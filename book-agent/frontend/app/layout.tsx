@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import css from "./globals.css";
+import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Editorial AI — Enterprise Manuscript Suite",
