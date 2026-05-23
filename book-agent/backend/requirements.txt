@@ -1,2 +1,8 @@
-cd book-agent/backend
-pip freeze > requirements.txt
+fastapi
+uvicorn
+sqlalchemy
+python-dotenv
+openai
+reportlab
+python-docx
+pydantic
