@@ -57,6 +57,7 @@ class BookRequest(BaseModel):
     num_pages: int
     words_per_page: int = 250
     user_id: Optional[str] = "default"
+    writing_style: Optional[str] = ""
 
 
 @app.get("/")
@@ -81,6 +82,7 @@ async def generate_book(req: BookRequest, bg: BackgroundTasks):
         num_pages=req.num_pages,
         words_per_page=req.words_per_page,
         user_id=req.user_id,
+        writing_style=req.writing_style or "",
         status="pending",
     )
     db.add(book)

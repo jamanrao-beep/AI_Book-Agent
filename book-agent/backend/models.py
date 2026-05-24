@@ -18,6 +18,7 @@ class Book(Base):
     docx_url       = Column(String(1000), nullable=True)
     created_at     = Column(DateTime, default=datetime.utcnow)
     user_id        = Column(String(200), nullable=True)
+    writing_style  = Column(String(200), nullable=True, default="")
 
 class BookSegment(Base):
     __tablename__ = "book_segments"

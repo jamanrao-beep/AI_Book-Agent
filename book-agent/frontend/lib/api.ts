@@ -14,6 +14,7 @@ export interface BookRequest {
   num_pages: number;
   words_per_page: number;
   user_id?: string;
+  writing_style?: string;
 }
 
 export interface BookStatus {
@@ -48,6 +49,48 @@ export interface ProofreadResult {
 }
 
 // ─────────────────────────────────────────────
+// Types — Cover Designer
+// ─────────────────────────────────────────────
+
+export interface CoverPalette {
+  bg_top: string;
+  bg_bottom: string;
+  accent: string;
+  title_color: string;
+  subtitle_color: string;
+  tagline_color: string;
+}
+
+export interface CoverConcept {
+  title: string;
+  subtitle: string;
+  tagline: string;
+  author_line: string;
+  palette: CoverPalette;
+  style: string;
+  motif: string;
+  genre_label: string;
+}
+
+export interface CoverFileResult {
+  source_filename: string;
+  concept: CoverConcept;
+}
+
+/** Returned by POST /design-cover */
+export interface CoverResult {
+  job_id: string;
+  mode: "single" | "zip_bundle";
+  original_filename: string;
+  download_url: string;
+  // single mode
+  concept?: CoverConcept;
+  // zip_bundle mode
+  files_processed?: number;
+  files?: CoverFileResult[];
+}
+
+// ─────────────────────────────────────────────
 // Book Writing
 // ─────────────────────────────────────────────
 
@@ -72,13 +115,13 @@ export const downloadDOCX = (id: number) =>
 // Proofreading
 // ─────────────────────────────────────────────
 
-/** Upload a .txt or .docx file for AI proofreading. */
+/** Upload a .txt, .docx, .pdf, .md, .rtf, or .zip file for AI proofreading. */
 export const proofreadDocument = (file: File) => {
   const form = new FormData();
   form.append("file", file);
   return API.post<ProofreadResult>("/proofread", form, {
     headers: { "Content-Type": "multipart/form-data" },
-    timeout: 120000, // proofreading can take longer than default 30s
+    timeout: 120000,
   });
 };
 
@@ -91,6 +134,55 @@ export const downloadProofreadDoc = (
   const a = document.createElement("a");
   a.href = url;
   a.download = `corrected_${originalFilename}`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+};
+
+// ─────────────────────────────────────────────
+// Cover Designer
+// ─────────────────────────────────────────────
+
+/**
+ * Upload a .pdf, .docx, or .zip for AI cover design.
+ * Optionally pass bookTitle, description, and designStyle.
+ * designStyle accepts: normal | premium | scifi | minimalist | fantasy |
+ *   thriller | romance | academic | vibrant | retro | or any custom string.
+ * Defaults to "premium" on the backend when omitted.
+ */
+export const designCover = (
+  file: File,
+  bookTitle: string = "",
+  description: string = "",
+  designStyle: string = "",
+) => {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("book_title", bookTitle);
+  form.append("description", description);
+  form.append("design_style", designStyle);
+  return API.post<CoverResult>("/design-cover", form, {
+    headers: { "Content-Type": "multipart/form-data" },
+    timeout: 120000,
+  });
+};
+
+/**
+ * Trigger a browser download of the cover output.
+ * Handles both single files and zip bundles automatically.
+ */
+export const downloadCoverDoc = (result: CoverResult) => {
+  const url = `${API.defaults.baseURL}${result.download_url}`;
+  const a = document.createElement("a");
+  a.href = url;
+  if (result.mode === "zip_bundle") {
+    const base = result.original_filename.replace(/\.zip$/i, "");
+    a.download = `${base}_covers.zip`;
+  } else {
+    const ext = result.original_filename.split(".").pop();
+    const base = result.original_filename.replace(/\.(pdf|docx)$/i, "");
+    a.download = `${base}_with_cover.${ext}`;
+  }
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);

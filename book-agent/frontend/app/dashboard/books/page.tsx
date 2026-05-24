@@ -65,6 +65,8 @@ export default function BooksPage() {
   const [title, setTitle] = useState("");
   const [pages, setPages] = useState(10);
   const [wpp, setWpp] = useState(200);
+  const [writingStyle, setWritingStyle] = useState("");
+  const [customWritingStyle, setCustomWritingStyle] = useState("");
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
@@ -102,10 +104,10 @@ export default function BooksPage() {
         setActiveJob((prev) =>
           prev
             ? {
-                ...prev,
-                status: statusRes.data.status,
-                segments: progressRes.data.completed_segments,
-              }
+              ...prev,
+              status: statusRes.data.status,
+              segments: progressRes.data.completed_segments,
+            }
             : null,
         );
         if (
@@ -128,11 +130,13 @@ export default function BooksPage() {
     setLoading(true);
     setError("");
     try {
+      const effectiveStyle = writingStyle === "other" ? customWritingStyle.trim() : writingStyle;
       const res = await generateBook({
         title,
         num_pages: pages,
         words_per_page: wpp,
         user_id: user?.uid || "anon",
+        writing_style: effectiveStyle,
       });
       setActiveJob({
         bookId: res.data.book_id,
@@ -142,6 +146,8 @@ export default function BooksPage() {
       });
       setShowForm(false);
       setTitle("");
+      setWritingStyle("");
+      setCustomWritingStyle("");
     } catch {
       setError(
         "Failed to start generation. Make sure the backend is running on port 8000.",
@@ -154,9 +160,9 @@ export default function BooksPage() {
   const totalSegments = Math.ceil((pages * wpp) / 250) * 4;
   const progress = activeJob
     ? Math.min(
-        100,
-        Math.round((activeJob.segments / Math.max(totalSegments, 1)) * 100),
-      )
+      100,
+      Math.round((activeJob.segments / Math.max(totalSegments, 1)) * 100),
+    )
     : 0;
 
   return (
@@ -273,6 +279,70 @@ export default function BooksPage() {
                   </div>
                 </div>
               </div>
+
+              {/* Writing Style */}
+              <div>
+                <label className="text-sm text-slate-400 mb-2 block">
+                  Writing Style{" "}
+                  <span className="text-slate-600 text-xs font-normal">(default: Professional)</span>
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { value: "", label: "✦ Default", hint: "Professional & balanced" },
+                    { value: "academic", label: "🎓 Academic", hint: "Formal, research-oriented, citation-friendly" },
+                    { value: "conversational", label: "💬 Conversational", hint: "Friendly, accessible, like talking to a friend" },
+                    { value: "storytelling", label: "📖 Storytelling", hint: "Narrative-driven, vivid scenes, character focus" },
+                    { value: "technical", label: "⚙️ Technical", hint: "Precise, structured, jargon-appropriate" },
+                    { value: "inspirational", label: "✨ Inspirational", hint: "Motivating, uplifting, call-to-action tone" },
+                    { value: "humorous", label: "😄 Humorous", hint: "Light-hearted, witty, entertaining" },
+                    { value: "journalistic", label: "📰 Journalistic", hint: "Objective, concise, fact-forward" },
+                    { value: "poetic", label: "🌿 Poetic", hint: "Lyrical, metaphor-rich, literary" },
+                    { value: "minimalist", label: "◻ Minimalist", hint: "Sparse, direct, no fluff" },
+                    { value: "other", label: "✏️ Other", hint: "Describe your own style" },
+                  ].map(({ value, label, hint }) => {
+                    const selected = writingStyle === value;
+                    return (
+                      <button
+                        key={value}
+                        type="button"
+                        title={hint}
+                        onClick={() => setWritingStyle(value)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-all whitespace-nowrap ${selected
+                          ? "bg-indigo-500/20 border-indigo-500 text-indigo-300"
+                          : "bg-slate-700/40 border-slate-600/50 text-slate-400 hover:border-indigo-500/50 hover:text-slate-200"
+                          }`}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {writingStyle === "other" && (
+                  <div className="mt-3">
+                    <input
+                      type="text"
+                      value={customWritingStyle}
+                      onChange={(e) => setCustomWritingStyle(e.target.value)}
+                      placeholder="e.g. Socratic dialogue, stream of consciousness, epistolary…"
+                      autoFocus
+                      className="w-full bg-indigo-500/5 border border-indigo-500/30 focus:border-indigo-500 rounded-xl py-2.5 px-4 text-sm placeholder:text-slate-500 text-slate-200 outline-none transition-colors"
+                    />
+                    <p className="text-xs text-slate-600 mt-1.5">
+                      Describe any writing style — the AI will interpret and apply it throughout.
+                    </p>
+                  </div>
+                )}
+
+                {writingStyle && writingStyle !== "other" && (
+                  <p className="text-xs text-slate-600 mt-2">
+                    AI will write in a{" "}
+                    <span className="text-indigo-400 font-medium">{writingStyle}</span>{" "}
+                    style. Hover a chip to see details.
+                  </p>
+                )}
+              </div>
+
               <div className="bg-slate-700/30 rounded-xl px-4 py-3 text-sm text-slate-400 flex flex-wrap gap-x-6 gap-y-1">
                 <span>~{(pages * wpp).toLocaleString()} total words</span>
                 <span>~{Math.ceil((pages * wpp) / 250) * 4} sections</span>

@@ -29,6 +29,8 @@ def run_book_agent(book_id: int):
 
     print(f"\n📖 Starting: '{book.title}'")
     print(f"   Pages: {book.num_pages}  |  Words/page: {book.words_per_page}")
+    if book.writing_style:
+        print(f"   Style: {book.writing_style}")
 
     try:
         # ── STEP 1: Generate Outline ──────────────────────────────────────────
@@ -38,7 +40,7 @@ def run_book_agent(book_id: int):
         num_chapters = calculate_chapters(book.num_pages, book.words_per_page)
         print(f"\n📋 Generating outline ({num_chapters} chapters)...")
 
-        outline = generate_outline(book.title, num_chapters)
+        outline = generate_outline(book.title, num_chapters, writing_style=book.writing_style or "")
         book.outline = json.dumps(outline)
         book.status  = "generating"
         db.commit()
@@ -78,7 +80,8 @@ def run_book_agent(book_id: int):
                     chapter_title    = chapter["title"],
                     subheading       = subheading,
                     previous_summary = previous_summary,
-                    word_count       = words_per_section
+                    word_count       = words_per_section,
+                    writing_style    = book.writing_style or "",
                 )
 
                 segment = BookSegment(
