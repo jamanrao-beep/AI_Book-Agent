@@ -6,3 +6,5 @@ openai
 reportlab
 python-docx
 pydantic
+python-multipart 
+pydanticpython-multipart
