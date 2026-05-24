@@ -10,6 +10,7 @@ import {
   ArrowRight,
   Sparkles,
   FileText,
+  Palette,
 } from "lucide-react";
 
 export default function DashboardHome() {
@@ -67,6 +68,26 @@ export default function DashboardHome() {
       accent: "#10b981",
       bg: "linear-gradient(135deg, rgba(16,185,129,0.08) 0%, rgba(16,185,129,0.02) 100%)",
       border: "rgba(16,185,129,0.25)",
+    },
+    {
+      key: "cover",
+      icon: Palette,
+      label: "Cover Designer",
+      tag: "NEW",
+      tagColor: "#fb923c",
+      tagBg: "rgba(251,146,60,0.12)",
+      description:
+        "Upload your manuscript (PDF or DOCX) and let AI design a stunning, print-ready cover page — professionally typeset and attached to your book.",
+      features: [
+        "AI-generated design concept",
+        "Full-bleed cover page rendered",
+        "Prepended to your original file",
+      ],
+      cta: "Design a Cover",
+      href: "/dashboard/cover",
+      accent: "#fb923c",
+      bg: "linear-gradient(135deg, rgba(251,146,60,0.08) 0%, rgba(251,146,60,0.02) 100%)",
+      border: "rgba(251,146,60,0.25)",
     },
   ];
 
@@ -155,7 +176,7 @@ export default function DashboardHome() {
       </nav>
 
       <main
-        style={{ maxWidth: "900px", margin: "0 auto", padding: "64px 40px" }}
+        style={{ maxWidth: "980px", margin: "0 auto", padding: "64px 40px" }}
       >
         {/* Header */}
         <div style={{ marginBottom: "56px" }}>
@@ -194,11 +215,11 @@ export default function DashboardHome() {
           </p>
         </div>
 
-        {/* Tool cards */}
+        {/* Tool cards — 3 column grid */}
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "1fr 1fr",
+            gridTemplateColumns: "repeat(3, 1fr)",
             gap: "20px",
           }}
         >
@@ -211,7 +232,7 @@ export default function DashboardHome() {
                   background: tool.bg,
                   border: `1px solid ${tool.border}`,
                   borderRadius: "16px",
-                  padding: "32px",
+                  padding: "28px",
                   cursor: "pointer",
                   transition: "transform 0.2s, box-shadow 0.2s",
                   position: "relative",
@@ -234,8 +255,8 @@ export default function DashboardHome() {
                 <div
                   style={{
                     position: "absolute",
-                    top: "20px",
-                    right: "20px",
+                    top: "18px",
+                    right: "18px",
                     background: tool.tagBg,
                     border: `1px solid ${tool.accent}33`,
                     borderRadius: "6px",
@@ -252,26 +273,26 @@ export default function DashboardHome() {
                 {/* Icon */}
                 <div
                   style={{
-                    width: "52px",
-                    height: "52px",
+                    width: "48px",
+                    height: "48px",
                     background: `${tool.accent}18`,
                     border: `1px solid ${tool.accent}33`,
                     borderRadius: "12px",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
-                    marginBottom: "20px",
+                    marginBottom: "18px",
                   }}
                 >
-                  <Icon size={24} color={tool.accent} />
+                  <Icon size={22} color={tool.accent} />
                 </div>
 
                 <h2
                   style={{
-                    fontSize: "22px",
+                    fontSize: "19px",
                     fontWeight: "700",
                     letterSpacing: "-0.01em",
-                    marginBottom: "10px",
+                    marginBottom: "8px",
                     fontFamily: "'Playfair Display', serif",
                   }}
                 >
@@ -280,9 +301,9 @@ export default function DashboardHome() {
                 <p
                   style={{
                     color: "#94a3b8",
-                    fontSize: "14px",
-                    lineHeight: "1.65",
-                    marginBottom: "24px",
+                    fontSize: "13px",
+                    lineHeight: "1.6",
+                    marginBottom: "20px",
                   }}
                 >
                   {tool.description}
@@ -293,7 +314,7 @@ export default function DashboardHome() {
                   style={{
                     listStyle: "none",
                     padding: 0,
-                    marginBottom: "28px",
+                    marginBottom: "24px",
                   }}
                 >
                   {tool.features.map((f) => (
@@ -301,14 +322,14 @@ export default function DashboardHome() {
                       key={f}
                       style={{
                         display: "flex",
-                        alignItems: "center",
+                        alignItems: "flex-start",
                         gap: "8px",
-                        fontSize: "13px",
+                        fontSize: "12px",
                         color: "#cbd5e1",
-                        marginBottom: "6px",
+                        marginBottom: "5px",
                       }}
                     >
-                      <span style={{ color: tool.accent, fontSize: "16px" }}>
+                      <span style={{ color: tool.accent, fontSize: "14px", lineHeight: "1.3" }}>
                         ✓
                       </span>
                       {f}
@@ -325,19 +346,19 @@ export default function DashboardHome() {
                     background: tool.accent,
                     color: "white",
                     borderRadius: "10px",
-                    padding: "10px 20px",
+                    padding: "9px 18px",
                     fontSize: "13px",
                     fontWeight: "600",
                   }}
                 >
-                  {tool.cta} <ArrowRight size={14} />
+                  {tool.cta} <ArrowRight size={13} />
                 </div>
               </div>
             );
           })}
         </div>
 
-        {/* Quick stats footer */}
+        {/* Footer strip */}
         <div
           style={{
             marginTop: "48px",
