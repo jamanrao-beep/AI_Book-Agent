@@ -30,7 +30,20 @@ MODEL = "gpt-4o"
 # ─────────────────────────────────────────────────────────────────────────────
 
 COVER_SYSTEM_PROMPT = """You are a world-class book cover designer and creative director.
-Given a book title (and optional subtitle/description), you produce a complete cover design brief.
+Given a book title (and optional subtitle/description/design style), you produce a complete cover design brief.
+
+The caller may pass a `design_style` hint. Honour it strictly:
+- "normal"      → clean, readable, balanced layout; neutral tones; accessible to any audience
+- "premium"     → rich dark backgrounds, gold/silver accents, elegant serif feel, luxury typography weight
+- "scifi"       → deep space blacks/navy, neon cyan/purple accents, futuristic geometric motifs, high-contrast
+- "minimalist"  → maximum whitespace, monochrome or single accent colour, ultra-thin rule lines, sparse motif
+- "fantasy"     → deep jewel tones (emerald, burgundy, midnight blue), ornate flourish motif, mystical feel
+- "thriller"    → high contrast, dark moody palette, sharp diagonal or shattered motifs, urgent title treatment
+- "romance"     → warm blush/rose/gold palette, soft curves or floral motif, elegant script feel
+- "academic"    → muted professional tones, grid or line motifs, structured layout, no decorative excess
+- "vibrant"     → bold saturated colours, energetic scattered-dot or wave motifs, modern and loud
+- "retro"       → warm sepia/mustard/rust palette, diagonal stripe or dot-grid motif, vintage character
+If no style is given, default to "premium".
 
 Respond ONLY with valid JSON (no markdown, no code fences):
 {
@@ -46,16 +59,20 @@ Respond ONLY with valid JSON (no markdown, no code fences):
     "subtitle_color": "<hex for subtitle text>",
     "tagline_color": "<hex for tagline text>"
   },
-  "style": "<one of: minimal | bold | literary | technical | elegant | vibrant>",
+  "style": "<one of: normal | premium | scifi | minimalist | fantasy | thriller | romance | academic | vibrant | retro>",
   "motif": "<short description of a geometric/abstract motif to draw, e.g. 'concentric circles', 'diagonal stripes', 'scattered dots', 'grid lines', 'wave curves'>",
   "genre_label": "<e.g. BUSINESS | SELF-HELP | SCIENCE | FICTION | HISTORY — uppercase>"
 }"""
 
 
-def generate_cover_concept(book_title: str, description: str = "") -> dict:
+def generate_cover_concept(book_title: str, description: str = "", design_style: str = "") -> dict:
     prompt = f"Book title: {book_title}"
     if description:
         prompt += f"\nDescription: {description}"
+    if design_style:
+        prompt += f"\nDesign style: {design_style}"
+    else:
+        prompt += "\nDesign style: premium"
 
     response = client.chat.completions.create(
         model=MODEL,
@@ -429,6 +446,7 @@ def design_cover(
     output_dir: str,
     book_title: str = "",
     description: str = "",
+    design_style: str = "",
 ) -> dict:
     """
     Full pipeline:
@@ -444,7 +462,7 @@ def design_cover(
         book_title = Path(filename).stem.replace("_", " ").replace("-", " ").title()
 
     # Step 1: AI concept
-    concept = generate_cover_concept(book_title, description)
+    concept = generate_cover_concept(book_title, description, design_style)
 
     job_id = uuid.uuid4().hex
     out_filename = f"cover_{job_id}{ext}"

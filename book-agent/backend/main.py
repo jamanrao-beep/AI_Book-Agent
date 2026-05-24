@@ -267,18 +267,19 @@ COVER_ALLOWED_DIRECT = {".pdf", ".docx"}
 COVER_ALLOWED_ALL    = {".pdf", ".docx", ".zip"}
 
 
-def _design_single(tmp_path: str, filename: str, book_title: str, description: str) -> dict:
+def _design_single(tmp_path: str, filename: str, book_title: str, description: str, design_style: str = "") -> dict:
     """Run design_cover on one PDF or DOCX and return the result dict."""
     return design_cover(
-        file_path   = tmp_path,
-        filename    = filename,
-        output_dir  = OUTPUT_DIR,
-        book_title  = book_title,
-        description = description,
+        file_path    = tmp_path,
+        filename     = filename,
+        output_dir   = OUTPUT_DIR,
+        book_title   = book_title,
+        description  = description,
+        design_style = design_style,
     )
 
 
-def _process_zip_for_covers(zip_path: str, book_title: str, description: str) -> list[dict]:
+def _process_zip_for_covers(zip_path: str, book_title: str, description: str, design_style: str = "") -> list[dict]:
     """
     Extract every .pdf / .docx from a zip, design a cover for each,
     and return a list of result dicts:
@@ -321,7 +322,7 @@ def _process_zip_for_covers(zip_path: str, book_title: str, description: str) ->
                     .title()
                 )
 
-                result = _design_single(tmp, base, file_title, description)
+                result = _design_single(tmp, base, file_title, description, design_style)
                 result["source_filename"] = base
                 results.append(result)
 
@@ -359,6 +360,7 @@ async def design_cover_endpoint(
     file: UploadFile = File(...),
     book_title: str = Form(default=""),
     description: str = Form(default=""),
+    design_style: str = Form(default=""),
 ):
     """
     Upload a .pdf, .docx, or .zip file.
@@ -367,8 +369,10 @@ async def design_cover_endpoint(
     • .zip          → extracts all .pdf/.docx inside, designs a cover for each,
                       returns per-file concepts + a bundle zip download URL.
 
-    Optionally pass `book_title` and `description` as form fields
-    (inferred from filename when omitted).
+    Optionally pass `book_title`, `description`, and `design_style` as form fields.
+    `design_style` accepts: normal | premium | scifi | minimalist | fantasy |
+                            thriller | romance | academic | vibrant | retro
+    Defaults to "premium" when omitted.
     """
     filename = file.filename or "document.pdf"
     ext = os.path.splitext(filename)[1].lower()
@@ -391,7 +395,7 @@ async def design_cover_endpoint(
 
         # ── Single file (PDF / DOCX) ──────────────────────────────────────────
         if ext in COVER_ALLOWED_DIRECT:
-            result  = _design_single(tmp_path, filename, book_title, description)
+            result  = _design_single(tmp_path, filename, book_title, description, design_style)
             job_id  = result["job_id"]
 
             _cover_jobs[job_id] = {
@@ -412,7 +416,7 @@ async def design_cover_endpoint(
         # ── ZIP bundle ────────────────────────────────────────────────────────
         else:
             try:
-                cover_results = _process_zip_for_covers(tmp_path, book_title, description)
+                cover_results = _process_zip_for_covers(tmp_path, book_title, description, design_style)
             except ValueError as e:
                 raise HTTPException(400, str(e))
 
