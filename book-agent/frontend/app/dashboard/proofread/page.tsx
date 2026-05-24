@@ -8,11 +8,18 @@ import {
   Loader,
   CheckCircle,
   Download,
-  AlertCircle,
   Sparkles,
   X,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import { proofreadDocument, downloadProofreadDoc } from "@/lib/api";
+
+interface ErrorDetail {
+  original: string;
+  corrected: string;
+  explanation: string;
+}
 
 interface ProofResult {
   job_id: string;
@@ -22,7 +29,12 @@ interface ProofResult {
   punctuation_fixes: number;
   style_suggestions: number;
   corrected_text: string;
+  grammar_details?: ErrorDetail[];
+  punctuation_details?: ErrorDetail[];
+  style_details?: ErrorDetail[];
 }
+
+type TabType = "summary" | "grammar" | "punctuation" | "style" | "corrected";
 
 export default function ProofreadPage() {
   const router = useRouter();
@@ -33,9 +45,17 @@ export default function ProofreadPage() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ProofResult | null>(null);
   const [error, setError] = useState("");
-  const [activeTab, setActiveTab] = useState<"summary" | "corrected">(
-    "summary",
-  );
+  const [activeTab, setActiveTab] = useState<TabType>("summary");
+  const [expandedErrors, setExpandedErrors] = useState<Set<string>>(new Set());
+
+  const toggleError = (key: string) => {
+    setExpandedErrors((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
 
   const handleFile = (f: File) => {
     const allowed = [
@@ -52,7 +72,7 @@ export default function ProofreadPage() {
       !f.name.endsWith(".rtf") &&
       !f.name.endsWith(".zip")
     ) {
-      setError("Please upload a .txt or .docx file. or .pdf file or .md file or .rtf or .zip file");
+      setError("Please upload a .txt, .docx, .pdf, .md, .rtf, or .zip file.");
       return;
     }
     if (f.size > 150 * 1024 * 1024) {
@@ -78,6 +98,7 @@ export default function ProofreadPage() {
       const res = await proofreadDocument(file);
       setResult(res.data);
       setActiveTab("summary");
+      setExpandedErrors(new Set());
     } catch (err: unknown) {
       const message =
         err instanceof Error
@@ -89,28 +110,62 @@ export default function ProofreadPage() {
     }
   };
 
-  const statCards = result
+  const TABS: { id: TabType; label: string; count?: number; color: string }[] = result
     ? [
+      { id: "summary", label: "AI Summary", color: "#e2e8f0" },
       {
-        label: "Grammar Fixes",
-        value: result.grammar_fixes,
+        id: "grammar",
+        label: "Grammar",
+        count: result.grammar_fixes,
         color: "#6366f1",
-        icon: "✦",
       },
       {
-        label: "Punctuation Fixes",
-        value: result.punctuation_fixes,
+        id: "punctuation",
+        label: "Punctuation",
+        count: result.punctuation_fixes,
         color: "#f59e0b",
-        icon: "✎",
       },
       {
-        label: "Style Suggestions",
-        value: result.style_suggestions,
+        id: "style",
+        label: "Style",
+        count: result.style_suggestions,
         color: "#10b981",
-        icon: "◈",
       },
+      { id: "corrected", label: "Corrected Text", color: "#94a3b8" },
     ]
     : [];
+
+  const getDetailList = (): ErrorDetail[] => {
+    if (!result) return [];
+    if (activeTab === "grammar") return result.grammar_details ?? [];
+    if (activeTab === "punctuation") return result.punctuation_details ?? [];
+    if (activeTab === "style") return result.style_details ?? [];
+    return [];
+  };
+
+  const tabColor =
+    TABS.find((t) => t.id === activeTab)?.color ?? "#e2e8f0";
+
+  const categoryMeta: Record<string, { label: string; emptyMsg: string; badgeColor: string; badgeBg: string }> = {
+    grammar: {
+      label: "Grammar Fix",
+      emptyMsg: "No grammar errors found — great writing!",
+      badgeColor: "#818cf8",
+      badgeBg: "rgba(99,102,241,0.12)",
+    },
+    punctuation: {
+      label: "Punctuation Fix",
+      emptyMsg: "No punctuation errors found.",
+      badgeColor: "#fbbf24",
+      badgeBg: "rgba(245,158,11,0.12)",
+    },
+    style: {
+      label: "Style Suggestion",
+      emptyMsg: "No style suggestions — the prose flows well.",
+      badgeColor: "#34d399",
+      badgeBg: "rgba(16,185,129,0.12)",
+    },
+  };
 
   return (
     <div
@@ -183,7 +238,7 @@ export default function ProofreadPage() {
       </nav>
 
       <main
-        style={{ maxWidth: "780px", margin: "0 auto", padding: "52px 40px" }}
+        style={{ maxWidth: "820px", margin: "0 auto", padding: "52px 40px" }}
       >
         {/* Header */}
         <div style={{ marginBottom: "40px" }}>
@@ -199,8 +254,8 @@ export default function ProofreadPage() {
             Proofread Your Document
           </h1>
           <p style={{ color: "#64748b", fontSize: "15px", lineHeight: "1.6" }}>
-            Upload a .txt or .docx file or .pdf file or .md file or .rtf file or .zip file. AI will correct grammar, punctuation,
-            and suggest style improvements.
+            Upload a .txt, .docx, .pdf, .md, .rtf, or .zip file. AI will correct grammar,
+            punctuation, and suggest style improvements — with full error breakdowns.
           </p>
         </div>
 
@@ -254,25 +309,13 @@ export default function ProofreadPage() {
                     margin: "0 auto 16px",
                   }}
                 >
-                  <FileText size={26} color="#10b981" />
+                  <FileText size={24} color="#10b981" />
                 </div>
-                <p
-                  style={{
-                    fontWeight: "600",
-                    fontSize: "15px",
-                    marginBottom: "4px",
-                  }}
-                >
+                <p style={{ fontWeight: "600", fontSize: "15px", marginBottom: "4px" }}>
                   {file.name}
                 </p>
-                <p
-                  style={{
-                    color: "#64748b",
-                    fontSize: "13px",
-                    marginBottom: "16px",
-                  }}
-                >
-                  {(file.size / 1024).toFixed(1)} KB · ready to proofread
+                <p style={{ color: "#64748b", fontSize: "13px", marginBottom: "12px" }}>
+                  {(file.size / 1024).toFixed(1)} KB
                 </p>
                 <button
                   onClick={(e) => {
@@ -280,16 +323,16 @@ export default function ProofreadPage() {
                     setFile(null);
                   }}
                   style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: "4px",
                     background: "rgba(255,255,255,0.06)",
                     border: "1px solid rgba(255,255,255,0.1)",
                     borderRadius: "8px",
                     padding: "6px 14px",
-                    fontSize: "12px",
                     color: "#94a3b8",
+                    fontSize: "12px",
                     cursor: "pointer",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "6px",
                   }}
                 >
                   <X size={12} /> Remove
@@ -301,7 +344,8 @@ export default function ProofreadPage() {
                   style={{
                     width: "56px",
                     height: "56px",
-                    background: "rgba(255,255,255,0.05)",
+                    background: "rgba(255,255,255,0.04)",
+                    border: "1px solid rgba(255,255,255,0.1)",
                     borderRadius: "12px",
                     display: "flex",
                     alignItems: "center",
@@ -311,17 +355,11 @@ export default function ProofreadPage() {
                 >
                   <Upload size={24} color="#64748b" />
                 </div>
-                <p
-                  style={{
-                    fontWeight: "600",
-                    fontSize: "15px",
-                    marginBottom: "6px",
-                  }}
-                >
+                <p style={{ fontWeight: "600", fontSize: "15px", marginBottom: "6px" }}>
                   Drop your document here
                 </p>
                 <p style={{ color: "#64748b", fontSize: "13px" }}>
-                  or click to browse · .txt or .docx or .pdf or .md or .rtf or .zip · max 150 MB
+                  or click to browse · .txt .docx .pdf .md .rtf .zip · max 150 MB
                 </p>
               </div>
             )}
@@ -331,19 +369,16 @@ export default function ProofreadPage() {
         {error && (
           <div
             style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "10px",
               background: "rgba(239,68,68,0.1)",
               border: "1px solid rgba(239,68,68,0.2)",
               borderRadius: "10px",
-              padding: "14px 18px",
-              fontSize: "13px",
+              padding: "12px 16px",
               color: "#f87171",
-              marginBottom: "20px",
+              fontSize: "13px",
+              marginBottom: "16px",
             }}
           >
-            <AlertCircle size={16} /> {error}
+            {error}
           </div>
         )}
 
@@ -354,7 +389,9 @@ export default function ProofreadPage() {
             disabled={loading}
             style={{
               width: "100%",
-              background: loading ? "rgba(16,185,129,0.4)" : "#10b981",
+              background: loading
+                ? "rgba(16,185,129,0.4)"
+                : "linear-gradient(135deg, #10b981 0%, #059669 100%)",
               color: "white",
               border: "none",
               borderRadius: "12px",
@@ -373,10 +410,7 @@ export default function ProofreadPage() {
           >
             {loading ? (
               <>
-                <Loader
-                  size={18}
-                  style={{ animation: "spin 1s linear infinite" }}
-                />
+                <Loader size={18} style={{ animation: "spin 1s linear infinite" }} />
                 Analysing document...
               </>
             ) : (
@@ -387,7 +421,7 @@ export default function ProofreadPage() {
           </button>
         )}
 
-        {/* Results */}
+        {/* ── RESULTS ── */}
         {result && (
           <div style={{ animation: "fadeInUp 0.4s ease forwards" }}>
             {/* Success banner */}
@@ -408,13 +442,7 @@ export default function ProofreadPage() {
                 <p style={{ fontWeight: "600", fontSize: "14px" }}>
                   Proofreading complete
                 </p>
-                <p
-                  style={{
-                    color: "#64748b",
-                    fontSize: "12px",
-                    marginTop: "2px",
-                  }}
-                >
+                <p style={{ color: "#64748b", fontSize: "12px", marginTop: "2px" }}>
                   {result.original_filename}
                 </p>
               </div>
@@ -441,29 +469,36 @@ export default function ProofreadPage() {
               </button>
             </div>
 
-            {/* Stat cards */}
+            {/* Stat cards — clickable to jump to that tab */}
             <div
               style={{
                 display: "grid",
                 gridTemplateColumns: "repeat(3, 1fr)",
                 gap: "12px",
-                marginBottom: "24px",
+                marginBottom: "28px",
               }}
             >
-              {statCards.map((s) => (
+              {[
+                { id: "grammar" as TabType, label: "Grammar Fixes", value: result.grammar_fixes, color: "#6366f1", icon: "✦" },
+                { id: "punctuation" as TabType, label: "Punctuation Fixes", value: result.punctuation_fixes, color: "#f59e0b", icon: "✎" },
+                { id: "style" as TabType, label: "Style Suggestions", value: result.style_suggestions, color: "#10b981", icon: "◈" },
+              ].map((s) => (
                 <div
                   key={s.label}
+                  onClick={() => setActiveTab(s.id)}
                   style={{
-                    background: `${s.color}10`,
-                    border: `1px solid ${s.color}25`,
+                    background: activeTab === s.id ? `${s.color}18` : `${s.color}10`,
+                    border: `1px solid ${activeTab === s.id ? s.color + "55" : s.color + "25"}`,
                     borderRadius: "12px",
                     padding: "20px",
                     textAlign: "center",
+                    cursor: "pointer",
+                    transition: "all 0.2s",
+                    transform: activeTab === s.id ? "translateY(-2px)" : "none",
+                    boxShadow: activeTab === s.id ? `0 8px 24px ${s.color}22` : "none",
                   }}
                 >
-                  <div style={{ fontSize: "28px", marginBottom: "4px" }}>
-                    {s.icon}
-                  </div>
+                  <div style={{ fontSize: "24px", marginBottom: "4px" }}>{s.icon}</div>
                   <div
                     style={{
                       fontSize: "32px",
@@ -487,11 +522,21 @@ export default function ProofreadPage() {
                   >
                     {s.label}
                   </div>
+                  <div
+                    style={{
+                      marginTop: "8px",
+                      fontSize: "11px",
+                      color: s.color,
+                      opacity: 0.7,
+                    }}
+                  >
+                    Click to view details →
+                  </div>
                 </div>
               ))}
             </div>
 
-            {/* Tabs */}
+            {/* Tab bar */}
             <div
               style={{
                 display: "flex",
@@ -500,74 +545,264 @@ export default function ProofreadPage() {
                 borderRadius: "10px",
                 padding: "4px",
                 marginBottom: "16px",
-                width: "fit-content",
+                overflowX: "auto",
               }}
             >
-              {(["summary", "corrected"] as const).map((tab) => (
+              {TABS.map((tab) => (
                 <button
-                  key={tab}
-                  onClick={() => setActiveTab(tab)}
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
                   style={{
-                    padding: "8px 18px",
+                    padding: "8px 14px",
                     borderRadius: "8px",
                     border: "none",
                     cursor: "pointer",
                     fontSize: "13px",
                     fontWeight: "600",
                     background:
-                      activeTab === tab
+                      activeTab === tab.id
                         ? "rgba(255,255,255,0.1)"
                         : "transparent",
-                    color: activeTab === tab ? "#e2e8f0" : "#64748b",
+                    color: activeTab === tab.id ? tab.color : "#64748b",
                     transition: "all 0.15s",
-                    textTransform: "capitalize",
+                    whiteSpace: "nowrap",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
                   }}
                 >
-                  {tab === "summary" ? "AI Summary" : "Corrected Text"}
+                  {tab.label}
+                  {tab.count !== undefined && tab.count > 0 && (
+                    <span
+                      style={{
+                        background: `${tab.color}22`,
+                        color: tab.color,
+                        borderRadius: "20px",
+                        padding: "1px 7px",
+                        fontSize: "11px",
+                        fontWeight: "700",
+                      }}
+                    >
+                      {tab.count}
+                    </span>
+                  )}
                 </button>
               ))}
             </div>
 
-            {/* Tab content */}
+            {/* Tab content panel */}
             <div
               style={{
                 background: "rgba(255,255,255,0.03)",
                 border: "1px solid rgba(255,255,255,0.07)",
                 borderRadius: "12px",
                 padding: "24px",
+                minHeight: "200px",
               }}
             >
-              {activeTab === "summary" ? (
-                <div>
-                  <p
-                    style={{
-                      fontSize: "13px",
-                      color: "#94a3b8",
-                      lineHeight: "1.8",
-                      whiteSpace: "pre-wrap",
-                    }}
-                  >
-                    {result.corrections_summary}
-                  </p>
-                </div>
-              ) : (
-                <div>
-                  <pre
-                    style={{
-                      fontSize: "13px",
-                      color: "#cbd5e1",
-                      lineHeight: "1.9",
-                      whiteSpace: "pre-wrap",
-                      wordBreak: "break-word",
-                      fontFamily: "'DM Mono', monospace",
-                      maxHeight: "400px",
-                      overflowY: "auto",
-                    }}
-                  >
-                    {result.corrected_text}
-                  </pre>
-                </div>
+              {/* Summary tab */}
+              {activeTab === "summary" && (
+                <p
+                  style={{
+                    fontSize: "14px",
+                    color: "#94a3b8",
+                    lineHeight: "1.9",
+                    whiteSpace: "pre-wrap",
+                  }}
+                >
+                  {result.corrections_summary}
+                </p>
               )}
+
+              {/* Corrected text tab */}
+              {activeTab === "corrected" && (
+                <pre
+                  style={{
+                    fontSize: "13px",
+                    color: "#cbd5e1",
+                    lineHeight: "1.9",
+                    whiteSpace: "pre-wrap",
+                    wordBreak: "break-word",
+                    fontFamily: "'DM Mono', monospace",
+                    maxHeight: "500px",
+                    overflowY: "auto",
+                  }}
+                >
+                  {result.corrected_text}
+                </pre>
+              )}
+
+              {/* Grammar / Punctuation / Style detail tabs */}
+              {(activeTab === "grammar" || activeTab === "punctuation" || activeTab === "style") && (() => {
+                const details = getDetailList();
+                const meta = categoryMeta[activeTab];
+                if (!details || details.length === 0) {
+                  return (
+                    <div
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        padding: "40px",
+                        color: "#475569",
+                        gap: "8px",
+                      }}
+                    >
+                      <CheckCircle size={32} color="#10b981" style={{ opacity: 0.5 }} />
+                      <p style={{ fontSize: "14px" }}>{meta.emptyMsg}</p>
+                    </div>
+                  );
+                }
+                return (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                    {details.map((item, idx) => {
+                      const key = `${activeTab}-${idx}`;
+                      const isOpen = expandedErrors.has(key);
+                      return (
+                        <div
+                          key={key}
+                          style={{
+                            border: `1px solid rgba(255,255,255,0.07)`,
+                            borderRadius: "10px",
+                            overflow: "hidden",
+                            transition: "border-color 0.2s",
+                          }}
+                        >
+                          {/* Collapsed header — always visible */}
+                          <div
+                            onClick={() => toggleError(key)}
+                            style={{
+                              display: "flex",
+                              alignItems: "flex-start",
+                              gap: "12px",
+                              padding: "14px 16px",
+                              cursor: "pointer",
+                              background: isOpen
+                                ? "rgba(255,255,255,0.04)"
+                                : "transparent",
+                              transition: "background 0.15s",
+                            }}
+                          >
+                            {/* Index badge */}
+                            <span
+                              style={{
+                                flexShrink: 0,
+                                width: "22px",
+                                height: "22px",
+                                borderRadius: "6px",
+                                background: meta.badgeBg,
+                                color: meta.badgeColor,
+                                fontSize: "11px",
+                                fontWeight: "700",
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                marginTop: "1px",
+                              }}
+                            >
+                              {idx + 1}
+                            </span>
+
+                            {/* Original snippet with strikethrough */}
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div
+                                style={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: "8px",
+                                  flexWrap: "wrap",
+                                }}
+                              >
+                                <span
+                                  style={{
+                                    fontSize: "13px",
+                                    color: "#ef4444",
+                                    textDecoration: "line-through",
+                                    fontFamily: "'DM Mono', monospace",
+                                    opacity: 0.85,
+                                    wordBreak: "break-word",
+                                  }}
+                                >
+                                  {item.original}
+                                </span>
+                                <span style={{ color: "#475569", fontSize: "12px" }}>→</span>
+                                <span
+                                  style={{
+                                    fontSize: "13px",
+                                    color: "#4ade80",
+                                    fontFamily: "'DM Mono', monospace",
+                                    fontWeight: "500",
+                                    wordBreak: "break-word",
+                                  }}
+                                >
+                                  {item.corrected}
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Expand toggle */}
+                            <span
+                              style={{
+                                flexShrink: 0,
+                                color: "#475569",
+                                display: "flex",
+                                alignItems: "center",
+                              }}
+                            >
+                              {isOpen ? (
+                                <ChevronUp size={15} />
+                              ) : (
+                                <ChevronDown size={15} />
+                              )}
+                            </span>
+                          </div>
+
+                          {/* Expanded explanation */}
+                          {isOpen && (
+                            <div
+                              style={{
+                                padding: "0 16px 14px 50px",
+                                borderTop: "1px solid rgba(255,255,255,0.05)",
+                              }}
+                            >
+                              <div
+                                style={{
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: "6px",
+                                  background: meta.badgeBg,
+                                  border: `1px solid ${meta.badgeColor}33`,
+                                  borderRadius: "6px",
+                                  padding: "3px 10px",
+                                  fontSize: "10px",
+                                  fontWeight: "700",
+                                  letterSpacing: "0.06em",
+                                  textTransform: "uppercase",
+                                  color: meta.badgeColor,
+                                  marginTop: "12px",
+                                  marginBottom: "8px",
+                                }}
+                              >
+                                {meta.label}
+                              </div>
+                              <p
+                                style={{
+                                  fontSize: "13px",
+                                  color: "#94a3b8",
+                                  lineHeight: "1.6",
+                                }}
+                              >
+                                {item.explanation}
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
             </div>
 
             {/* New upload */}
@@ -575,6 +810,7 @@ export default function ProofreadPage() {
               onClick={() => {
                 setResult(null);
                 setFile(null);
+                setExpandedErrors(new Set());
               }}
               style={{
                 marginTop: "20px",

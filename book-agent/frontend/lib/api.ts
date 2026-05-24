@@ -46,6 +46,9 @@ export interface ProofreadResult {
   style_suggestions: number;
   corrections_summary: string;
   download_url: string;
+  grammar_details?: { original: string; corrected: string; explanation: string }[];
+  punctuation_details?: { original: string; corrected: string; explanation: string }[];
+  style_details?: { original: string; corrected: string; explanation: string }[];
 }
 
 // ─────────────────────────────────────────────
