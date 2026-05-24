@@ -250,6 +250,7 @@ body {
 
 /* Range */
 input[type="range"] {
+  appearance: none;
   -webkit-appearance: none;
   height: 3px;
   background: var(--border);
