@@ -1,7 +1,8 @@
 """
 proofreader.py
 AI-powered proofreading: grammar, punctuation, style improvements.
-Reads .txt or .docx, returns corrected text + structured diff summary.
+Reads .txt or .docx, returns corrected text + structured diff summary
+WITH detailed per-error lists for each category.
 """
 import os
 import re
@@ -95,7 +96,7 @@ def extract_text(path: str, filename: str) -> str:
     return extract_text_from_txt(path)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# AI proofreading
+# AI proofreading — updated system prompt returns detailed error lists
 # ─────────────────────────────────────────────────────────────────────────────
 
 SYSTEM_PROMPT = """You are an expert editor and proofreader. When given a document, you:
@@ -110,8 +111,31 @@ Respond with ONLY valid JSON (no markdown, no code fences). Structure:
   "grammar_fixes": <integer count>,
   "punctuation_fixes": <integer count>,
   "style_suggestions": <integer count>,
-  "corrections_summary": "<3-5 sentence narrative summary of what was changed and why>"
-}"""
+  "corrections_summary": "<3-5 sentence narrative summary of what was changed and why>",
+  "grammar_details": [
+    {
+      "original": "<the original incorrect text snippet (max ~15 words)>",
+      "corrected": "<the corrected version>",
+      "explanation": "<brief explanation of why this is wrong, e.g. subject-verb agreement, wrong tense>"
+    }
+  ],
+  "punctuation_details": [
+    {
+      "original": "<the original text snippet with punctuation error>",
+      "corrected": "<the corrected version>",
+      "explanation": "<brief explanation, e.g. missing Oxford comma, incorrect apostrophe>"
+    }
+  ],
+  "style_details": [
+    {
+      "original": "<the original wordy or unclear text>",
+      "corrected": "<the improved version>",
+      "explanation": "<brief explanation, e.g. passive voice, redundant phrase, overly complex sentence>"
+    }
+  ]
+}
+
+For each category, list up to 20 of the most significant issues. Keep snippets short (max 15 words each). Be specific in explanations."""
 
 
 def _chunk_text(text: str, max_chars: int = 50000) -> list[str]:
@@ -122,7 +146,6 @@ def _chunk_text(text: str, max_chars: int = 50000) -> list[str]:
     start = 0
     while start < len(text):
         end = min(start + max_chars, len(text))
-        # Try to break at a paragraph boundary
         if end < len(text):
             newline = text.rfind("\n\n", start, end)
             if newline > start:
@@ -141,6 +164,9 @@ def proofread_text(text: str) -> dict:
     total_punct = 0
     total_style = 0
     summaries = []
+    all_grammar_details = []
+    all_punctuation_details = []
+    all_style_details = []
 
     for i, chunk in enumerate(chunks):
         prompt = f"Proofread the following document{f' (part {i+1}/{len(chunks)})' if len(chunks) > 1 else ''}:\n\n{chunk}"
@@ -157,7 +183,6 @@ def proofread_text(text: str) -> dict:
 
         raw = response.choices[0].message.content.strip()
         raw = raw.replace("```json", "").replace("```", "").strip()
-        # Extract JSON
         s = raw.find("{")
         e = raw.rfind("}") + 1
         if s == -1 or e == 0:
@@ -169,6 +194,9 @@ def proofread_text(text: str) -> dict:
         total_punct += int(data.get("punctuation_fixes", 0))
         total_style += int(data.get("style_suggestions", 0))
         summaries.append(data.get("corrections_summary", ""))
+        all_grammar_details.extend(data.get("grammar_details", []))
+        all_punctuation_details.extend(data.get("punctuation_details", []))
+        all_style_details.extend(data.get("style_details", []))
 
     combined_summary = " ".join(s for s in summaries if s)
     if len(summaries) > 1:
@@ -180,6 +208,9 @@ def proofread_text(text: str) -> dict:
         "punctuation_fixes": total_punct,
         "style_suggestions": total_style,
         "corrections_summary": combined_summary,
+        "grammar_details": all_grammar_details[:20],
+        "punctuation_details": all_punctuation_details[:20],
+        "style_details": all_style_details[:20],
     }
 
 
