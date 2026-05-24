@@ -231,6 +231,9 @@ async def proofread_document(file: UploadFile = File(...)):
             "punctuation_fixes": result["punctuation_fixes"],
             "style_suggestions": result["style_suggestions"],
             "corrections_summary": result["corrections_summary"],
+            "grammar_details": result.get("grammar_details", []),
+            "punctuation_details": result.get("punctuation_details", []),
+            "style_details": result.get("style_details", []),
             "download_url": f"/proofread/{job_id}/download",
         }
 

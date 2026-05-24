@@ -37,6 +37,12 @@ export interface BookProgress {
 // Types — Proofreading
 // ─────────────────────────────────────────────
 
+export interface ErrorDetail {
+  original: string;
+  corrected: string;
+  explanation: string;
+}
+
 export interface ProofreadResult {
   job_id: string;
   original_filename: string;
@@ -46,9 +52,9 @@ export interface ProofreadResult {
   style_suggestions: number;
   corrections_summary: string;
   download_url: string;
-  grammar_details?: { original: string; corrected: string; explanation: string }[];
-  punctuation_details?: { original: string; corrected: string; explanation: string }[];
-  style_details?: { original: string; corrected: string; explanation: string }[];
+  grammar_details: ErrorDetail[];
+  punctuation_details: ErrorDetail[];
+  style_details: ErrorDetail[];
 }
 
 // ─────────────────────────────────────────────
@@ -146,13 +152,6 @@ export const downloadProofreadDoc = (
 // Cover Designer
 // ─────────────────────────────────────────────
 
-/**
- * Upload a .pdf, .docx, or .zip for AI cover design.
- * Optionally pass bookTitle, description, and designStyle.
- * designStyle accepts: normal | premium | scifi | minimalist | fantasy |
- *   thriller | romance | academic | vibrant | retro | or any custom string.
- * Defaults to "premium" on the backend when omitted.
- */
 export const designCover = (
   file: File,
   bookTitle: string = "",
@@ -170,10 +169,6 @@ export const designCover = (
   });
 };
 
-/**
- * Trigger a browser download of the cover output.
- * Handles both single files and zip bundles automatically.
- */
 export const downloadCoverDoc = (result: CoverResult) => {
   const url = `${API.defaults.baseURL}${result.download_url}`;
   const a = document.createElement("a");
