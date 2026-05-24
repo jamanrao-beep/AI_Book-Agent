@@ -53,11 +53,13 @@ async function designCover(
     file: File,
     bookTitle: string,
     description: string,
+    designStyle: string,
 ): Promise<CoverResult> {
     const form = new FormData();
     form.append("file", file);
     form.append("book_title", bookTitle);
     form.append("description", description);
+    form.append("design_style", designStyle);
 
     const res = await fetch(`${API_BASE}/design-cover`, {
         method: "POST",
@@ -256,6 +258,8 @@ export default function CoverDesignerPage() {
     const [file, setFile] = useState<File | null>(null);
     const [bookTitle, setBookTitle] = useState("");
     const [description, setDescription] = useState("");
+    const [designStyle, setDesignStyle] = useState("");
+    const [customStyle, setCustomStyle] = useState("");
     const [dragging, setDragging] = useState(false);
     const [loading, setLoading] = useState(false);
     const [result, setResult] = useState<CoverResult | null>(null);
@@ -295,7 +299,8 @@ export default function CoverDesignerPage() {
         setLoading(true);
         setError("");
         try {
-            const res = await designCover(file, bookTitle, description);
+            const effectiveStyle = designStyle === "other" ? customStyle.trim() : designStyle;
+            const res = await designCover(file, bookTitle, description, effectiveStyle);
             setResult(res);
         } catch (err: unknown) {
             setError(
@@ -618,6 +623,120 @@ export default function CoverDesignerPage() {
                             </div>
                         </div>
 
+                        {/* Design style selector */}
+                        <div style={{ marginBottom: "24px" }}>
+                            <label
+                                style={{
+                                    fontSize: "11px",
+                                    fontWeight: "700",
+                                    letterSpacing: "0.08em",
+                                    textTransform: "uppercase",
+                                    color: "#64748b",
+                                    display: "block",
+                                    marginBottom: "10px",
+                                }}
+                            >
+                                Design Style{" "}
+                                <span style={{ color: "#334155", fontWeight: "400", textTransform: "none", fontSize: "10px" }}>
+                                    (default: Premium)
+                                </span>
+                            </label>
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                                {[
+                                    { value: "", label: "✦ Default", hint: "Premium" },
+                                    { value: "normal", label: "📄 Normal", hint: "Clean & balanced" },
+                                    { value: "premium", label: "💎 Premium", hint: "Luxury & elegant" },
+                                    { value: "scifi", label: "🚀 Sci-Fi", hint: "Futuristic & neon" },
+                                    { value: "minimalist", label: "◻ Minimalist", hint: "Sparse & modern" },
+                                    { value: "fantasy", label: "🔮 Fantasy", hint: "Mystical & rich" },
+                                    { value: "thriller", label: "⚡ Thriller", hint: "Dark & high contrast" },
+                                    { value: "romance", label: "🌸 Romance", hint: "Warm & soft" },
+                                    { value: "academic", label: "📚 Academic", hint: "Structured & muted" },
+                                    { value: "vibrant", label: "🎨 Vibrant", hint: "Bold & energetic" },
+                                    { value: "retro", label: "📻 Retro", hint: "Vintage warmth" },
+                                    { value: "other", label: "✏️ Other", hint: "Describe your own style" },
+                                ].map(({ value, label, hint }) => {
+                                    const selected = designStyle === value;
+                                    return (
+                                        <button
+                                            key={value}
+                                            title={hint}
+                                            onClick={() => setDesignStyle(value)}
+                                            style={{
+                                                background: selected
+                                                    ? "rgba(251,146,60,0.18)"
+                                                    : "rgba(255,255,255,0.04)",
+                                                border: `1px solid ${selected ? "#fb923c" : "rgba(255,255,255,0.1)"}`,
+                                                borderRadius: "8px",
+                                                padding: "7px 14px",
+                                                fontSize: "12px",
+                                                fontWeight: selected ? "700" : "500",
+                                                color: selected ? "#fb923c" : "#94a3b8",
+                                                cursor: "pointer",
+                                                transition: "all 0.15s",
+                                                whiteSpace: "nowrap",
+                                            }}
+                                            onMouseOver={(e) => {
+                                                if (!selected) {
+                                                    (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(251,146,60,0.4)";
+                                                    (e.currentTarget as HTMLButtonElement).style.color = "#e2e8f0";
+                                                }
+                                            }}
+                                            onMouseOut={(e) => {
+                                                if (!selected) {
+                                                    (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(255,255,255,0.1)";
+                                                    (e.currentTarget as HTMLButtonElement).style.color = "#94a3b8";
+                                                }
+                                            }}
+                                        >
+                                            {label}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                            {designStyle === "other" && (
+                                <div style={{ marginTop: "12px" }}>
+                                    <input
+                                        type="text"
+                                        value={customStyle}
+                                        onChange={(e) => setCustomStyle(e.target.value)}
+                                        placeholder="e.g. brutalist, watercolour, cyberpunk noir, hand-drawn…"
+                                        autoFocus
+                                        style={{
+                                            width: "100%",
+                                            background: "rgba(251,146,60,0.06)",
+                                            border: "1px solid rgba(251,146,60,0.4)",
+                                            borderRadius: "10px",
+                                            padding: "11px 14px",
+                                            fontSize: "13px",
+                                            color: "#e2e8f0",
+                                            outline: "none",
+                                            transition: "border-color 0.2s",
+                                            boxSizing: "border-box",
+                                        }}
+                                        onFocus={(e) =>
+                                            (e.currentTarget.style.borderColor = "#fb923c")
+                                        }
+                                        onBlur={(e) =>
+                                            (e.currentTarget.style.borderColor = "rgba(251,146,60,0.4)")
+                                        }
+                                    />
+                                    <p style={{ fontSize: "11px", color: "#475569", marginTop: "6px" }}>
+                                        Describe any style you like — the AI will interpret it freely.
+                                    </p>
+                                </div>
+                            )}
+                            {designStyle && designStyle !== "other" && (
+                                <p style={{ fontSize: "11px", color: "#475569", marginTop: "8px" }}>
+                                    AI will design a{" "}
+                                    <span style={{ color: "#fb923c", fontWeight: "600" }}>
+                                        {designStyle}
+                                    </span>{" "}
+                                    themed cover. Hover a style to see a description.
+                                </p>
+                            )}
+                        </div>
+
                         {error && (
                             <div
                                 style={{
@@ -934,6 +1053,8 @@ export default function CoverDesignerPage() {
                                 setFile(null);
                                 setBookTitle("");
                                 setDescription("");
+                                setDesignStyle("");
+                                setCustomStyle("");
                             }}
                             style={{
                                 marginTop: "28px",
