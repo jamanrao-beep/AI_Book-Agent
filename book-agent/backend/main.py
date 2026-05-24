@@ -15,7 +15,7 @@ Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
     title="AI Book Writing Agent",
-    description="Generate full books using OpenAI GPT-4o",   # ← updated
+    description="Generate full books using OpenAI GPT-4o",   
     version="2.0.0"
 )
 
