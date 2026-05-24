@@ -1,7 +1,1 @@
-﻿node_modules/
-.next/
-__pycache__/
-venv/
-.venv/
-*.db
-*.pyc
+﻿.venv/
