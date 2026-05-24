@@ -1,5 +1,5 @@
 # pyrefly: ignore [missing-import]
-from fastapi import FastAPI, BackgroundTasks, HTTPException, UploadFile, File
+from fastapi import FastAPI, BackgroundTasks, HTTPException, UploadFile, File, Form
 # pyrefly: ignore [missing-import]
 from fastapi.responses import FileResponse
 # pyrefly: ignore [missing-import]
@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 # pyrefly: ignore [missing-import]
 from pydantic import BaseModel
 from typing import Optional
-import os, sys, uuid, tempfile, shutil
+import os, sys, uuid, zipfile, shutil
 
 sys.path.insert(0, os.path.dirname(__file__))
 
@@ -20,13 +20,14 @@ from proofreader import (
     save_corrected_docx,
     save_corrected_txt,
 )
+from cover_designer import design_cover
 
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
-    title="Editorial AI — Book Writing + Proofreading",
-    description="Generate full books and proofread documents using OpenAI GPT-4o",
-    version="3.0.0",
+    title="Editorial AI — Book Writing + Proofreading + Cover Design",
+    description="Generate full books, proofread documents, and design covers using OpenAI GPT-4o",
+    version="4.1.0",
 )
 
 app.add_middleware(
@@ -37,12 +38,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# In-memory store for proofreading jobs (keyed by job_id)
-# For production, move this to a database or Redis
+# In-memory job stores (use Redis/DB in production)
 _proofread_jobs: dict[str, dict] = {}
+_cover_jobs:     dict[str, dict] = {}
 
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "output")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+MAX_FILE_SIZE = 150 * 1024 * 1024  # 150 MB
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -58,11 +61,11 @@ class BookRequest(BaseModel):
 
 @app.get("/")
 def root():
-    return {"status": "running", "message": "Editorial AI Backend v3 🚀"}
+    return {"status": "running", "message": "Editorial AI Backend v4.1 🚀"}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Book Writing  (unchanged endpoints)
+# Book Writing
 # ─────────────────────────────────────────────────────────────────────────────
 
 @app.post("/generate-book")
@@ -173,46 +176,35 @@ def list_books():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Proofreading  (NEW)
+# Proofreading
 # ─────────────────────────────────────────────────────────────────────────────
 
-ALLOWED_EXTENSIONS = {".txt", ".docx", ".pdf", ".md", ".rtf", ".zip"}
-MAX_FILE_SIZE = 150 * 1024 * 1024  # 150 MB
+ALLOWED_PROOFREAD_EXTENSIONS = {".txt", ".docx", ".pdf", ".md", ".rtf", ".zip"}
 
 
 @app.post("/proofread")
 async def proofread_document(file: UploadFile = File(...)):
-    """
-    Upload a .txt or .docx file or .pdf or .md or .rtf or .zip file.
-    Returns AI-corrected text + grammar/punctuation/style counts.
-    The corrected file is stored at output/corrected_<job_id>.<ext> for download.
-    """
     filename = file.filename or "document.txt"
     ext = os.path.splitext(filename)[1].lower()
 
-    if ext not in ALLOWED_EXTENSIONS:
-        raise HTTPException(400, f"Unsupported file type '{ext}'. Upload .txt or .docx. or .pdf or .md or .rtf or .zip")
+    if ext not in ALLOWED_PROOFREAD_EXTENSIONS:
+        raise HTTPException(400, f"Unsupported file type '{ext}'. Upload .txt, .docx, .pdf, .md, .rtf, or .zip")
 
-    # Read & size-check
     content = await file.read()
     if len(content) > MAX_FILE_SIZE:
         raise HTTPException(413, "File too large. Maximum size is 150 MB.")
 
-    # Save to temp file
     tmp_path = os.path.join(OUTPUT_DIR, f"upload_{uuid.uuid4().hex}{ext}")
     try:
         with open(tmp_path, "wb") as f_out:
             f_out.write(content)
 
-        # Extract text
         original_text = extract_text(tmp_path, filename)
         if not original_text.strip():
             raise HTTPException(400, "Document appears to be empty.")
 
-        # AI proofreading
         result = proofread_text(original_text)
 
-        # Save corrected file
         job_id = uuid.uuid4().hex
         corrected_filename = f"corrected_{job_id}{ext}"
         corrected_path = os.path.join(OUTPUT_DIR, corrected_filename)
@@ -223,7 +215,6 @@ async def proofread_document(file: UploadFile = File(...)):
         else:
             save_corrected_txt(result["corrected_text"], corrected_path)
 
-        # Store job info
         _proofread_jobs[job_id] = {
             "original_filename": filename,
             "corrected_path": corrected_path,
@@ -242,18 +233,16 @@ async def proofread_document(file: UploadFile = File(...)):
         }
 
     finally:
-        # Clean up original upload
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
 
 
 @app.get("/proofread/{job_id}/download")
 def download_proofread(job_id: str):
-    """Download the corrected document."""
     job = _proofread_jobs.get(job_id)
     if not job:
         raise HTTPException(404, "Proofreading job not found. It may have expired — re-upload to proofread again.")
-    
+
     path = job["corrected_path"]
     if not os.path.exists(path):
         raise HTTPException(404, "Corrected file not found on disk.")
@@ -266,5 +255,227 @@ def download_proofread(job_id: str):
         media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     else:
         media_type = "text/plain"
+
+    return FileResponse(path, media_type=media_type, filename=download_name)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Cover Designer  —  helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+COVER_ALLOWED_DIRECT = {".pdf", ".docx"}
+COVER_ALLOWED_ALL    = {".pdf", ".docx", ".zip"}
+
+
+def _design_single(tmp_path: str, filename: str, book_title: str, description: str) -> dict:
+    """Run design_cover on one PDF or DOCX and return the result dict."""
+    return design_cover(
+        file_path   = tmp_path,
+        filename    = filename,
+        output_dir  = OUTPUT_DIR,
+        book_title  = book_title,
+        description = description,
+    )
+
+
+def _process_zip_for_covers(zip_path: str, book_title: str, description: str) -> list[dict]:
+    """
+    Extract every .pdf / .docx from a zip, design a cover for each,
+    and return a list of result dicts:
+      [{filename, output_path, concept, ext}, ...]
+    Skips unsupported entries silently.
+    Raises ValueError if no supported files were found.
+    """
+    results = []
+    scratch_dir = os.path.join(OUTPUT_DIR, f"zip_scratch_{uuid.uuid4().hex}")
+    os.makedirs(scratch_dir, exist_ok=True)
+
+    try:
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            members = [
+                m for m in zf.namelist()
+                if os.path.splitext(m)[1].lower() in COVER_ALLOWED_DIRECT
+                and not m.startswith("__MACOSX")   # skip macOS metadata
+                and not os.path.basename(m).startswith(".")
+            ]
+
+            if not members:
+                raise ValueError(
+                    "No .pdf or .docx files found inside the zip. "
+                    "Please upload a zip that contains at least one .pdf or .docx."
+                )
+
+            for member in members:
+                ext  = os.path.splitext(member)[1].lower()
+                base = os.path.basename(member)
+                tmp  = os.path.join(scratch_dir, f"{uuid.uuid4().hex}{ext}")
+
+                with zf.open(member) as src, open(tmp, "wb") as dst:
+                    shutil.copyfileobj(src, dst)
+
+                # Use the file's own name as the title if caller didn't provide one
+                file_title = book_title or (
+                    os.path.splitext(base)[0]
+                    .replace("_", " ")
+                    .replace("-", " ")
+                    .title()
+                )
+
+                result = _design_single(tmp, base, file_title, description)
+                result["source_filename"] = base
+                results.append(result)
+
+                if os.path.exists(tmp):
+                    os.remove(tmp)
+
+    finally:
+        shutil.rmtree(scratch_dir, ignore_errors=True)
+
+    return results
+
+
+def _build_result_zip(cover_results: list[dict], zip_job_id: str) -> str:
+    """
+    Bundle all output files from a zip job into a single downloadable zip.
+    Returns path to the bundle zip.
+    """
+    bundle_path = os.path.join(OUTPUT_DIR, f"covers_{zip_job_id}.zip")
+    with zipfile.ZipFile(bundle_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        for r in cover_results:
+            out_path = r["output_path"]
+            ext      = r["ext"]
+            base     = os.path.splitext(r["source_filename"])[0]
+            arc_name = f"{base}_with_cover{ext}"
+            zf.write(out_path, arcname=arc_name)
+    return bundle_path
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Cover Designer  —  endpoints
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.post("/design-cover")
+async def design_cover_endpoint(
+    file: UploadFile = File(...),
+    book_title: str = Form(default=""),
+    description: str = Form(default=""),
+):
+    """
+    Upload a .pdf, .docx, or .zip file.
+
+    • .pdf / .docx  → designs one cover, returns concept JSON + single-file download URL.
+    • .zip          → extracts all .pdf/.docx inside, designs a cover for each,
+                      returns per-file concepts + a bundle zip download URL.
+
+    Optionally pass `book_title` and `description` as form fields
+    (inferred from filename when omitted).
+    """
+    filename = file.filename or "document.pdf"
+    ext = os.path.splitext(filename)[1].lower()
+
+    if ext not in COVER_ALLOWED_ALL:
+        raise HTTPException(
+            400,
+            f"Unsupported file type '{ext}'. "
+            "Upload a .pdf, .docx, or a .zip containing .pdf/.docx files."
+        )
+
+    content = await file.read()
+    if len(content) > MAX_FILE_SIZE:
+        raise HTTPException(413, "File too large. Maximum 150 MB.")
+
+    tmp_path = os.path.join(OUTPUT_DIR, f"upload_{uuid.uuid4().hex}{ext}")
+    try:
+        with open(tmp_path, "wb") as f_out:
+            f_out.write(content)
+
+        # ── Single file (PDF / DOCX) ──────────────────────────────────────────
+        if ext in COVER_ALLOWED_DIRECT:
+            result  = _design_single(tmp_path, filename, book_title, description)
+            job_id  = result["job_id"]
+
+            _cover_jobs[job_id] = {
+                "original_filename": filename,
+                "output_path": result["output_path"],
+                "ext": ext,
+                "is_zip_bundle": False,
+            }
+
+            return {
+                "job_id": job_id,
+                "mode": "single",
+                "original_filename": filename,
+                "concept": result["concept"],
+                "download_url": f"/design-cover/{job_id}/download",
+            }
+
+        # ── ZIP bundle ────────────────────────────────────────────────────────
+        else:
+            try:
+                cover_results = _process_zip_for_covers(tmp_path, book_title, description)
+            except ValueError as e:
+                raise HTTPException(400, str(e))
+
+            zip_job_id   = uuid.uuid4().hex
+            bundle_path  = _build_result_zip(cover_results, zip_job_id)
+
+            _cover_jobs[zip_job_id] = {
+                "original_filename": filename,
+                "output_path": bundle_path,
+                "ext": ".zip",
+                "is_zip_bundle": True,
+            }
+
+            # Summarise per-file concepts for the response
+            files_info = [
+                {
+                    "source_filename": r["source_filename"],
+                    "concept": r["concept"],
+                }
+                for r in cover_results
+            ]
+
+            return {
+                "job_id": zip_job_id,
+                "mode": "zip_bundle",
+                "original_filename": filename,
+                "files_processed": len(cover_results),
+                "files": files_info,
+                "download_url": f"/design-cover/{zip_job_id}/download",
+            }
+
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
+
+@app.get("/design-cover/{job_id}/download")
+def download_cover_doc(job_id: str):
+    """
+    Download the output:
+    • Single .pdf/.docx  → the original file with the AI cover page prepended.
+    • ZIP bundle         → a zip containing all processed files with their covers.
+    """
+    job = _cover_jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, "Cover job not found. Re-upload to regenerate.")
+
+    path = job["output_path"]
+    if not os.path.exists(path):
+        raise HTTPException(404, "Output file not found on disk.")
+
+    ext           = job["ext"]
+    original_name = os.path.splitext(job["original_filename"])[0]
+    is_bundle     = job.get("is_zip_bundle", False)
+
+    if is_bundle:
+        download_name = f"{original_name}_covers.zip"
+        media_type    = "application/zip"
+    elif ext == ".docx":
+        download_name = f"{original_name}_with_cover.docx"
+        media_type    = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    else:
+        download_name = f"{original_name}_with_cover.pdf"
+        media_type    = "application/pdf"
 
     return FileResponse(path, media_type=media_type, filename=download_name)

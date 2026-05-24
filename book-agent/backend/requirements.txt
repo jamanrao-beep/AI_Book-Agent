@@ -4,8 +4,9 @@ sqlalchemy
 python-dotenv
 openai
 reportlab
-python-docx
+python-docxs
 pydantic
 python-multipart
 pdfplumber
 striprtf
+pypdf
