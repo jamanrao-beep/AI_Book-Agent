@@ -1,7 +1,12 @@
+# pyrefly: ignore [missing-import]
 from docx import Document
+# pyrefly: ignore [missing-import]
 from docx.shared import Pt, RGBColor, Inches, Cm
+# pyrefly: ignore [missing-import]
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+# pyrefly: ignore [missing-import]
 from docx.oxml.ns import qn
+# pyrefly: ignore [missing-import]
 from docx.oxml import OxmlElement
 import datetime
 import os

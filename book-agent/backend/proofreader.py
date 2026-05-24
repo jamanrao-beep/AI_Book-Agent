@@ -10,8 +10,9 @@ import json
 import tempfile
 from pathlib import Path
 from typing import Optional
-
+# pyrefly: ignore [missing-import]
 from openai import OpenAI
+# pyrefly: ignore [missing-import]
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -29,6 +30,7 @@ def extract_text_from_txt(path: str) -> str:
 
 
 def extract_text_from_docx(path: str) -> str:
+    # pyrefly: ignore [missing-import]
     from docx import Document
     doc = Document(path)
     return "\n".join(p.text for p in doc.paragraphs if p.text.strip())
@@ -134,8 +136,11 @@ def proofread_text(text: str) -> dict:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def save_corrected_docx(corrected_text: str, output_path: str, original_title: str = "Corrected Document"):
+    # pyrefly: ignore [missing-import]
     from docx import Document
+    # pyrefly: ignore [missing-import]
     from docx.shared import Pt
+    # pyrefly: ignore [missing-import]
     from docx.enum.text import WD_ALIGN_PARAGRAPH
 
     doc = Document()
