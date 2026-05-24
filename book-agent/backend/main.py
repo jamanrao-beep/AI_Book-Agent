@@ -176,14 +176,14 @@ def list_books():
 # Proofreading  (NEW)
 # ─────────────────────────────────────────────────────────────────────────────
 
-ALLOWED_EXTENSIONS = {".txt", ".docx"}
-MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
+ALLOWED_EXTENSIONS = {".txt", ".docx", ".pdf", ".md", ".rtf", ".zip"}
+MAX_FILE_SIZE = 150 * 1024 * 1024  # 150 MB
 
 
 @app.post("/proofread")
 async def proofread_document(file: UploadFile = File(...)):
     """
-    Upload a .txt or .docx file.
+    Upload a .txt or .docx file or .pdf or .md or .rtf or .zip file.
     Returns AI-corrected text + grammar/punctuation/style counts.
     The corrected file is stored at output/corrected_<job_id>.<ext> for download.
     """
@@ -191,12 +191,12 @@ async def proofread_document(file: UploadFile = File(...)):
     ext = os.path.splitext(filename)[1].lower()
 
     if ext not in ALLOWED_EXTENSIONS:
-        raise HTTPException(400, f"Unsupported file type '{ext}'. Upload .txt or .docx.")
+        raise HTTPException(400, f"Unsupported file type '{ext}'. Upload .txt or .docx. or .pdf or .md or .rtf or .zip")
 
     # Read & size-check
     content = await file.read()
     if len(content) > MAX_FILE_SIZE:
-        raise HTTPException(413, "File too large. Maximum size is 10 MB.")
+        raise HTTPException(413, "File too large. Maximum size is 150 MB.")
 
     # Save to temp file
     tmp_path = os.path.join(OUTPUT_DIR, f"upload_{uuid.uuid4().hex}{ext}")

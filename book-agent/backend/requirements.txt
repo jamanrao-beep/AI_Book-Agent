@@ -7,3 +7,5 @@ reportlab
 python-docx
 pydantic
 python-multipart
+pdfplumber
+striprtf

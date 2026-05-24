@@ -46,13 +46,17 @@ export default function ProofreadPage() {
     if (
       !allowed.includes(f.type) &&
       !f.name.endsWith(".txt") &&
-      !f.name.endsWith(".docx")
+      !f.name.endsWith(".docx") &&
+      !f.name.endsWith(".pdf") &&
+      !f.name.endsWith(".md") &&
+      !f.name.endsWith(".rtf") &&
+      !f.name.endsWith(".zip")
     ) {
-      setError("Please upload a .txt or .docx file.");
+      setError("Please upload a .txt or .docx file. or .pdf file or .md file or .rtf or .zip file");
       return;
     }
-    if (f.size > 10 * 1024 * 1024) {
-      setError("File must be under 10 MB.");
+    if (f.size > 150 * 1024 * 1024) {
+      setError("File must be under 150 MB.");
       return;
     }
     setError("");
@@ -87,25 +91,25 @@ export default function ProofreadPage() {
 
   const statCards = result
     ? [
-        {
-          label: "Grammar Fixes",
-          value: result.grammar_fixes,
-          color: "#6366f1",
-          icon: "✦",
-        },
-        {
-          label: "Punctuation Fixes",
-          value: result.punctuation_fixes,
-          color: "#f59e0b",
-          icon: "✎",
-        },
-        {
-          label: "Style Suggestions",
-          value: result.style_suggestions,
-          color: "#10b981",
-          icon: "◈",
-        },
-      ]
+      {
+        label: "Grammar Fixes",
+        value: result.grammar_fixes,
+        color: "#6366f1",
+        icon: "✦",
+      },
+      {
+        label: "Punctuation Fixes",
+        value: result.punctuation_fixes,
+        color: "#f59e0b",
+        icon: "✎",
+      },
+      {
+        label: "Style Suggestions",
+        value: result.style_suggestions,
+        color: "#10b981",
+        icon: "◈",
+      },
+    ]
     : [];
 
   return (
@@ -195,7 +199,7 @@ export default function ProofreadPage() {
             Proofread Your Document
           </h1>
           <p style={{ color: "#64748b", fontSize: "15px", lineHeight: "1.6" }}>
-            Upload a .txt or .docx file. AI will correct grammar, punctuation,
+            Upload a .txt or .docx file or .pdf file or .md file or .rtf file or .zip file. AI will correct grammar, punctuation,
             and suggest style improvements.
           </p>
         </div>
@@ -228,7 +232,7 @@ export default function ProofreadPage() {
             <input
               ref={fileInputRef}
               type="file"
-              accept=".txt,.docx"
+              accept=".txt,.docx,.pdf,.md,.rtf,.zip"
               style={{ display: "none" }}
               onChange={(e) =>
                 e.target.files?.[0] && handleFile(e.target.files[0])
@@ -317,7 +321,7 @@ export default function ProofreadPage() {
                   Drop your document here
                 </p>
                 <p style={{ color: "#64748b", fontSize: "13px" }}>
-                  or click to browse · .txt or .docx · max 10 MB
+                  or click to browse · .txt or .docx or .pdf or .md or .rtf or .zip · max 150 MB
                 </p>
               </div>
             )}

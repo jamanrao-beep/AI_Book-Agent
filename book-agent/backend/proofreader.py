@@ -8,7 +8,10 @@ import re
 import uuid
 import json
 import tempfile
+import zipfile
 from pathlib import Path
+# pyrefly: ignore [missing-import]
+import pdfplumber
 from typing import Optional
 # pyrefly: ignore [missing-import]
 from openai import OpenAI
@@ -36,11 +39,60 @@ def extract_text_from_docx(path: str) -> str:
     return "\n".join(p.text for p in doc.paragraphs if p.text.strip())
 
 
-def extract_text(path: str, filename: str) -> str:
-    if filename.lower().endswith(".docx"):
-        return extract_text_from_docx(path)
-    return extract_text_from_txt(path)
+def extract_text_from_pdf(path: str) -> str:
+    # pyrefly: ignore [missing-import]
+    import pdfplumber
+    text = []
+    with pdfplumber.open(path) as pdf:
+        for page in pdf.pages:
+            t = page.extract_text()
+            if t:
+                text.append(t)
+    return "\n".join(text)
 
+def extract_text_from_rtf(path: str) -> str:
+    # pyrefly: ignore [missing-import]
+    from striprtf.striprtf import rtf_to_text
+    with open(path, "r", encoding="utf-8", errors="replace") as f:
+        return rtf_to_text(f.read())
+
+
+def extract_text_from_zip(path: str) -> str:
+    """Extract and concatenate all readable text files inside a zip."""
+    texts = []
+    with zipfile.ZipFile(path, "r") as z:
+        for name in z.namelist():
+            ext = os.path.splitext(name)[1].lower()
+            if ext not in {".txt", ".md", ".docx", ".pdf", ".rtf"}:
+                continue
+            with z.open(name) as f:
+                tmp = os.path.join(os.path.dirname(path), f"zip_extract_{uuid.uuid4().hex}{ext}")
+                with open(tmp, "wb") as out:
+                    out.write(f.read())
+                try:
+                    texts.append(f"--- {name} ---\n{extract_text(tmp, name)}")
+                finally:
+                    if os.path.exists(tmp):
+                        os.remove(tmp)
+    if not texts:
+        raise ValueError("No readable text files found inside the zip.")
+    return "\n\n".join(texts)
+
+def extract_text_from_md(path: str) -> str:
+    with open(path, "r", encoding="utf-8", errors="ignore") as f:
+        return f.read()
+
+def extract_text(path: str, filename: str) -> str:
+    name = filename.lower()
+    if name.endswith(".docx"):
+        return extract_text_from_docx(path)
+    elif name.endswith(".pdf"):
+        return extract_text_from_pdf(path)
+    elif name.endswith(".rtf"):
+        return extract_text_from_rtf(path)
+    elif name.endswith(".zip"):
+        return extract_text_from_zip(path)
+    return extract_text_from_txt(path)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # AI proofreading
@@ -62,7 +114,7 @@ Respond with ONLY valid JSON (no markdown, no code fences). Structure:
 }"""
 
 
-def _chunk_text(text: str, max_chars: int = 12000) -> list[str]:
+def _chunk_text(text: str, max_chars: int = 50000) -> list[str]:
     """Split long documents into overlapping chunks so we stay within token limits."""
     if len(text) <= max_chars:
         return [text]
