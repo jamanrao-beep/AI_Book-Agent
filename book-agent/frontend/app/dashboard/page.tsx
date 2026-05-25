@@ -14,6 +14,7 @@ import {
   ScanLine,
   PencilLine,
   Languages,
+  LayoutTemplate,
 } from "lucide-react";
 
 export default function DashboardHome() {
@@ -160,12 +161,42 @@ export default function DashboardHome() {
       border: "rgba(14,165,233,0.25)",
       row: 2,
     },
+    // ── Row 3 (1 full-width feature card) ────────────────────────────────────
+    {
+      key: "layout",
+      icon: LayoutTemplate,
+      label: "Layout Designer",
+      tag: "NEW",
+      tagColor: "#f59e0b",
+      tagBg: "rgba(245,158,11,0.12)",
+      description:
+        "Upload your manuscript (PDF, DOCX, or ZIP), choose a paper size, and describe your vision. AI designs a fully typeset internal layout — custom page dimensions, fonts, colour palette, chapter ornaments, drop caps, and more — exported as a print-ready PDF & DOCX.",
+      features: [
+        "Custom paper size (A4, A5, US Trade, or any mm)",
+        "AI-chosen typography, spacing & colour palette",
+        "Drop caps, ornaments & page numbers",
+        "PDF + DOCX export",
+      ],
+      cta: "Design Layout",
+      href: "/dashboard/layout",
+      accent: "#f59e0b",
+      bg: "linear-gradient(135deg, rgba(245,158,11,0.08) 0%, rgba(245,158,11,0.02) 100%)",
+      border: "rgba(245,158,11,0.25)",
+      row: 3,
+    },
   ];
 
   const row1 = tools.filter((t) => t.row === 1);
   const row2 = tools.filter((t) => t.row === 2);
+  const row3 = tools.filter((t) => t.row === 3);
 
-  const Card = ({ tool }: { tool: (typeof tools)[0] }) => {
+  const Card = ({
+    tool,
+    wide = false,
+  }: {
+    tool: (typeof tools)[0];
+    wide?: boolean;
+  }) => {
     const Icon = tool.icon;
     return (
       <div
@@ -173,13 +204,15 @@ export default function DashboardHome() {
           background: tool.bg,
           border: `1px solid ${tool.border}`,
           borderRadius: "16px",
-          padding: "28px",
+          padding: wide ? "32px 36px" : "28px",
           cursor: "pointer",
           transition: "transform 0.2s, box-shadow 0.2s",
           position: "relative",
           overflow: "hidden",
           display: "flex",
-          flexDirection: "column",
+          flexDirection: wide ? "row" : "column",
+          gap: wide ? "32px" : undefined,
+          alignItems: wide ? "flex-start" : undefined,
         }}
         onMouseOver={(e) => {
           (e.currentTarget as HTMLDivElement).style.transform =
@@ -222,80 +255,93 @@ export default function DashboardHome() {
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            marginBottom: "18px",
+            marginBottom: wide ? 0 : "18px",
             flexShrink: 0,
           }}
         >
           <Icon size={22} color={tool.accent} />
         </div>
 
-        <h2
-          style={{
-            fontSize: "19px",
-            fontWeight: "700",
-            letterSpacing: "-0.01em",
-            marginBottom: "8px",
-            fontFamily: "'Playfair Display', serif",
-          }}
-        >
-          {tool.label}
-        </h2>
-        <p
-          style={{
-            color: "#94a3b8",
-            fontSize: "13px",
-            lineHeight: "1.6",
-            marginBottom: "20px",
-            flex: 1,
-          }}
-        >
-          {tool.description}
-        </p>
+        {/* Content */}
+        <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
+          <h2
+            style={{
+              fontSize: "19px",
+              fontWeight: "700",
+              letterSpacing: "-0.01em",
+              marginBottom: "8px",
+              fontFamily: "'Playfair Display', serif",
+            }}
+          >
+            {tool.label}
+          </h2>
+          <p
+            style={{
+              color: "#94a3b8",
+              fontSize: "13px",
+              lineHeight: "1.6",
+              marginBottom: "20px",
+              flex: wide ? undefined : 1,
+              maxWidth: wide ? "520px" : undefined,
+            }}
+          >
+            {tool.description}
+          </p>
 
-        {/* Feature list */}
-        <ul style={{ listStyle: "none", padding: 0, marginBottom: "24px" }}>
-          {tool.features.map((f) => (
-            <li
-              key={f}
-              style={{
-                display: "flex",
-                alignItems: "flex-start",
-                gap: "8px",
-                fontSize: "12px",
-                color: "#cbd5e1",
-                marginBottom: "5px",
-              }}
-            >
-              <span
+          {/* Feature list */}
+          <ul
+            style={{
+              listStyle: "none",
+              padding: 0,
+              marginBottom: "24px",
+              display: wide ? "grid" : "block",
+              gridTemplateColumns: wide ? "repeat(2, 1fr)" : undefined,
+              gap: wide ? "4px 24px" : undefined,
+            }}
+          >
+            {tool.features.map((f) => (
+              <li
+                key={f}
                 style={{
-                  color: tool.accent,
-                  fontSize: "14px",
-                  lineHeight: "1.3",
+                  display: "flex",
+                  alignItems: "flex-start",
+                  gap: "8px",
+                  fontSize: "12px",
+                  color: "#cbd5e1",
+                  marginBottom: wide ? 0 : "5px",
                 }}
               >
-                ✓
-              </span>
-              {f}
-            </li>
-          ))}
-        </ul>
+                <span
+                  style={{
+                    color: tool.accent,
+                    fontSize: "14px",
+                    lineHeight: "1.3",
+                  }}
+                >
+                  ✓
+                </span>
+                {f}
+              </li>
+            ))}
+          </ul>
 
-        {/* CTA */}
-        <div
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: "8px",
-            background: tool.accent,
-            color: "white",
-            borderRadius: "10px",
-            padding: "9px 18px",
-            fontSize: "13px",
-            fontWeight: "600",
-            alignSelf: "flex-start",
-          }}
-        >
-          {tool.cta} <ArrowRight size={13} />
+          {/* CTA */}
+          <div
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "8px",
+              background: tool.accent,
+              color: "#0c0f1a",
+              borderRadius: "10px",
+              padding: "9px 18px",
+              fontSize: "13px",
+              fontWeight: "700",
+              alignSelf: "flex-start",
+            }}
+          >
+            {tool.cta} <ArrowRight size={13} />
+          </div>
         </div>
       </div>
     );
@@ -445,6 +491,7 @@ export default function DashboardHome() {
             display: "grid",
             gridTemplateColumns: "repeat(3, 1fr)",
             gap: "20px",
+            marginBottom: "20px",
           }}
         >
           {row2.map((tool) => (
@@ -452,10 +499,17 @@ export default function DashboardHome() {
           ))}
         </div>
 
+        {/* Row 3 — Layout Designer full-width feature card */}
+        <div style={{ marginBottom: "20px" }}>
+          {row3.map((tool) => (
+            <Card key={tool.key} tool={tool} wide />
+          ))}
+        </div>
+
         {/* Footer strip */}
         <div
           style={{
-            marginTop: "40px",
+            marginTop: "20px",
             padding: "18px 24px",
             background: "rgba(255,255,255,0.03)",
             border: "1px solid rgba(255,255,255,0.06)",
