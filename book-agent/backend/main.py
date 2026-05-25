@@ -7,13 +7,13 @@ from fastapi.middleware.cors import CORSMiddleware
 # pyrefly: ignore [missing-import]
 from pydantic import BaseModel
 from typing import Optional
-import os, sys, uuid, zipfile, shutil
+import os, sys, uuid, zipfile, shutil,threading
 from handwritten_scanner import scan_handwritten_book, SUPPORTED_IMAGE_EXTS, SUPPORTED_UPLOAD_EXTS
 from book_editor import (
     extract_book_text, parse_book_structure,
     process_editor_turn, THEMES,
 )
-
+from translator import translate_book
 
 sys.path.insert(0, os.path.dirname(__file__))
 
@@ -49,6 +49,7 @@ _proofread_jobs: dict[str, dict] = {}
 _cover_jobs:     dict[str, dict] = {}
 _scan_jobs: dict[str, dict] = {}
 _editor_sessions: dict[str, dict] = {}
+_translate_jobs: dict[str, dict] = {}
 
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "output")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -836,4 +837,157 @@ def editor_delete_session(session_id: str):
                     try: os.remove(p)
                     except: pass
     return {"deleted": True}
+ 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Book Translator  ← NEW
+# ─────────────────────────────────────────────────────────────────────────────
+ 
+TRANSLATE_ALLOWED_EXTS = {".pdf", ".docx", ".zip"}
+ 
+ 
+def _run_translation_job(job_id: str, file_path: str, filename: str,
+                         target_language: str, source_language: str) -> None:
+    """Background thread worker for translation."""
+    def progress(stage: str, pct: int, message: str) -> None:
+        _translate_jobs[job_id].update({"stage": stage, "pct": pct, "message": message})
+ 
+    try:
+        result = translate_book(
+            file_path=file_path,
+            filename=filename,
+            output_dir=OUTPUT_DIR,
+            target_language=target_language,
+            source_language=source_language,
+            progress_callback=progress,
+        )
+        _translate_jobs[job_id].update({
+            "stage": "done",
+            "pct": 100,
+            "message": "Translation complete!",
+            "result": result,
+            "pdf_path": result["pdf_path"],
+            "docx_path": result["docx_path"],
+            "title": result["title"],
+        })
+    except Exception as e:
+        _translate_jobs[job_id].update({
+            "stage": "error",
+            "pct": 0,
+            "message": str(e),
+        })
+    finally:
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except Exception:
+                pass
+ 
+ 
+@app.post("/translate")
+async def translate_book_endpoint(
+    file: UploadFile = File(...),
+    target_language: str = Form(...),
+    source_language: str = Form(default=""),
+):
+    """
+    Upload a PDF, DOCX, or ZIP book and translate it to the target language.
+    Returns a job_id immediately; poll /translate/{job_id}/status for progress.
+    """
+    filename = file.filename or "document.pdf"
+    ext = os.path.splitext(filename)[1].lower()
+ 
+    if ext not in TRANSLATE_ALLOWED_EXTS:
+        raise HTTPException(
+            400,
+            f"Unsupported file type '{ext}'. Upload a .pdf, .docx, or .zip file."
+        )
+    if not target_language.strip():
+        raise HTTPException(400, "target_language is required.")
+ 
+    content = await file.read()
+    if len(content) > MAX_FILE_SIZE:
+        raise HTTPException(413, "File too large. Maximum 150 MB.")
+ 
+    job_id = uuid.uuid4().hex
+    tmp_path = os.path.join(OUTPUT_DIR, f"translate_upload_{job_id}{ext}")
+    with open(tmp_path, "wb") as f_out:
+        f_out.write(content)
+ 
+    _translate_jobs[job_id] = {
+        "stage": "extracting",
+        "pct": 5,
+        "message": "Upload received — starting extraction…",
+        "result": None,
+    }
+ 
+    thread = threading.Thread(
+        target=_run_translation_job,
+        args=(job_id, tmp_path, filename, target_language.strip(), source_language.strip()),
+        daemon=True,
+    )
+    thread.start()
+ 
+    return {"job_id": job_id, "status": "started"}
+ 
+ 
+@app.get("/translate/{job_id}/status")
+def translate_status(job_id: str):
+    """Poll this endpoint for translation progress."""
+    job = _translate_jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, "Translation job not found.")
+ 
+    resp: dict = {
+        "job_id": job_id,
+        "stage": job["stage"],
+        "pct": job["pct"],
+        "message": job["message"],
+    }
+ 
+    if job["stage"] == "done" and job.get("result"):
+        r = job["result"]
+        resp["result"] = {
+            "job_id": job_id,
+            "title": r["title"],
+            "source_language": r["source_language"],
+            "target_language": r["target_language"],
+            "total_words": r["total_words"],
+            "chapters": r["chapters"],
+            "chapter_titles": r["chapter_titles"],
+            "pdf_url": f"/translate/{job_id}/download/pdf",
+            "docx_url": f"/translate/{job_id}/download/docx",
+        }
+ 
+    return resp
+ 
+ 
+@app.get("/translate/{job_id}/download/pdf")
+def download_translate_pdf(job_id: str):
+    job = _translate_jobs.get(job_id)
+    if not job or job.get("stage") != "done":
+        raise HTTPException(404, "Translation not complete or job not found.")
+    path = job.get("pdf_path", "")
+    if not path or not os.path.exists(path):
+        raise HTTPException(404, "PDF file not found on disk.")
+    title = job.get("title", "translated_book")
+    safe = "".join(c for c in title if c.isalnum() or c in (" ", "-", "_")).strip()
+    return FileResponse(path, media_type="application/pdf", filename=f"{safe}_translated.pdf")
+ 
+ 
+@app.get("/translate/{job_id}/download/docx")
+def download_translate_docx(job_id: str):
+    job = _translate_jobs.get(job_id)
+    if not job or job.get("stage") != "done":
+        raise HTTPException(404, "Translation not complete or job not found.")
+    path = job.get("docx_path", "")
+    if not path or not os.path.exists(path):
+        raise HTTPException(404, "DOCX file not found on disk.")
+    title = job.get("title", "translated_book")
+    safe = "".join(c for c in title if c.isalnum() or c in (" ", "-", "_")).strip()
+    return FileResponse(
+        path,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        filename=f"{safe}_translated.docx",
+    )
  
