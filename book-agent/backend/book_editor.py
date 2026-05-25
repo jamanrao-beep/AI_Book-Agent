@@ -185,6 +185,10 @@ Respond ONLY with valid JSON:
   "edit_summary": "<2-3 sentence plain English summary of what you changed>",
   "chapters_changed": [<list of chapter numbers that were modified>]
 }
+CRITICAL: You must return valid, minified JSON. 
+Ensure all newlines in the "content" field are escaped as '\\n'.
+Do not include any conversational text, explanations, or Markdown formatting.
+Output strictly the JSON object.
 """
 
 
@@ -264,13 +268,19 @@ def apply_edit(
         max_tokens=4096,
     )
     raw = resp.choices[0].message.content.strip()
-    raw = raw.replace("```json", "").replace("```", "").strip()
-    s = raw.find("{"); e = raw.rfind("}") + 1
-    if s == -1 or e == 0:
-        raise ValueError("No valid JSON returned from editor")
-    result = json.loads(raw[s:e])
-    return result
-
+    
+    raw = re.sub(r'^```json\s*', '', raw, flags=re.IGNORECASE)
+    raw = re.sub(r'\s*```$', '', raw)
+    
+    # 2. Try parsing directly
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        # 3. Fallback: Search for the first '{' and last '}'
+        s = raw.find("{"); e = raw.rfind("}") + 1
+        if s == -1 or e == 0:
+            raise ValueError("No valid JSON structure found.")
+        return json.loads(raw[s:e])
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Theme definitions for PDF/DOCX rendering
