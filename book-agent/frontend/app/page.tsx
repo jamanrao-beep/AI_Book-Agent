@@ -167,6 +167,8 @@ export default function Home() {
                 gap: "8px",
                 padding: "14px 28px",
                 fontSize: "14px",
+                justifyContent: "center",
+                margin: "0 auto",
               }}
             >
               Generate Your Book Free <ArrowRight size={16} />
