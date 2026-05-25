@@ -1007,12 +1007,24 @@ def _run_layout_job(
     page_height_mm: float,
     book_title: str,
     design_instructions: str,
+    # Typography overrides — None means "let AI decide"
+    body_font: Optional[str] = None,
+    chapter_font: Optional[str] = None,
+    body_font_size: Optional[float] = None,
+    chapter_font_size: Optional[float] = None,
+    line_spacing: Optional[float] = None,
+    margin_top_mm: Optional[float] = None,
+    margin_bottom_mm: Optional[float] = None,
+    margin_left_mm: Optional[float] = None,
+    margin_right_mm: Optional[float] = None,
+    show_drop_cap: Optional[bool] = None,
+    show_page_numbers: Optional[bool] = None,
 ) -> None:
     """Background thread worker for layout design."""
- 
+
     def progress(stage: str, pct: int, message: str) -> None:
         _layout_jobs[job_id].update({"stage": stage, "pct": pct, "message": message})
- 
+
     try:
         result = design_layout(
             file_path=file_path,
@@ -1023,6 +1035,18 @@ def _run_layout_job(
             book_title=book_title,
             design_instructions=design_instructions,
             progress_callback=progress,
+            # pass overrides through
+            body_font=body_font,
+            chapter_font=chapter_font,
+            body_font_size=body_font_size,
+            chapter_font_size=chapter_font_size,
+            line_spacing=line_spacing,
+            margin_top_mm=margin_top_mm,
+            margin_bottom_mm=margin_bottom_mm,
+            margin_left_mm=margin_left_mm,
+            margin_right_mm=margin_right_mm,
+            show_drop_cap=show_drop_cap,
+            show_page_numbers=show_page_numbers,
         )
         _layout_jobs[job_id].update(
             {
@@ -1054,41 +1078,70 @@ async def design_layout_endpoint(
     page_height_mm: float = Form(default=297.0),
     book_title: str = Form(default=""),
     design_instructions: str = Form(default=""),
+    # Typography overrides — all optional, empty string = let AI decide
+    body_font: Optional[str] = Form(default=None),
+    chapter_font: Optional[str] = Form(default=None),
+    body_font_size: Optional[str] = Form(default=None),
+    chapter_font_size: Optional[str] = Form(default=None),
+    line_spacing: Optional[str] = Form(default=None),
+    margin_top_mm: Optional[str] = Form(default=None),
+    margin_bottom_mm: Optional[str] = Form(default=None),
+    margin_left_mm: Optional[str] = Form(default=None),
+    margin_right_mm: Optional[str] = Form(default=None),
+    show_drop_cap: Optional[str] = Form(default=None),
+    show_page_numbers: Optional[str] = Form(default=None),
 ):
     """
     Upload a PDF, DOCX, or ZIP book and apply an AI-generated internal layout.
-    Accepts custom page dimensions (mm) and optional design instructions.
+    Accepts custom page dimensions (mm), optional design instructions, and
+    optional typography overrides (fonts, sizes, spacing, margins, drop caps).
     Returns a job_id immediately; poll /layout/{job_id}/status for progress.
+    Every submission runs a full regeneration — changing any field always
+    produces a fresh book.
     """
     filename = file.filename or "book.pdf"
     ext = os.path.splitext(filename)[1].lower()
- 
+
     if ext not in LAYOUT_ALLOWED_EXTS:
         raise HTTPException(
             400,
             f"Unsupported file type '{ext}'. Upload a .pdf, .docx, or .zip file.",
         )
- 
+
     # Clamp page dimensions to sensible range (50 mm – 600 mm)
     page_width_mm  = max(50.0, min(600.0, page_width_mm))
     page_height_mm = max(50.0, min(600.0, page_height_mm))
- 
+
     content = await file.read()
     if len(content) > MAX_FILE_SIZE:
         raise HTTPException(413, "File too large. Maximum 150 MB.")
- 
+
+    # Safe parsers for optional numeric / bool overrides
+    def _float_or_none(v: Optional[str]) -> Optional[float]:
+        if not v or not v.strip():
+            return None
+        try:
+            return float(v)
+        except ValueError:
+            return None
+
+    def _bool_or_none(v: Optional[str]) -> Optional[bool]:
+        if not v or not v.strip():
+            return None
+        return v.strip().lower() in {"true", "1", "yes"}
+
     job_id = uuid.uuid4().hex
     tmp_path = os.path.join(OUTPUT_DIR, f"layout_upload_{job_id}{ext}")
     with open(tmp_path, "wb") as f_out:
         f_out.write(content)
- 
+
     _layout_jobs[job_id] = {
         "stage": "queued",
         "pct": 0,
         "message": "Job queued — starting shortly…",
         "result": None,
     }
- 
+
     thread = threading.Thread(
         target=_run_layout_job,
         args=(
@@ -1100,10 +1153,23 @@ async def design_layout_endpoint(
             book_title.strip(),
             design_instructions.strip(),
         ),
+        kwargs=dict(
+            body_font=body_font if body_font else None,
+            chapter_font=chapter_font if chapter_font else None,
+            body_font_size=_float_or_none(body_font_size),
+            chapter_font_size=_float_or_none(chapter_font_size),
+            line_spacing=_float_or_none(line_spacing),
+            margin_top_mm=_float_or_none(margin_top_mm),
+            margin_bottom_mm=_float_or_none(margin_bottom_mm),
+            margin_left_mm=_float_or_none(margin_left_mm),
+            margin_right_mm=_float_or_none(margin_right_mm),
+            show_drop_cap=_bool_or_none(show_drop_cap),
+            show_page_numbers=_bool_or_none(show_page_numbers),
+        ),
         daemon=True,
     )
     thread.start()
- 
+
     return {"job_id": job_id, "status": "started"}
  
  
@@ -1165,4 +1231,3 @@ def download_layout_docx(job_id: str):
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         filename=f"{safe}_layout.docx",
     )
- 

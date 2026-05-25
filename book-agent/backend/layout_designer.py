@@ -689,16 +689,31 @@ def design_layout(
     book_title: str = "",
     design_instructions: str = "",
     progress_callback: Optional[Callable[[str, int, str], None]] = None,
+    # ── Typography overrides (None = let AI decide) ───────────────────────────
+    body_font: Optional[str] = None,
+    chapter_font: Optional[str] = None,
+    body_font_size: Optional[float] = None,
+    chapter_font_size: Optional[float] = None,
+    line_spacing: Optional[float] = None,
+    margin_top_mm: Optional[float] = None,
+    margin_bottom_mm: Optional[float] = None,
+    margin_left_mm: Optional[float] = None,
+    margin_right_mm: Optional[float] = None,
+    show_drop_cap: Optional[bool] = None,
+    show_page_numbers: Optional[bool] = None,
 ) -> dict:
     """
     Full pipeline:
       1. Extract text
       2. Detect chapters
       3. AI layout concept
-      4. Render PDF
-      5. Render DOCX
+      4. Apply user typography overrides (if any)
+      5. Render PDF
+      6. Render DOCX
     Returns a dict with keys: title, style_name, concept, chapter_count,
                                chapter_titles, pdf_path, docx_path
+    Every call is a full regeneration — changing any parameter produces a
+    completely fresh book with the new settings applied.
     """
 
     def progress(stage: str, pct: int, message: str) -> None:
@@ -728,13 +743,63 @@ def design_layout(
 
     # ── 3. AI concept ─────────────────────────────────────────────────────────
     progress("designing", 38, "AI is designing your layout concept…")
+
+    # Hint the AI about user overrides so its remaining choices are complementary
+    override_hints: list[str] = []
+    if body_font:
+        override_hints.append(f"body font must be {body_font}")
+    if chapter_font:
+        override_hints.append(f"chapter heading font must be {chapter_font}")
+    if body_font_size is not None:
+        override_hints.append(f"body font size must be {body_font_size}pt")
+    if chapter_font_size is not None:
+        override_hints.append(f"chapter heading size must be {chapter_font_size}pt")
+    if line_spacing is not None:
+        override_hints.append(f"line spacing must be {line_spacing}×")
+    if show_drop_cap is not None:
+        override_hints.append("drop caps: " + ("on" if show_drop_cap else "off"))
+    if show_page_numbers is not None:
+        override_hints.append("page numbers: " + ("on" if show_page_numbers else "off"))
+
+    effective_instructions = design_instructions
+    if override_hints:
+        hint_str = "; ".join(override_hints)
+        effective_instructions = (
+            (design_instructions + "\n" if design_instructions else "")
+            + f"[User typography overrides — honour these exactly: {hint_str}]"
+        )
+
     concept = generate_layout_concept(
         book_title=book_title,
         sample_text=raw_text,
-        design_instructions=design_instructions,
+        design_instructions=effective_instructions,
         page_width_mm=page_width_mm,
         page_height_mm=page_height_mm,
     )
+
+    # ── 3b. Apply user overrides on top of AI concept — user always wins ──────
+    if body_font:
+        concept["body_font"] = body_font
+    if chapter_font:
+        concept["chapter_font"] = chapter_font
+    if body_font_size is not None:
+        concept["body_font_size"] = float(body_font_size)
+    if chapter_font_size is not None:
+        concept["chapter_font_size"] = float(chapter_font_size)
+    if line_spacing is not None:
+        concept["line_spacing"] = float(line_spacing)
+    if margin_top_mm is not None:
+        concept["margin_top_mm"] = float(margin_top_mm)
+    if margin_bottom_mm is not None:
+        concept["margin_bottom_mm"] = float(margin_bottom_mm)
+    if margin_left_mm is not None:
+        concept["margin_left_mm"] = float(margin_left_mm)
+    if margin_right_mm is not None:
+        concept["margin_right_mm"] = float(margin_right_mm)
+    if show_drop_cap is not None:
+        concept["show_drop_cap"] = show_drop_cap
+    if show_page_numbers is not None:
+        concept["show_page_numbers"] = show_page_numbers
 
     job_id = uuid.uuid4().hex
     safe_name = _safe_title(book_title, "book").replace(" ", "_")
