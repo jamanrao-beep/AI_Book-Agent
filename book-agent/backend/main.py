@@ -14,6 +14,7 @@ from book_editor import (
     process_editor_turn, THEMES,
 )
 from translator import translate_book
+from layout_designer import design_layout
 
 sys.path.insert(0, os.path.dirname(__file__))
 
@@ -50,6 +51,7 @@ _cover_jobs:     dict[str, dict] = {}
 _scan_jobs: dict[str, dict] = {}
 _editor_sessions: dict[str, dict] = {}
 _translate_jobs: dict[str, dict] = {}
+_layout_jobs: dict[str, dict] = {}
 
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "output")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -840,7 +842,7 @@ def editor_delete_session(session_id: str):
  
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Book Translator  ← NEW
+# Book Translator  
 # ─────────────────────────────────────────────────────────────────────────────
  
 TRANSLATE_ALLOWED_EXTS = {".pdf", ".docx", ".zip"}
@@ -989,5 +991,178 @@ def download_translate_docx(job_id: str):
         path,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         filename=f"{safe}_translated.docx",
+    )
+ 
+# ─────────────────────────────────────────────────────────────────────────────
+# Internal Layout Designer 
+# ────────────────────────────────────────────────────────────────────────────
+
+LAYOUT_ALLOWED_EXTS = {".pdf", ".docx", ".zip"}
+ 
+def _run_layout_job(
+    job_id: str,
+    file_path: str,
+    filename: str,
+    page_width_mm: float,
+    page_height_mm: float,
+    book_title: str,
+    design_instructions: str,
+) -> None:
+    """Background thread worker for layout design."""
+ 
+    def progress(stage: str, pct: int, message: str) -> None:
+        _layout_jobs[job_id].update({"stage": stage, "pct": pct, "message": message})
+ 
+    try:
+        result = design_layout(
+            file_path=file_path,
+            filename=filename,
+            output_dir=OUTPUT_DIR,
+            page_width_mm=page_width_mm,
+            page_height_mm=page_height_mm,
+            book_title=book_title,
+            design_instructions=design_instructions,
+            progress_callback=progress,
+        )
+        _layout_jobs[job_id].update(
+            {
+                "stage": "done",
+                "pct": 100,
+                "message": "Layout design complete!",
+                "result": result,
+                "pdf_path": result["pdf_path"],
+                "docx_path": result["docx_path"],
+                "title": result["title"],
+            }
+        )
+    except Exception as e:
+        _layout_jobs[job_id].update(
+            {"stage": "error", "pct": 0, "message": str(e)}
+        )
+    finally:
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except Exception:
+                pass
+ 
+ 
+@app.post("/design-layout")
+async def design_layout_endpoint(
+    file: UploadFile = File(...),
+    page_width_mm: float = Form(default=210.0),
+    page_height_mm: float = Form(default=297.0),
+    book_title: str = Form(default=""),
+    design_instructions: str = Form(default=""),
+):
+    """
+    Upload a PDF, DOCX, or ZIP book and apply an AI-generated internal layout.
+    Accepts custom page dimensions (mm) and optional design instructions.
+    Returns a job_id immediately; poll /layout/{job_id}/status for progress.
+    """
+    filename = file.filename or "book.pdf"
+    ext = os.path.splitext(filename)[1].lower()
+ 
+    if ext not in LAYOUT_ALLOWED_EXTS:
+        raise HTTPException(
+            400,
+            f"Unsupported file type '{ext}'. Upload a .pdf, .docx, or .zip file.",
+        )
+ 
+    # Clamp page dimensions to sensible range (50 mm – 600 mm)
+    page_width_mm  = max(50.0, min(600.0, page_width_mm))
+    page_height_mm = max(50.0, min(600.0, page_height_mm))
+ 
+    content = await file.read()
+    if len(content) > MAX_FILE_SIZE:
+        raise HTTPException(413, "File too large. Maximum 150 MB.")
+ 
+    job_id = uuid.uuid4().hex
+    tmp_path = os.path.join(OUTPUT_DIR, f"layout_upload_{job_id}{ext}")
+    with open(tmp_path, "wb") as f_out:
+        f_out.write(content)
+ 
+    _layout_jobs[job_id] = {
+        "stage": "queued",
+        "pct": 0,
+        "message": "Job queued — starting shortly…",
+        "result": None,
+    }
+ 
+    thread = threading.Thread(
+        target=_run_layout_job,
+        args=(
+            job_id,
+            tmp_path,
+            filename,
+            page_width_mm,
+            page_height_mm,
+            book_title.strip(),
+            design_instructions.strip(),
+        ),
+        daemon=True,
+    )
+    thread.start()
+ 
+    return {"job_id": job_id, "status": "started"}
+ 
+ 
+@app.get("/layout/{job_id}/status")
+def layout_status(job_id: str):
+    """Poll this endpoint for layout-design progress."""
+    job = _layout_jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, "Layout job not found.")
+ 
+    resp: dict = {
+        "job_id": job_id,
+        "stage": job["stage"],
+        "pct": job["pct"],
+        "message": job["message"],
+    }
+ 
+    if job["stage"] == "done" and job.get("result"):
+        r = job["result"]
+        resp["result"] = {
+            "job_id": job_id,
+            "title": r["title"],
+            "style_name": r["style_name"],
+            "concept": r["concept"],
+            "chapter_count": r["chapter_count"],
+            "chapter_titles": r["chapter_titles"],
+            "pdf_url": f"/layout/{job_id}/download/pdf",
+            "docx_url": f"/layout/{job_id}/download/docx",
+        }
+ 
+    return resp
+ 
+ 
+@app.get("/layout/{job_id}/download/pdf")
+def download_layout_pdf(job_id: str):
+    job = _layout_jobs.get(job_id)
+    if not job or job.get("stage") != "done":
+        raise HTTPException(404, "Layout job not complete or not found.")
+    path = job.get("pdf_path", "")
+    if not path or not os.path.exists(path):
+        raise HTTPException(404, "PDF file not found on disk.")
+    title = job.get("title", "book_layout")
+    safe = "".join(c for c in title if c.isalnum() or c in (" ", "-", "_")).strip()
+    return FileResponse(path, media_type="application/pdf", filename=f"{safe}_layout.pdf")
+ 
+ 
+@app.get("/layout/{job_id}/download/docx")
+def download_layout_docx(job_id: str):
+    job = _layout_jobs.get(job_id)
+    if not job or job.get("stage") != "done":
+        raise HTTPException(404, "Layout job not complete or not found.")
+    path = job.get("docx_path", "")
+    if not path or not os.path.exists(path):
+        raise HTTPException(404, "DOCX file not found on disk.")
+    title = job.get("title", "book_layout")
+    safe = "".join(c for c in title if c.isalnum() or c in (" ", "-", "_")).strip()
+    return FileResponse(
+        path,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        filename=f"{safe}_layout.docx",
     )
  
