@@ -1,10 +1,18 @@
 """
-book_editor.py — Fixed version
+book_editor.py — Fixed & improved version
 Key fixes:
-  1. Edit chapters one-by-one for large books to avoid truncation
-  2. Robust JSON extraction with multiple fallback strategies
-  3. Higher max_tokens and smarter payload trimming
-  4. JSON repair for common GPT truncation patterns
+  1. BUG FIX: _estimate_tokens received an int (total_chars) but called len() on it →
+     TypeError 'object of type int has no len()'. Fixed by accepting int or str.
+  2. BUG FIX: chapter content fields that are None or non-str crashed len() inside
+     apply_edit. Added defensive str-coercion before all len() calls.
+  3. BUG FIX: conversation_history messages with non-string 'content' were passed raw
+     to the OpenAI API. Now sanitised to str and invalid roles are filtered out.
+  4. IMPROVEMENT: _edit_single_chapter retries once on transient API errors instead of
+     silently falling back immediately.
+  5. IMPROVEMENT: max_tokens for chapter edits now scales with chapter length
+     (up to 8192) instead of a hard-coded 4096, preventing truncated outputs.
+  6. IMPROVEMENT: Return values from _edit_single_chapter always coerce title/content
+     to str so downstream PDF/DOCX generators never receive unexpected types.
 """
 
 import os
@@ -244,6 +252,8 @@ def _edit_single_chapter(chapter: dict, instruction: str, book_title: str, chapt
     """Edit a single chapter. Returns the (possibly modified) chapter dict."""
     # Trim very long chapters to fit context
     content = chapter.get("content", "")
+    if not isinstance(content, str):
+        content = str(content or "")
     max_content = 30000
     truncated = len(content) > max_content
     if truncated:
@@ -263,30 +273,39 @@ def _edit_single_chapter(chapter: dict, instruction: str, book_title: str, chapt
         )}
     ]
 
-    try:
-        resp = client.chat.completions.create(
-            model=MODEL,
-            messages=messages,
-            max_tokens=4096,
-            temperature=0.7,
-        )
-        raw = resp.choices[0].message.content.strip()
-        raw = re.sub(r'^```json\s*', '', raw, flags=re.IGNORECASE)
-        raw = re.sub(r'\s*```$', '', raw)
+    # Scale max_tokens to chapter length so long chapters aren't truncated
+    estimated_output_tokens = min(8192, max(2048, len(content) // 3))
 
-        result = _try_parse_json(raw)
-        if result and isinstance(result, dict):
-            return {
-                "chapter_number": chapter.get("chapter_number", chapter_idx + 1),
-                "title": result.get("title", chapter.get("title", "")),
-                "content": result.get("content", chapter.get("content", "")),
-                "_changed": result.get("changed", True),
-            }
-    except Exception as ex:
-        print(f"  ⚠️  Chapter {chapter_idx + 1} edit failed: {ex}")
+    last_exc = None
+    for attempt in range(2):  # retry once on transient errors
+        try:
+            resp = client.chat.completions.create(
+                model=MODEL,
+                messages=messages,
+                max_tokens=estimated_output_tokens,
+                temperature=0.7,
+            )
+            raw = resp.choices[0].message.content.strip()
+            raw = re.sub(r'^```json\s*', '', raw, flags=re.IGNORECASE)
+            raw = re.sub(r'\s*```$', '', raw)
 
-    # Return original chapter on failure
-    return {**chapter, "_changed": False}
+            result = _try_parse_json(raw)
+            if result and isinstance(result, dict):
+                return {
+                    "chapter_number": chapter.get("chapter_number", chapter_idx + 1),
+                    "title": str(result.get("title", chapter.get("title", ""))),
+                    "content": str(result.get("content", chapter.get("content", ""))),
+                    "_changed": result.get("changed", True),
+                }
+        except Exception as ex:
+            last_exc = ex
+            print(f"  Warning: Chapter {chapter_idx + 1} edit attempt {attempt + 1} failed: {ex}")
+
+    if last_exc:
+        print(f"  Error: Chapter {chapter_idx + 1} permanently failed, keeping original. Error: {last_exc}")
+
+    # Return original chapter on failure — ensure content is a str
+    return {**chapter, "content": content, "_changed": False}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -320,8 +339,14 @@ CRITICAL: Return valid JSON. Never truncate content with placeholders.
 """
 
 
-def _estimate_tokens(text: str) -> int:
-    """Rough token estimate: ~4 chars per token."""
+def _estimate_tokens(text) -> int:
+    """Rough token estimate: ~4 chars per token.
+    Accepts either a string or a pre-computed character count (int).
+    """
+    if isinstance(text, int):
+        return text // 4
+    if not isinstance(text, str):
+        text = str(text)
     return len(text) // 4
 
 
@@ -339,6 +364,12 @@ def apply_edit(
     """
     chapters = book_structure.get("chapters", [])
     book_title = book_structure.get("title", "Untitled")
+
+    # Safely coerce every chapter's content to str before measuring
+    for ch in chapters:
+        if not isinstance(ch.get("content"), str):
+            ch["content"] = str(ch.get("content") or "")
+
     total_chars = sum(len(ch.get("content", "")) for ch in chapters)
     estimated_tokens = _estimate_tokens(total_chars)
 
@@ -365,8 +396,14 @@ def _apply_edit_whole_book(
         book_json = book_json[:50000] + '...(truncated)}'
 
     recent_history = conversation_history[-4:] if len(conversation_history) > 4 else conversation_history
+    # Ensure every history message has a string 'content' (OpenAI rejects non-strings)
+    safe_history = [
+        {**msg, "content": str(msg.get("content") or "")}
+        for msg in recent_history
+        if isinstance(msg, dict) and msg.get("role") in ("user", "assistant", "system")
+    ]
     messages = [{"role": "system", "content": EDITOR_SYSTEM}]
-    for msg in recent_history:
+    for msg in safe_history:
         messages.append(msg)
     messages.append({
         "role": "user",
