@@ -13,6 +13,7 @@ import {
   Palette,
   ScanLine,
   PencilLine,
+  Languages,
 } from "lucide-react";
 
 export default function DashboardHome() {
@@ -95,7 +96,7 @@ export default function DashboardHome() {
       border: "rgba(244,114,182,0.25)",
       row: 1,
     },
-    // ── Row 2 (2 cards — centred) ─────────────────────────────────────────────
+    // ── Row 2 (3 cards) ───────────────────────────────────────────────────────
     {
       key: "cover",
       icon: Palette,
@@ -136,6 +137,27 @@ export default function DashboardHome() {
       accent: "#7c3aed",
       bg: "linear-gradient(135deg, rgba(124,58,237,0.08) 0%, rgba(124,58,237,0.02) 100%)",
       border: "rgba(124,58,237,0.25)",
+      row: 2,
+    },
+    {
+      key: "translate",
+      icon: Languages,
+      label: "Book Translator",
+      tag: "NEW",
+      tagColor: "#0ea5e9",
+      tagBg: "rgba(14,165,233,0.12)",
+      description:
+        "Upload any PDF, DOCX, or ZIP book and translate it into 100+ languages. AI preserves chapter structure, tone, and formatting — exported as PDF & DOCX.",
+      features: [
+        "100+ languages supported",
+        "Structure & chapters preserved",
+        "PDF + DOCX export",
+      ],
+      cta: "Translate a Book",
+      href: "/dashboard/translate",
+      accent: "#0ea5e9",
+      bg: "linear-gradient(135deg, rgba(14,165,233,0.08) 0%, rgba(14,165,233,0.02) 100%)",
+      border: "rgba(14,165,233,0.25)",
       row: 2,
     },
   ];
@@ -231,9 +253,7 @@ export default function DashboardHome() {
         </p>
 
         {/* Feature list */}
-        <ul
-          style={{ listStyle: "none", padding: 0, marginBottom: "24px" }}
-        >
+        <ul style={{ listStyle: "none", padding: 0, marginBottom: "24px" }}>
           {tool.features.map((f) => (
             <li
               key={f}
@@ -419,15 +439,12 @@ export default function DashboardHome() {
           ))}
         </div>
 
-        {/* Row 2 — 2 cards centred (each ~48% width, centred via auto margins) */}
+        {/* Row 2 — 3 equal columns */}
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "repeat(2, 1fr)",
+            gridTemplateColumns: "repeat(3, 1fr)",
             gap: "20px",
-            /* Centre the 2-card row under the 3-card row by capping width */
-            maxWidth: "calc(66.66% + 10px)", /* 2/3 of row-1 + half a gap */
-            margin: "0 auto",
           }}
         >
           {row2.map((tool) => (
