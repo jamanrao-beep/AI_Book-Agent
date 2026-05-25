@@ -11,6 +11,7 @@ import {
   Sparkles,
   FileText,
   Palette,
+  ScanLine,
 } from "lucide-react";
 
 export default function DashboardHome() {
@@ -53,7 +54,7 @@ export default function DashboardHome() {
       key: "proof",
       icon: FileSearch,
       label: "Proofreading",
-      tag: "NEW",
+      tag: "POPULAR",
       tagColor: "#10b981",
       tagBg: "rgba(16,185,129,0.12)",
       description:
@@ -73,7 +74,7 @@ export default function DashboardHome() {
       key: "cover",
       icon: Palette,
       label: "Cover Designer",
-      tag: "NEW",
+      tag: "AI ART",
       tagColor: "#fb923c",
       tagBg: "rgba(251,146,60,0.12)",
       description:
@@ -88,6 +89,26 @@ export default function DashboardHome() {
       accent: "#fb923c",
       bg: "linear-gradient(135deg, rgba(251,146,60,0.08) 0%, rgba(251,146,60,0.02) 100%)",
       border: "rgba(251,146,60,0.25)",
+    },
+    {
+      key: "scan",
+      icon: ScanLine,
+      label: "Handwritten Scanner",
+      tag: "NEW",
+      tagColor: "#a78bfa",
+      tagBg: "rgba(124,58,237,0.12)",
+      description:
+        "Photograph up to 400 handwritten pages — in any language — and AI transcribes every word into a clean, structured book exported as PDF & DOCX.",
+      features: [
+        "GPT-4o vision transcription",
+        "Any language, any script",
+        "Auto chapter detection & export",
+      ],
+      cta: "Scan Handwriting",
+      href: "/dashboard/scan",
+      accent: "#7c3aed",
+      bg: "linear-gradient(135deg, rgba(124,58,237,0.08) 0%, rgba(124,58,237,0.02) 100%)",
+      border: "rgba(124,58,237,0.25)",
     },
   ];
 
@@ -176,10 +197,10 @@ export default function DashboardHome() {
       </nav>
 
       <main
-        style={{ maxWidth: "980px", margin: "0 auto", padding: "64px 40px" }}
+        style={{ maxWidth: "1060px", margin: "0 auto", padding: "64px 40px" }}
       >
         {/* Header */}
-        <div style={{ marginBottom: "56px" }}>
+        <div style={{ marginBottom: "52px" }}>
           <div
             style={{
               display: "inline-flex",
@@ -215,11 +236,11 @@ export default function DashboardHome() {
           </p>
         </div>
 
-        {/* Tool cards — 3 column grid */}
+        {/* Tool cards — 2×2 grid */}
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "repeat(3, 1fr)",
+            gridTemplateColumns: "repeat(2, 1fr)",
             gap: "20px",
           }}
         >
@@ -239,14 +260,11 @@ export default function DashboardHome() {
                   overflow: "hidden",
                 }}
                 onMouseOver={(e) => {
-                  (e.currentTarget as HTMLDivElement).style.transform =
-                    "translateY(-3px)";
-                  (e.currentTarget as HTMLDivElement).style.boxShadow =
-                    `0 20px 60px ${tool.accent}22`;
+                  (e.currentTarget as HTMLDivElement).style.transform = "translateY(-3px)";
+                  (e.currentTarget as HTMLDivElement).style.boxShadow = `0 20px 60px ${tool.accent}22`;
                 }}
                 onMouseOut={(e) => {
-                  (e.currentTarget as HTMLDivElement).style.transform =
-                    "translateY(0)";
+                  (e.currentTarget as HTMLDivElement).style.transform = "translateY(0)";
                   (e.currentTarget as HTMLDivElement).style.boxShadow = "none";
                 }}
                 onClick={() => router.push(tool.href)}
@@ -310,13 +328,7 @@ export default function DashboardHome() {
                 </p>
 
                 {/* Feature list */}
-                <ul
-                  style={{
-                    listStyle: "none",
-                    padding: 0,
-                    marginBottom: "24px",
-                  }}
-                >
+                <ul style={{ listStyle: "none", padding: 0, marginBottom: "24px" }}>
                   {tool.features.map((f) => (
                     <li
                       key={f}
@@ -329,9 +341,7 @@ export default function DashboardHome() {
                         marginBottom: "5px",
                       }}
                     >
-                      <span style={{ color: tool.accent, fontSize: "14px", lineHeight: "1.3" }}>
-                        ✓
-                      </span>
+                      <span style={{ color: tool.accent, fontSize: "14px", lineHeight: "1.3" }}>✓</span>
                       {f}
                     </li>
                   ))}
@@ -361,8 +371,8 @@ export default function DashboardHome() {
         {/* Footer strip */}
         <div
           style={{
-            marginTop: "48px",
-            padding: "20px 28px",
+            marginTop: "40px",
+            padding: "18px 24px",
             background: "rgba(255,255,255,0.03)",
             border: "1px solid rgba(255,255,255,0.06)",
             borderRadius: "12px",

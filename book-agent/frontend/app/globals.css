@@ -218,6 +218,7 @@ body {
   color: var(--text-primary);
   outline: none;
   transition: all 0.2s;
+  appearance: none;
   -webkit-appearance: none;
 }
 
