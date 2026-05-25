@@ -471,17 +471,13 @@ export default function DashboardHome() {
           </p>
         </div>
 
-        {/* Row 1 — 3 equal columns */}
+        {/* Row 1 — 2 equal columns */}
         <div
           style={{
-            display: "flex",
-            flexDirection: "row",
+            display: "grid",
+            gridTemplateColumns: "repeat(2, 1fr)",
             gap: "20px",
             marginBottom: "20px",
-            justifyContent: "center",
-            alignItems: "center",
-            justifyItems: "center",
-
           }}
         >
           {row1.map((tool) => (
@@ -503,18 +499,17 @@ export default function DashboardHome() {
           ))}
         </div>
 
-        {/* Row 3 — Layout Designer full-width feature card */}
-        <div style={{
-          display: "flex",
-          flexDirection: "row",
-          gap: "20px",
-          marginBottom: "20px",
-          justifyContent: "center",
-          alignItems: "center",
-          justifyItems: "center",
-        }}>
+        {/* Row 3 — 2 equal columns, matches row 1 */}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(2, 1fr)",
+            gap: "20px",
+            marginBottom: "20px",
+          }}
+        >
           {row3.map((tool) => (
-            <Card key={tool.key} tool={tool} wide />
+            <Card key={tool.key} tool={tool} />
           ))}
         </div>
 
