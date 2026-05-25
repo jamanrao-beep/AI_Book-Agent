@@ -188,7 +188,10 @@ Respond ONLY with valid JSON:
 CRITICAL: You must return valid, minified JSON. 
 Ensure all newlines in the "content" field are escaped as '\\n'.
 Do not include any conversational text, explanations, or Markdown formatting.
-Output strictly the JSON object.
+Output strictly the JSON object.You MUST return valid, minified JSON. 
+Do not include conversational text, explanations, or Markdown code blocks.
+Ensure all newlines in the "content" field are escaped as '\\n'.
+Your output must be a single JSON object.
 """
 
 
@@ -266,6 +269,7 @@ def apply_edit(
         model=MODEL,
         messages=messages,
         max_tokens=4096,
+        temperature=0.7,
     )
     raw = resp.choices[0].message.content.strip()
     
@@ -277,10 +281,20 @@ def apply_edit(
         return json.loads(raw)
     except json.JSONDecodeError:
         # 3. Fallback: Search for the first '{' and last '}'
-        s = raw.find("{"); e = raw.rfind("}") + 1
-        if s == -1 or e == 0:
+        s = raw.find("{"); 
+        e = raw.rfind("}") + 1
+        if s == -1 or e == 1:
             raise ValueError("No valid JSON structure found.")
-        return json.loads(raw[s:e])
+        if s != -1 and e != 0 and e > s:
+            try:
+                return json.loads(raw[s:e])
+            except Exception:
+                pass
+        
+        # If response was truncated (no closing brace)
+        if len(raw) > 4000:
+            raise ValueError("Edit failed: Output truncated. Please try a smaller, more specific edit request.")
+        raise ValueError("Edit failed: AI returned invalid JSON format.")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Theme definitions for PDF/DOCX rendering
