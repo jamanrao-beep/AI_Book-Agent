@@ -8,6 +8,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
 import os, sys, uuid, zipfile, shutil
+from handwritten_scanner import scan_handwritten_book, SUPPORTED_IMAGE_EXTS, SUPPORTED_UPLOAD_EXTS
+
 
 sys.path.insert(0, os.path.dirname(__file__))
 
@@ -41,6 +43,7 @@ app.add_middleware(
 # In-memory job stores (use Redis/DB in production)
 _proofread_jobs: dict[str, dict] = {}
 _cover_jobs:     dict[str, dict] = {}
+_scan_jobs: dict[str, dict] = {}
 
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "output")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -488,3 +491,137 @@ def download_cover_doc(job_id: str):
         media_type    = "application/pdf"
 
     return FileResponse(path, media_type=media_type, filename=download_name)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Handwritten Book Scanner
+# ─────────────────────────────────────────────────────────────────────────────
+ 
+SCAN_ALLOWED_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff", ".tif", ".gif", ".pdf", ".docx", ".zip"}
+ 
+ 
+@app.post("/scan-handwritten")
+async def scan_handwritten(
+    file: Optional[UploadFile] = File(default=None),
+    files: list[UploadFile] = File(default=[]),
+    book_title: str = Form(default=""),
+):
+    """
+    Transcribe handwritten pages into a clean book.
+ 
+    Accepts:
+    - Single file: image (jpg/png/webp/bmp/tiff/gif), PDF scan, DOCX with images, or ZIP of images
+    - Multiple files: list of image files (multi-upload)
+ 
+    Returns job metadata + download URLs for PDF and DOCX.
+    """
+    import tempfile, zipfile as _zipfile
+ 
+    # Normalise: single file vs multiple
+    all_uploads: list[UploadFile] = []
+    if file and file.filename:
+        all_uploads.append(file)
+    if files:
+        all_uploads.extend(files)
+ 
+    if not all_uploads:
+        raise HTTPException(400, "No file(s) uploaded.")
+ 
+    # Validate extensions
+    for u in all_uploads:
+        ext = os.path.splitext(u.filename or "")[1].lower()
+        if ext not in SCAN_ALLOWED_EXTS:
+            raise HTTPException(400, f"Unsupported file type '{ext}'. Accepted: images, .pdf, .docx, .zip")
+ 
+    # If multiple image files, bundle them into a temporary ZIP
+    if len(all_uploads) > 1:
+        # Read all into a temp zip
+        zip_job_id = uuid.uuid4().hex
+        zip_tmp = os.path.join(OUTPUT_DIR, f"upload_pages_{zip_job_id}.zip")
+        try:
+            with _zipfile.ZipFile(zip_tmp, "w") as zf:
+                for upload in all_uploads:
+                    data = await upload.read()
+                    if len(data) > MAX_FILE_SIZE:
+                        raise HTTPException(413, f"File '{upload.filename}' exceeds 150 MB limit.")
+                    zf.writestr(upload.filename or f"page_{uuid.uuid4().hex}.jpg", data)
+            result = scan_handwritten_book(
+                file_path=zip_tmp,
+                filename=f"pages_{zip_job_id}.zip",
+                output_dir=OUTPUT_DIR,
+                book_title=book_title,
+            )
+        finally:
+            if os.path.exists(zip_tmp):
+                os.remove(zip_tmp)
+    else:
+        # Single file upload
+        upload = all_uploads[0]
+        filename = upload.filename or "document"
+        content = await upload.read()
+        if len(content) > MAX_FILE_SIZE:
+            raise HTTPException(413, "File too large. Maximum 150 MB.")
+ 
+        ext = os.path.splitext(filename)[1].lower()
+        tmp_path = os.path.join(OUTPUT_DIR, f"upload_{uuid.uuid4().hex}{ext}")
+        try:
+            with open(tmp_path, "wb") as f_out:
+                f_out.write(content)
+            result = scan_handwritten_book(
+                file_path=tmp_path,
+                filename=filename,
+                output_dir=OUTPUT_DIR,
+                book_title=book_title,
+            )
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+ 
+    job_id = result["job_id"]
+    _scan_jobs[job_id] = {
+        "pdf_path": result["pdf_path"],
+        "docx_path": result["docx_path"],
+        "title": result["title"],
+    }
+ 
+    return {
+        "job_id": job_id,
+        "title": result["title"],
+        "language": result["language"],
+        "total_pages": result["total_pages"],
+        "content_pages": result["content_pages"],
+        "total_words": result["total_words"],
+        "chapters": result["chapters"],
+        "chapter_titles": result["chapter_titles"],
+        "pdf_url": f"/scan-handwritten/{job_id}/download/pdf",
+        "docx_url": f"/scan-handwritten/{job_id}/download/docx",
+    }
+ 
+ 
+@app.get("/scan-handwritten/{job_id}/download/pdf")
+def download_scan_pdf(job_id: str):
+    job = _scan_jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, "Scan job not found. Re-upload to scan again.")
+    path = job["pdf_path"]
+    if not os.path.exists(path):
+        raise HTTPException(404, "PDF file not found on disk.")
+    title = job.get("title", "manuscript")
+    safe = "".join(c for c in title if c.isalnum() or c in (" ", "-", "_")).strip()
+    return FileResponse(path, media_type="application/pdf", filename=f"{safe}.pdf")
+ 
+ 
+@app.get("/scan-handwritten/{job_id}/download/docx")
+def download_scan_docx(job_id: str):
+    job = _scan_jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, "Scan job not found. Re-upload to scan again.")
+    path = job["docx_path"]
+    if not os.path.exists(path):
+        raise HTTPException(404, "DOCX file not found on disk.")
+    title = job.get("title", "manuscript")
+    safe = "".join(c for c in title if c.isalnum() or c in (" ", "-", "_")).strip()
+    return FileResponse(
+        path,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        filename=f"{safe}.docx",
+    )
