@@ -9,6 +9,10 @@ from pydantic import BaseModel
 from typing import Optional
 import os, sys, uuid, zipfile, shutil
 from handwritten_scanner import scan_handwritten_book, SUPPORTED_IMAGE_EXTS, SUPPORTED_UPLOAD_EXTS
+from book_editor import (
+    extract_book_text, parse_book_structure,
+    process_editor_turn, THEMES,
+)
 
 
 sys.path.insert(0, os.path.dirname(__file__))
@@ -44,6 +48,7 @@ app.add_middleware(
 _proofread_jobs: dict[str, dict] = {}
 _cover_jobs:     dict[str, dict] = {}
 _scan_jobs: dict[str, dict] = {}
+_editor_sessions: dict[str, dict] = {}
 
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "output")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -625,3 +630,210 @@ def download_scan_docx(job_id: str):
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         filename=f"{safe}.docx",
     )
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Book Editor — session management
+# ─────────────────────────────────────────────────────────────────────────────
+ 
+EDITOR_ALLOWED_EXTS = {".pdf", ".docx", ".zip", ".txt", ".md"}
+ 
+ 
+@app.post("/editor/upload")
+async def editor_upload(
+    file: UploadFile = File(...),
+    theme: str = Form(default="premium"),
+):
+    """
+    Upload a book file to start an editing session.
+    Returns session_id + parsed book metadata.
+    """
+    filename = file.filename or "book"
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in EDITOR_ALLOWED_EXTS:
+        raise HTTPException(400, f"Unsupported file type '{ext}'. Upload .pdf, .docx, .zip, .txt, or .md")
+ 
+    content = await file.read()
+    if len(content) > MAX_FILE_SIZE:
+        raise HTTPException(413, "File too large. Maximum 150 MB.")
+ 
+    tmp_path = os.path.join(OUTPUT_DIR, f"editor_upload_{uuid.uuid4().hex}{ext}")
+    try:
+        with open(tmp_path, "wb") as f_out:
+            f_out.write(content)
+ 
+        raw_text = extract_book_text(tmp_path, filename)
+        if not raw_text.strip():
+            raise HTTPException(400, "Document appears empty or unreadable.")
+ 
+        book_structure = parse_book_structure(raw_text, filename)
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+ 
+    session_id = uuid.uuid4().hex
+    _editor_sessions[session_id] = {
+        "book": book_structure,
+        "theme": theme,
+        "history": [],       # conversation history
+        "versions": [],      # list of {pdf_path, docx_path, edit_summary, theme, turn}
+        "turn": 0,
+        "original_filename": filename,
+    }
+ 
+    return {
+        "session_id": session_id,
+        "title": book_structure.get("title", "Untitled"),
+        "author": book_structure.get("author", ""),
+        "chapters": len(book_structure.get("chapters", [])),
+        "chapter_titles": [c["title"] for c in book_structure.get("chapters", [])],
+        "theme": theme,
+        "available_themes": list(THEMES.keys()),
+        "message": f"Book loaded successfully. {len(book_structure.get('chapters', []))} chapters found. What would you like to edit?",
+    }
+ 
+ 
+@app.post("/editor/{session_id}/chat")
+async def editor_chat(
+    session_id: str,
+    user_message: str = Form(...),
+    theme: Optional[str] = Form(default=None),
+):
+    """
+    Send an edit instruction. AI edits the book and returns a new downloadable version.
+    Maintains full conversation context across turns.
+    """
+    session = _editor_sessions.get(session_id)
+    if not session:
+        raise HTTPException(404, "Editor session not found. Please re-upload your book.")
+ 
+    current_book = session["book"]
+    current_theme = theme or session["theme"]
+    session["turn"] += 1
+    turn = session["turn"]
+ 
+    # Add user message to history
+    session["history"].append({"role": "user", "content": user_message})
+ 
+    try:
+        result = process_editor_turn(
+            book_structure=current_book,
+            user_message=user_message,
+            conversation_history=session["history"],
+            output_dir=OUTPUT_DIR,
+            theme=current_theme,
+            job_id=f"{session_id}_v{turn}",
+        )
+    except Exception as e:
+        # Don't crash the session — return error message
+        session["history"].append({
+            "role": "assistant",
+            "content": f"I encountered an error applying that edit: {str(e)}. Please try rephrasing your request.",
+        })
+        raise HTTPException(500, f"Edit failed: {str(e)}")
+ 
+    # Update session state
+    session["book"]  = result["updated_book"]
+    session["theme"] = result["theme"]
+ 
+    version_record = {
+        "turn": turn,
+        "pdf_path": result["pdf_path"],
+        "docx_path": result["docx_path"],
+        "edit_summary": result["edit_summary"],
+        "theme": result["theme"],
+        "chapters_changed": result["chapters_changed"],
+        "pdf_url": f"/editor/{session_id}/download/pdf/{turn}",
+        "docx_url": f"/editor/{session_id}/download/docx/{turn}",
+    }
+    session["versions"].append(version_record)
+ 
+    # Add assistant response to history
+    assistant_msg = (
+        f"{result['edit_summary']}\n\n"
+        f"Theme: **{result['theme']}** · "
+        f"Chapters modified: {result['chapters_changed'] or 'none'} · "
+        f"Version {turn} ready to download."
+    )
+    session["history"].append({"role": "assistant", "content": assistant_msg})
+ 
+    return {
+        "turn": turn,
+        "edit_summary": result["edit_summary"],
+        "chapters_changed": result["chapters_changed"],
+        "theme": result["theme"],
+        "title": result["updated_book"].get("title", ""),
+        "chapter_titles": [c["title"] for c in result["updated_book"].get("chapters", [])],
+        "pdf_url": version_record["pdf_url"],
+        "docx_url": version_record["docx_url"],
+        "assistant_message": assistant_msg,
+    }
+ 
+ 
+@app.get("/editor/{session_id}/download/pdf/{turn}")
+def editor_download_pdf(session_id: str, turn: int):
+    session = _editor_sessions.get(session_id)
+    if not session:
+        raise HTTPException(404, "Session not found.")
+    version = next((v for v in session["versions"] if v["turn"] == turn), None)
+    if not version or not os.path.exists(version["pdf_path"]):
+        raise HTTPException(404, "PDF not found. It may have been cleaned up.")
+    title = session["book"].get("title", "book")
+    safe = "".join(c for c in title if c.isalnum() or c in (" ", "-", "_")).strip()
+    return FileResponse(version["pdf_path"], media_type="application/pdf", filename=f"{safe}_v{turn}.pdf")
+ 
+ 
+@app.get("/editor/{session_id}/download/docx/{turn}")
+def editor_download_docx(session_id: str, turn: int):
+    session = _editor_sessions.get(session_id)
+    if not session:
+        raise HTTPException(404, "Session not found.")
+    version = next((v for v in session["versions"] if v["turn"] == turn), None)
+    if not version or not os.path.exists(version["docx_path"]):
+        raise HTTPException(404, "DOCX not found.")
+    title = session["book"].get("title", "book")
+    safe = "".join(c for c in title if c.isalnum() or c in (" ", "-", "_")).strip()
+    return FileResponse(
+        version["docx_path"],
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        filename=f"{safe}_v{turn}.docx",
+    )
+ 
+ 
+@app.get("/editor/{session_id}/history")
+def editor_history(session_id: str):
+    session = _editor_sessions.get(session_id)
+    if not session:
+        raise HTTPException(404, "Session not found.")
+    return {
+        "session_id": session_id,
+        "turn": session["turn"],
+        "title": session["book"].get("title", ""),
+        "theme": session["theme"],
+        "versions": [
+            {
+                "turn": v["turn"],
+                "edit_summary": v["edit_summary"],
+                "theme": v["theme"],
+                "chapters_changed": v["chapters_changed"],
+                "pdf_url": v["pdf_url"],
+                "docx_url": v["docx_url"],
+            }
+            for v in session["versions"]
+        ],
+        "messages": session["history"],
+    }
+ 
+ 
+@app.delete("/editor/{session_id}")
+def editor_delete_session(session_id: str):
+    session = _editor_sessions.pop(session_id, None)
+    if session:
+        # Cleanup output files
+        for v in session.get("versions", []):
+            for path_key in ("pdf_path", "docx_path"):
+                p = v.get(path_key, "")
+                if p and os.path.exists(p):
+                    try: os.remove(p)
+                    except: pass
+    return {"deleted": True}
+ 
