@@ -1,5 +1,6 @@
 """
 book_editor.py
+─────────────────────────────────────────────────────────────────────────────
 Conversational AI book editor.
 - Accepts PDF / DOCX / ZIP input
 - Extracts full text and structure
@@ -36,7 +37,7 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 MODEL = "gpt-4o"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Text extraction (reuses proofreader helpers where possible)
+# Text extraction
 # ─────────────────────────────────────────────────────────────────────────────
 
 def extract_text_from_docx(path: str) -> str:
@@ -139,7 +140,6 @@ def parse_book_structure(raw_text: str, filename: str = "") -> dict:
         return json.loads(raw[s:e])
     except Exception as ex:
         print(f"  ⚠️  parse_book_structure fallback: {ex}")
-        # Fallback: naive chapter split
         title = Path(filename).stem.replace("_", " ").replace("-", " ").title() if filename else "Untitled"
         chapters = []
         ch_pattern = re.split(r"(?i)(chapter\s+\w+[^\n]*)", raw_text)
@@ -168,6 +168,8 @@ You MUST:
 4. If asked to edit specific chapters, pages, or paragraphs, locate and edit ONLY those.
 5. If asked to add content, insert it at the appropriate location.
 6. If asked to remove content, omit it cleanly.
+7. IMPORTANT: Always return the COMPLETE book with ALL chapters fully written out.
+   Never truncate, summarise, or use placeholders like "[content continues...]" in your output.
 
 Respond ONLY with valid JSON:
 {
@@ -185,6 +187,52 @@ Respond ONLY with valid JSON:
 }
 """
 
+
+def _build_book_payload(book_structure: dict, max_chars: int = 60000) -> str:
+    """
+    Intelligently serialize the book for the AI prompt.
+    If the full JSON fits within max_chars, send it as-is.
+    Otherwise, trim each chapter's content proportionally so we never
+    hard-truncate mid-JSON (which confuses the model into ignoring the book).
+    """
+    full_json = json.dumps(book_structure, ensure_ascii=False)
+    if len(full_json) <= max_chars:
+        return full_json
+
+    chapters = book_structure.get("chapters", [])
+    n = len(chapters)
+    if n == 0:
+        return full_json[:max_chars]
+
+    # Reserve space for metadata + chapter titles/numbers (≈500 chars each)
+    overhead = 500 + n * 200
+    available_for_content = max(max_chars - overhead, 2000)
+    per_chapter = available_for_content // n
+
+    trimmed_chapters = []
+    for ch in chapters:
+        content = ch.get("content", "")
+        if len(content) > per_chapter:
+            # Trim to per_chapter chars, but end on a sentence boundary if possible
+            trimmed = content[:per_chapter]
+            last_period = trimmed.rfind(".")
+            if last_period > per_chapter * 0.7:
+                trimmed = trimmed[:last_period + 1]
+            content = trimmed + "\n\n[CHAPTER CONTINUES — keep all remaining content unchanged in your output]"
+        trimmed_chapters.append({
+            "chapter_number": ch["chapter_number"],
+            "title": ch["title"],
+            "content": content,
+        })
+
+    trimmed_book = {
+        "title": book_structure.get("title", ""),
+        "author": book_structure.get("author", ""),
+        "chapters": trimmed_chapters,
+    }
+    return json.dumps(trimmed_book, ensure_ascii=False)
+
+
 def apply_edit(
     book_structure: dict,
     user_instruction: str,
@@ -194,7 +242,7 @@ def apply_edit(
     Apply a natural-language edit instruction to the book structure.
     Returns updated book structure dict with extra keys: edit_summary, chapters_changed.
     """
-    book_json = json.dumps(book_structure, ensure_ascii=False)
+    book_payload = _build_book_payload(book_structure, max_chars=60000)
 
     # Keep last 6 turns of history to stay within context
     recent_history = conversation_history[-6:] if len(conversation_history) > 6 else conversation_history
@@ -205,7 +253,7 @@ def apply_edit(
     messages.append({
         "role": "user",
         "content": (
-            f"Current book (JSON):\n{book_json[:40000]}\n\n"
+            f"Current book (JSON):\n{book_payload}\n\n"
             f"Edit instruction: {user_instruction}"
         ),
     })
@@ -229,16 +277,16 @@ def apply_edit(
 # ─────────────────────────────────────────────────────────────────────────────
 
 THEMES = {
-    "normal":     {"bg": "#FFFFFF", "accent": "#374151", "title_col": "#111827", "body_col": "#374151", "font_body": "Helvetica",       "font_head": "Helvetica-Bold"},
-    "premium":    {"bg": "#FAFAF8", "accent": "#1D4ED8", "title_col": "#0F172A", "body_col": "#1E293B", "font_body": "Helvetica",       "font_head": "Helvetica-Bold"},
-    "scifi":      {"bg": "#050A14", "accent": "#00D4FF", "title_col": "#00D4FF", "body_col": "#A0C8E0", "font_body": "Courier",         "font_head": "Courier-Bold"},
-    "fantasy":    {"bg": "#0D0A1A", "accent": "#C084FC", "title_col": "#E9D5FF", "body_col": "#DDD6FE", "font_body": "Helvetica",       "font_head": "Helvetica-Bold"},
-    "romance":    {"bg": "#FFF5F5", "accent": "#E11D48", "title_col": "#9F1239", "body_col": "#4C0519", "font_body": "Helvetica-Oblique","font_head": "Helvetica-Bold"},
-    "thriller":   {"bg": "#0A0A0A", "accent": "#EF4444", "title_col": "#FAFAFA", "body_col": "#D1D5DB", "font_body": "Helvetica",       "font_head": "Helvetica-Bold"},
-    "academic":   {"bg": "#F9FAFB", "accent": "#1E40AF", "title_col": "#1E3A5F", "body_col": "#374151", "font_body": "Times-Roman",     "font_head": "Times-Bold"},
-    "minimalist": {"bg": "#FFFFFF", "accent": "#000000", "title_col": "#000000", "body_col": "#333333", "font_body": "Helvetica",       "font_head": "Helvetica"},
-    "vibrant":    {"bg": "#1A0533", "accent": "#F59E0B", "title_col": "#FDE68A", "body_col": "#FEF3C7", "font_body": "Helvetica",       "font_head": "Helvetica-Bold"},
-    "retro":      {"bg": "#FDF6E3", "accent": "#B45309", "title_col": "#78350F", "body_col": "#451A03", "font_body": "Courier",         "font_head": "Courier-Bold"},
+    "normal":     {"bg": "#FFFFFF", "accent": "#374151", "title_col": "#111827", "body_col": "#374151", "font_body": "Helvetica",        "font_head": "Helvetica-Bold"},
+    "premium":    {"bg": "#FAFAF8", "accent": "#1D4ED8", "title_col": "#0F172A", "body_col": "#1E293B", "font_body": "Helvetica",        "font_head": "Helvetica-Bold"},
+    "scifi":      {"bg": "#050A14", "accent": "#00D4FF", "title_col": "#00D4FF", "body_col": "#A0C8E0", "font_body": "Courier",          "font_head": "Courier-Bold"},
+    "fantasy":    {"bg": "#0D0A1A", "accent": "#C084FC", "title_col": "#E9D5FF", "body_col": "#DDD6FE", "font_body": "Helvetica",        "font_head": "Helvetica-Bold"},
+    "romance":    {"bg": "#FFF5F5", "accent": "#E11D48", "title_col": "#9F1239", "body_col": "#4C0519", "font_body": "Helvetica-Oblique", "font_head": "Helvetica-Bold"},
+    "thriller":   {"bg": "#0A0A0A", "accent": "#EF4444", "title_col": "#FAFAFA", "body_col": "#D1D5DB", "font_body": "Helvetica",        "font_head": "Helvetica-Bold"},
+    "academic":   {"bg": "#F9FAFB", "accent": "#1E40AF", "title_col": "#1E3A5F", "body_col": "#374151", "font_body": "Times-Roman",      "font_head": "Times-Bold"},
+    "minimalist": {"bg": "#FFFFFF", "accent": "#000000", "title_col": "#000000", "body_col": "#333333", "font_body": "Helvetica",        "font_head": "Helvetica"},
+    "vibrant":    {"bg": "#1A0533", "accent": "#F59E0B", "title_col": "#FDE68A", "body_col": "#FEF3C7", "font_body": "Helvetica",        "font_head": "Helvetica-Bold"},
+    "retro":      {"bg": "#FDF6E3", "accent": "#B45309", "title_col": "#78350F", "body_col": "#451A03", "font_body": "Courier",          "font_head": "Courier-Bold"},
 }
 
 
@@ -260,7 +308,7 @@ def generate_edited_pdf(book: dict, output_path: str, theme_name: str = "premium
     from reportlab.lib.colors import HexColor, Color, white, black
 
     theme = THEMES.get(theme_name, THEMES["premium"])
-    is_dark = _hex_to_rgb(theme["bg"])[0] < 0.5  # dark bg detection
+    is_dark = _hex_to_rgb(theme["bg"])[0] < 0.5
 
     BG     = HexColor(theme["bg"])
     ACCENT = HexColor(theme["accent"])
@@ -330,7 +378,9 @@ def generate_edited_pdf(book: dict, output_path: str, theme_name: str = "premium
         for para in ch.get("content", "").split("\n\n"):
             para = para.strip()
             if para:
-                story.append(Paragraph(para, body_s))
+                # Escape XML special characters for ReportLab
+                safe = para.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                story.append(Paragraph(safe, body_s))
         story.append(PageBreak())
 
     doc.build(story, onFirstPage=on_cover, onLaterPages=on_page)

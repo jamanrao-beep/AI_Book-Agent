@@ -68,7 +68,10 @@ const THEME_META: Record<string, { label: string; color: string; desc: string; i
     academic: { label: "Academic", color: "#7986cb", desc: "Clean scholarly layout, indigo accents", icon: "⊞" },
     thriller: { label: "Thriller", color: "#ef5350", desc: "High-contrast dark noir aesthetic", icon: "◆" },
     fantasy: { label: "Fantasy", color: "#ab47bc", desc: "Ornate display font, jewel tones", icon: "⟡" },
-    minimal: { label: "Minimal", color: "#90a4ae", desc: "Ultra-clean black on white, no frills", icon: "○" },
+    minimalist: { label: "Minimal", color: "#90a4ae", desc: "Ultra-clean black on white", icon: "○" },
+    retro: { label: "Vintage", color: "#a1887f", desc: "Sepia tones, old-book warmth", icon: "⊛" },
+    normal: { label: "Normal", color: "#94a3b8", desc: "Clean default layout", icon: "□" },
+    vibrant: { label: "Vibrant", color: "#F59E0B", desc: "Bold colors, high energy", icon: "★" },
     vintage: { label: "Vintage", color: "#a1887f", desc: "Sepia tones, old-book warmth", icon: "⊛" },
 };
 
@@ -271,6 +274,11 @@ export default function BookEditorPage() {
         } catch (e: unknown) {
             setMessages((prev) => prev.filter((m) => m.content !== typingId));
             setChatError(e instanceof Error ? e.message : "Something went wrong");
+            setUploadError(
+                e instanceof TypeError && e.message.includes("fetch")
+                    ? `Cannot connect to server at ${API_BASE}. Is the backend running?`
+                    : e instanceof Error ? e.message : "Upload failed"
+            );
         } finally {
             setSending(false);
         }
