@@ -33,7 +33,28 @@ export default function DashboardHome() {
     user?.displayName?.split(" ")[0] || user?.email?.split("@")[0] || "there";
 
   const tools = [
-    // ── Row 1 (3 cards) ──────────────────────────────────────────────────────
+    // ── Row 1 (2 cards) ──────────────────────────────────────────────────────
+    {
+      key: "scan",
+      icon: ScanLine,
+      label: "Handwritten Scanner",
+      tag: "AI VISION",
+      tagColor: "#a78bfa",
+      tagBg: "rgba(124,58,237,0.12)",
+      description:
+        "Photograph up to 400 handwritten pages — in any language — and AI transcribes every word into a clean, structured book exported as PDF & DOCX.",
+      features: [
+        "GPT-4o vision transcription",
+        "Any language, any script",
+        "Auto chapter detection & export",
+      ],
+      cta: "Scan Handwriting",
+      href: "/dashboard/scan",
+      accent: "#7c3aed",
+      bg: "linear-gradient(135deg, rgba(124,58,237,0.08) 0%, rgba(124,58,237,0.02) 100%)",
+      border: "rgba(124,58,237,0.25)",
+      row: 1,
+    },
     {
       key: "book",
       icon: BookOpen,
@@ -55,27 +76,7 @@ export default function DashboardHome() {
       border: "rgba(99,102,241,0.25)",
       row: 1,
     },
-    {
-      key: "proof",
-      icon: FileSearch,
-      label: "Proofreading",
-      tag: "POPULAR",
-      tagColor: "#10b981",
-      tagBg: "rgba(16,185,129,0.12)",
-      description:
-        "Upload any document and get an AI-powered edit covering grammar, punctuation, style, and readability — with a clean corrected file to download.",
-      features: [
-        "Grammar & spelling fixes",
-        "Punctuation corrections",
-        "Style & readability suggestions",
-      ],
-      cta: "Proofread a Doc",
-      href: "/dashboard/proofread",
-      accent: "#10b981",
-      bg: "linear-gradient(135deg, rgba(16,185,129,0.08) 0%, rgba(16,185,129,0.02) 100%)",
-      border: "rgba(16,185,129,0.25)",
-      row: 1,
-    },
+    // ── Row 2 (3 cards) ───────────────────────────────────────────────────────
     {
       key: "editor",
       icon: PencilLine,
@@ -95,49 +96,27 @@ export default function DashboardHome() {
       accent: "#f472b6",
       bg: "linear-gradient(135deg, rgba(244,114,182,0.08) 0%, rgba(244,114,182,0.02) 100%)",
       border: "rgba(244,114,182,0.25)",
-      row: 1,
-    },
-    // ── Row 2 (3 cards) ───────────────────────────────────────────────────────
-    {
-      key: "cover",
-      icon: Palette,
-      label: "Cover Designer",
-      tag: "AI ART",
-      tagColor: "#fb923c",
-      tagBg: "rgba(251,146,60,0.12)",
-      description:
-        "Upload your manuscript (PDF or DOCX) and let AI design a stunning, print-ready cover page — professionally typeset and attached to your book.",
-      features: [
-        "AI-generated design concept",
-        "Full-bleed cover page rendered",
-        "Prepended to your original file",
-      ],
-      cta: "Design a Cover",
-      href: "/dashboard/cover",
-      accent: "#fb923c",
-      bg: "linear-gradient(135deg, rgba(251,146,60,0.08) 0%, rgba(251,146,60,0.02) 100%)",
-      border: "rgba(251,146,60,0.25)",
       row: 2,
     },
     {
-      key: "scan",
-      icon: ScanLine,
-      label: "Handwritten Scanner",
-      tag: "AI VISION",
-      tagColor: "#a78bfa",
-      tagBg: "rgba(124,58,237,0.12)",
+      key: "proof",
+      icon: FileSearch,
+      label: "Proofreading",
+      tag: "POPULAR",
+      tagColor: "#10b981",
+      tagBg: "rgba(16,185,129,0.12)",
       description:
-        "Photograph up to 400 handwritten pages — in any language — and AI transcribes every word into a clean, structured book exported as PDF & DOCX.",
+        "Upload any document and get an AI-powered edit covering grammar, punctuation, style, and readability — with a clean corrected file to download.",
       features: [
-        "GPT-4o vision transcription",
-        "Any language, any script",
-        "Auto chapter detection & export",
+        "Grammar & spelling fixes",
+        "Punctuation corrections",
+        "Style & readability suggestions",
       ],
-      cta: "Scan Handwriting",
-      href: "/dashboard/scan",
-      accent: "#7c3aed",
-      bg: "linear-gradient(135deg, rgba(124,58,237,0.08) 0%, rgba(124,58,237,0.02) 100%)",
-      border: "rgba(124,58,237,0.25)",
+      cta: "Proofread a Doc",
+      href: "/dashboard/proofread",
+      accent: "#10b981",
+      bg: "linear-gradient(135deg, rgba(16,185,129,0.08) 0%, rgba(16,185,129,0.02) 100%)",
+      border: "rgba(16,185,129,0.25)",
       row: 2,
     },
     {
@@ -161,7 +140,28 @@ export default function DashboardHome() {
       border: "rgba(14,165,233,0.25)",
       row: 2,
     },
-    // ── Row 3 (1 full-width feature card) ────────────────────────────────────
+    // ── Row 3 (2 full-width feature card) ────────────────────────────────────
+    {
+      key: "cover",
+      icon: Palette,
+      label: "Cover Designer",
+      tag: "AI ART",
+      tagColor: "#fb923c",
+      tagBg: "rgba(251,146,60,0.12)",
+      description:
+        "Upload your manuscript (PDF or DOCX) and let AI design a stunning, print-ready cover page — professionally typeset and attached to your book.",
+      features: [
+        "AI-generated design concept",
+        "Full-bleed cover page rendered",
+        "Prepended to your original file",
+      ],
+      cta: "Design a Cover",
+      href: "/dashboard/cover",
+      accent: "#fb923c",
+      bg: "linear-gradient(135deg, rgba(251,146,60,0.08) 0%, rgba(251,146,60,0.02) 100%)",
+      border: "rgba(251,146,60,0.25)",
+      row: 3,
+    },
     {
       key: "layout",
       icon: LayoutTemplate,
