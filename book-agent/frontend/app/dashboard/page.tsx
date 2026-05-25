@@ -12,6 +12,7 @@ import {
   FileText,
   Palette,
   ScanLine,
+  PencilLine,
 } from "lucide-react";
 
 export default function DashboardHome() {
@@ -30,6 +31,7 @@ export default function DashboardHome() {
     user?.displayName?.split(" ")[0] || user?.email?.split("@")[0] || "there";
 
   const tools = [
+    // ── Row 1 (3 cards) ──────────────────────────────────────────────────────
     {
       key: "book",
       icon: BookOpen,
@@ -49,6 +51,7 @@ export default function DashboardHome() {
       accent: "#6366f1",
       bg: "linear-gradient(135deg, rgba(99,102,241,0.08) 0%, rgba(99,102,241,0.02) 100%)",
       border: "rgba(99,102,241,0.25)",
+      row: 1,
     },
     {
       key: "proof",
@@ -69,7 +72,30 @@ export default function DashboardHome() {
       accent: "#10b981",
       bg: "linear-gradient(135deg, rgba(16,185,129,0.08) 0%, rgba(16,185,129,0.02) 100%)",
       border: "rgba(16,185,129,0.25)",
+      row: 1,
     },
+    {
+      key: "editor",
+      icon: PencilLine,
+      label: "Book Editor",
+      tag: "NEW",
+      tagColor: "#f472b6",
+      tagBg: "rgba(244,114,182,0.12)",
+      description:
+        "Upload your book (PDF / DOCX / ZIP) and have a conversation to edit it — rewrite chapters, change the theme, adjust tone, add sections, and download each new version instantly.",
+      features: [
+        "Chat-based chapter editing",
+        "Theme switching (Sci-Fi, Romance, Academic…)",
+        "Versioned PDF + DOCX exports",
+      ],
+      cta: "Edit a Book",
+      href: "/dashboard/editor",
+      accent: "#f472b6",
+      bg: "linear-gradient(135deg, rgba(244,114,182,0.08) 0%, rgba(244,114,182,0.02) 100%)",
+      border: "rgba(244,114,182,0.25)",
+      row: 1,
+    },
+    // ── Row 2 (2 cards — centred) ─────────────────────────────────────────────
     {
       key: "cover",
       icon: Palette,
@@ -89,12 +115,13 @@ export default function DashboardHome() {
       accent: "#fb923c",
       bg: "linear-gradient(135deg, rgba(251,146,60,0.08) 0%, rgba(251,146,60,0.02) 100%)",
       border: "rgba(251,146,60,0.25)",
+      row: 2,
     },
     {
       key: "scan",
       icon: ScanLine,
       label: "Handwritten Scanner",
-      tag: "NEW",
+      tag: "AI VISION",
       tagColor: "#a78bfa",
       tagBg: "rgba(124,58,237,0.12)",
       description:
@@ -109,8 +136,150 @@ export default function DashboardHome() {
       accent: "#7c3aed",
       bg: "linear-gradient(135deg, rgba(124,58,237,0.08) 0%, rgba(124,58,237,0.02) 100%)",
       border: "rgba(124,58,237,0.25)",
+      row: 2,
     },
   ];
+
+  const row1 = tools.filter((t) => t.row === 1);
+  const row2 = tools.filter((t) => t.row === 2);
+
+  const Card = ({ tool }: { tool: (typeof tools)[0] }) => {
+    const Icon = tool.icon;
+    return (
+      <div
+        style={{
+          background: tool.bg,
+          border: `1px solid ${tool.border}`,
+          borderRadius: "16px",
+          padding: "28px",
+          cursor: "pointer",
+          transition: "transform 0.2s, box-shadow 0.2s",
+          position: "relative",
+          overflow: "hidden",
+          display: "flex",
+          flexDirection: "column",
+        }}
+        onMouseOver={(e) => {
+          (e.currentTarget as HTMLDivElement).style.transform =
+            "translateY(-3px)";
+          (e.currentTarget as HTMLDivElement).style.boxShadow = `0 20px 60px ${tool.accent}22`;
+        }}
+        onMouseOut={(e) => {
+          (e.currentTarget as HTMLDivElement).style.transform = "translateY(0)";
+          (e.currentTarget as HTMLDivElement).style.boxShadow = "none";
+        }}
+        onClick={() => router.push(tool.href)}
+      >
+        {/* Tag */}
+        <div
+          style={{
+            position: "absolute",
+            top: "18px",
+            right: "18px",
+            background: tool.tagBg,
+            border: `1px solid ${tool.accent}33`,
+            borderRadius: "6px",
+            padding: "2px 8px",
+            fontSize: "10px",
+            fontWeight: "700",
+            letterSpacing: "0.08em",
+            color: tool.tagColor,
+          }}
+        >
+          {tool.tag}
+        </div>
+
+        {/* Icon */}
+        <div
+          style={{
+            width: "48px",
+            height: "48px",
+            background: `${tool.accent}18`,
+            border: `1px solid ${tool.accent}33`,
+            borderRadius: "12px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            marginBottom: "18px",
+            flexShrink: 0,
+          }}
+        >
+          <Icon size={22} color={tool.accent} />
+        </div>
+
+        <h2
+          style={{
+            fontSize: "19px",
+            fontWeight: "700",
+            letterSpacing: "-0.01em",
+            marginBottom: "8px",
+            fontFamily: "'Playfair Display', serif",
+          }}
+        >
+          {tool.label}
+        </h2>
+        <p
+          style={{
+            color: "#94a3b8",
+            fontSize: "13px",
+            lineHeight: "1.6",
+            marginBottom: "20px",
+            flex: 1,
+          }}
+        >
+          {tool.description}
+        </p>
+
+        {/* Feature list */}
+        <ul
+          style={{ listStyle: "none", padding: 0, marginBottom: "24px" }}
+        >
+          {tool.features.map((f) => (
+            <li
+              key={f}
+              style={{
+                display: "flex",
+                alignItems: "flex-start",
+                gap: "8px",
+                fontSize: "12px",
+                color: "#cbd5e1",
+                marginBottom: "5px",
+              }}
+            >
+              <span
+                style={{
+                  color: tool.accent,
+                  fontSize: "14px",
+                  lineHeight: "1.3",
+                }}
+              >
+                ✓
+              </span>
+              {f}
+            </li>
+          ))}
+        </ul>
+
+        {/* CTA */}
+        <div
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "8px",
+            background: tool.accent,
+            color: "white",
+            borderRadius: "10px",
+            padding: "9px 18px",
+            fontSize: "13px",
+            fontWeight: "600",
+            alignSelf: "flex-start",
+          }}
+        >
+          {tool.cta} <ArrowRight size={13} />
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div
@@ -236,136 +405,34 @@ export default function DashboardHome() {
           </p>
         </div>
 
-        {/* Tool cards — 2×2 grid */}
+        {/* Row 1 — 3 equal columns */}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(3, 1fr)",
+            gap: "20px",
+            marginBottom: "20px",
+          }}
+        >
+          {row1.map((tool) => (
+            <Card key={tool.key} tool={tool} />
+          ))}
+        </div>
+
+        {/* Row 2 — 2 cards centred (each ~48% width, centred via auto margins) */}
         <div
           style={{
             display: "grid",
             gridTemplateColumns: "repeat(2, 1fr)",
             gap: "20px",
+            /* Centre the 2-card row under the 3-card row by capping width */
+            maxWidth: "calc(66.66% + 10px)", /* 2/3 of row-1 + half a gap */
+            margin: "0 auto",
           }}
         >
-          {tools.map((tool) => {
-            const Icon = tool.icon;
-            return (
-              <div
-                key={tool.key}
-                style={{
-                  background: tool.bg,
-                  border: `1px solid ${tool.border}`,
-                  borderRadius: "16px",
-                  padding: "28px",
-                  cursor: "pointer",
-                  transition: "transform 0.2s, box-shadow 0.2s",
-                  position: "relative",
-                  overflow: "hidden",
-                }}
-                onMouseOver={(e) => {
-                  (e.currentTarget as HTMLDivElement).style.transform = "translateY(-3px)";
-                  (e.currentTarget as HTMLDivElement).style.boxShadow = `0 20px 60px ${tool.accent}22`;
-                }}
-                onMouseOut={(e) => {
-                  (e.currentTarget as HTMLDivElement).style.transform = "translateY(0)";
-                  (e.currentTarget as HTMLDivElement).style.boxShadow = "none";
-                }}
-                onClick={() => router.push(tool.href)}
-              >
-                {/* Tag */}
-                <div
-                  style={{
-                    position: "absolute",
-                    top: "18px",
-                    right: "18px",
-                    background: tool.tagBg,
-                    border: `1px solid ${tool.accent}33`,
-                    borderRadius: "6px",
-                    padding: "2px 8px",
-                    fontSize: "10px",
-                    fontWeight: "700",
-                    letterSpacing: "0.08em",
-                    color: tool.tagColor,
-                  }}
-                >
-                  {tool.tag}
-                </div>
-
-                {/* Icon */}
-                <div
-                  style={{
-                    width: "48px",
-                    height: "48px",
-                    background: `${tool.accent}18`,
-                    border: `1px solid ${tool.accent}33`,
-                    borderRadius: "12px",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    marginBottom: "18px",
-                  }}
-                >
-                  <Icon size={22} color={tool.accent} />
-                </div>
-
-                <h2
-                  style={{
-                    fontSize: "19px",
-                    fontWeight: "700",
-                    letterSpacing: "-0.01em",
-                    marginBottom: "8px",
-                    fontFamily: "'Playfair Display', serif",
-                  }}
-                >
-                  {tool.label}
-                </h2>
-                <p
-                  style={{
-                    color: "#94a3b8",
-                    fontSize: "13px",
-                    lineHeight: "1.6",
-                    marginBottom: "20px",
-                  }}
-                >
-                  {tool.description}
-                </p>
-
-                {/* Feature list */}
-                <ul style={{ listStyle: "none", padding: 0, marginBottom: "24px" }}>
-                  {tool.features.map((f) => (
-                    <li
-                      key={f}
-                      style={{
-                        display: "flex",
-                        alignItems: "flex-start",
-                        gap: "8px",
-                        fontSize: "12px",
-                        color: "#cbd5e1",
-                        marginBottom: "5px",
-                      }}
-                    >
-                      <span style={{ color: tool.accent, fontSize: "14px", lineHeight: "1.3" }}>✓</span>
-                      {f}
-                    </li>
-                  ))}
-                </ul>
-
-                {/* CTA */}
-                <div
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: "8px",
-                    background: tool.accent,
-                    color: "white",
-                    borderRadius: "10px",
-                    padding: "9px 18px",
-                    fontSize: "13px",
-                    fontWeight: "600",
-                  }}
-                >
-                  {tool.cta} <ArrowRight size={13} />
-                </div>
-              </div>
-            );
-          })}
+          {row2.map((tool) => (
+            <Card key={tool.key} tool={tool} />
+          ))}
         </div>
 
         {/* Footer strip */}
