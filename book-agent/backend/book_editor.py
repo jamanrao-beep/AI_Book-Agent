@@ -1,20 +1,10 @@
 """
-book_editor.py
-─────────────────────────────────────────────────────────────────────────────
-Conversational AI book editor.
-- Accepts PDF / DOCX / ZIP input
-- Extracts full text and structure
-- Maintains multi-turn conversation history
-- Processes natural-language edit commands:
-    • Rewrite specific chapters or sections
-    • Edit particular pages / paragraphs
-    • Change writing style / tone / theme
-    • Add new chapters or sections
-    • Remove content
-    • Translate the book
-    • Change formatting theme (scifi, romance, academic, etc.)
-- Re-generates PDF + DOCX after every successful edit turn
-- Returns structured diff info + download paths
+book_editor.py — Fixed version
+Key fixes:
+  1. Edit chapters one-by-one for large books to avoid truncation
+  2. Robust JSON extraction with multiple fallback strategies
+  3. Higher max_tokens and smarter payload trimming
+  4. JSON repair for common GPT truncation patterns
 """
 
 import os
@@ -37,7 +27,7 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 MODEL = "gpt-4o"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Text extraction
+# Text extraction (unchanged)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def extract_text_from_docx(path: str) -> str:
@@ -121,7 +111,6 @@ Rules:
 """
 
 def parse_book_structure(raw_text: str, filename: str = "") -> dict:
-    # Truncate if huge (keep first ~80k chars for parsing)
     sample = raw_text[:80000]
     try:
         resp = client.chat.completions.create(
@@ -154,7 +143,154 @@ def parse_book_structure(raw_text: str, filename: str = "") -> dict:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# AI edit processor
+# JSON repair utilities
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _try_parse_json(text: str) -> Optional[dict]:
+    """Attempt multiple strategies to extract valid JSON from text."""
+    # Strategy 1: direct parse
+    try:
+        return json.loads(text)
+    except Exception:
+        pass
+
+    # Strategy 2: find outermost braces
+    s = text.find("{")
+    e = text.rfind("}") + 1
+    if s != -1 and e > s:
+        try:
+            return json.loads(text[s:e])
+        except Exception:
+            pass
+
+    # Strategy 3: try to repair truncated JSON by closing open structures
+    if s != -1:
+        truncated = text[s:]
+        repaired = _repair_truncated_json(truncated)
+        if repaired:
+            try:
+                return json.loads(repaired)
+            except Exception:
+                pass
+
+    return None
+
+
+def _repair_truncated_json(text: str) -> Optional[str]:
+    """
+    Attempt to repair JSON that was cut off mid-stream.
+    Closes unclosed strings, arrays, and objects.
+    """
+    # Count open/close braces and brackets
+    in_string = False
+    escape_next = False
+    depth_brace = 0
+    depth_bracket = 0
+
+    result = list(text)
+    i = 0
+    while i < len(result):
+        ch = result[i]
+        if escape_next:
+            escape_next = False
+        elif ch == '\\' and in_string:
+            escape_next = True
+        elif ch == '"':
+            in_string = not in_string
+        elif not in_string:
+            if ch == '{':
+                depth_brace += 1
+            elif ch == '}':
+                depth_brace -= 1
+            elif ch == '[':
+                depth_bracket += 1
+            elif ch == ']':
+                depth_bracket -= 1
+        i += 1
+
+    # If we're inside a string, close it
+    suffix = ""
+    if in_string:
+        suffix += '"'
+
+    # Close open brackets and braces
+    suffix += "]" * depth_bracket
+    suffix += "}" * depth_brace
+
+    if suffix:
+        return text + suffix
+    return text
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Single-chapter editor (processes one chapter at a time for large books)
+# ─────────────────────────────────────────────────────────────────────────────
+
+CHAPTER_EDIT_SYSTEM = """You are an expert book editor. You will receive ONE chapter of a book and an edit instruction.
+
+Apply the instruction to this chapter ONLY.
+Return ONLY valid JSON — no markdown, no explanation:
+{
+  "title": "<chapter title, updated if requested>",
+  "content": "<full chapter content after edit, newlines as \\n>",
+  "changed": true
+}
+
+If the instruction doesn't apply to this chapter, return the chapter unchanged with "changed": false.
+CRITICAL: Return complete content, never truncate with placeholders.
+"""
+
+def _edit_single_chapter(chapter: dict, instruction: str, book_title: str, chapter_idx: int, total_chapters: int) -> dict:
+    """Edit a single chapter. Returns the (possibly modified) chapter dict."""
+    # Trim very long chapters to fit context
+    content = chapter.get("content", "")
+    max_content = 30000
+    truncated = len(content) > max_content
+    if truncated:
+        content = content[:max_content] + "\n\n[REST OF CHAPTER — preserve in output]"
+
+    payload = json.dumps({
+        "title": chapter.get("title", ""),
+        "content": content
+    }, ensure_ascii=False)
+
+    messages = [
+        {"role": "system", "content": CHAPTER_EDIT_SYSTEM},
+        {"role": "user", "content": (
+            f"Book: \"{book_title}\" | Chapter {chapter_idx + 1} of {total_chapters}\n"
+            f"Edit instruction: {instruction}\n\n"
+            f"Chapter JSON:\n{payload}"
+        )}
+    ]
+
+    try:
+        resp = client.chat.completions.create(
+            model=MODEL,
+            messages=messages,
+            max_tokens=4096,
+            temperature=0.7,
+        )
+        raw = resp.choices[0].message.content.strip()
+        raw = re.sub(r'^```json\s*', '', raw, flags=re.IGNORECASE)
+        raw = re.sub(r'\s*```$', '', raw)
+
+        result = _try_parse_json(raw)
+        if result and isinstance(result, dict):
+            return {
+                "chapter_number": chapter.get("chapter_number", chapter_idx + 1),
+                "title": result.get("title", chapter.get("title", "")),
+                "content": result.get("content", chapter.get("content", "")),
+                "_changed": result.get("changed", True),
+            }
+    except Exception as ex:
+        print(f"  ⚠️  Chapter {chapter_idx + 1} edit failed: {ex}")
+
+    # Return original chapter on failure
+    return {**chapter, "_changed": False}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Whole-book editor (for small books — original approach, improved)
 # ─────────────────────────────────────────────────────────────────────────────
 
 EDITOR_SYSTEM = """You are an expert book editor and author assistant.
@@ -163,81 +299,30 @@ The user provides a book (as structured JSON) and a natural-language edit instru
 You MUST:
 1. Apply the requested edit faithfully and thoroughly.
 2. Keep all other content EXACTLY as-is unless explicitly asked to change it.
-3. If asked to change the theme/style (e.g. 'make it sci-fi', 'romantic tone', 'academic'), rewrite
-   chapter content in that style while preserving the plot/facts/structure.
-4. If asked to edit specific chapters, pages, or paragraphs, locate and edit ONLY those.
-5. If asked to add content, insert it at the appropriate location.
-6. If asked to remove content, omit it cleanly.
-7. IMPORTANT: Always return the COMPLETE book with ALL chapters fully written out.
-   Never truncate, summarise, or use placeholders like "[content continues...]" in your output.
+3. If asked to change the theme/style (e.g. 'make it sci-fi', 'romantic tone', 'academic'), rewrite chapter content in that style while preserving the plot/facts/structure.
+4. IMPORTANT: Always return the COMPLETE book with ALL chapters fully written out.
 
 Respond ONLY with valid JSON:
 {
-  "title": "<book title — update only if user explicitly asked>",
+  "title": "<book title>",
   "author": "<author>",
   "chapters": [
     {
       "chapter_number": 1,
       "title": "<chapter title>",
-      "content": "<full chapter content after edit>"
+      "content": "<full chapter content after edit, newlines as \\n>"
     }
   ],
-  "edit_summary": "<2-3 sentence plain English summary of what you changed>",
+  "edit_summary": "<2-3 sentence summary of what you changed>",
   "chapters_changed": [<list of chapter numbers that were modified>]
 }
-CRITICAL: You must return valid, minified JSON. 
-Ensure all newlines in the "content" field are escaped as '\\n'.
-Do not include any conversational text, explanations, or Markdown formatting.
-Output strictly the JSON object.You MUST return valid, minified JSON. 
-Do not include conversational text, explanations, or Markdown code blocks.
-Ensure all newlines in the "content" field are escaped as '\\n'.
-Your output must be a single JSON object.
+CRITICAL: Return valid JSON. Never truncate content with placeholders.
 """
 
 
-def _build_book_payload(book_structure: dict, max_chars: int = 60000) -> str:
-    """
-    Intelligently serialize the book for the AI prompt.
-    If the full JSON fits within max_chars, send it as-is.
-    Otherwise, trim each chapter's content proportionally so we never
-    hard-truncate mid-JSON (which confuses the model into ignoring the book).
-    """
-    full_json = json.dumps(book_structure, ensure_ascii=False)
-    if len(full_json) <= max_chars:
-        return full_json
-
-    chapters = book_structure.get("chapters", [])
-    n = len(chapters)
-    if n == 0:
-        return full_json[:max_chars]
-
-    # Reserve space for metadata + chapter titles/numbers (≈500 chars each)
-    overhead = 500 + n * 200
-    available_for_content = max(max_chars - overhead, 2000)
-    per_chapter = available_for_content // n
-
-    trimmed_chapters = []
-    for ch in chapters:
-        content = ch.get("content", "")
-        if len(content) > per_chapter:
-            # Trim to per_chapter chars, but end on a sentence boundary if possible
-            trimmed = content[:per_chapter]
-            last_period = trimmed.rfind(".")
-            if last_period > per_chapter * 0.7:
-                trimmed = trimmed[:last_period + 1]
-            content = trimmed + "\n\n[CHAPTER CONTINUES — keep all remaining content unchanged in your output]"
-        trimmed_chapters.append({
-            "chapter_number": ch["chapter_number"],
-            "title": ch["title"],
-            "content": content,
-        })
-
-    trimmed_book = {
-        "title": book_structure.get("title", ""),
-        "author": book_structure.get("author", ""),
-        "chapters": trimmed_chapters,
-    }
-    return json.dumps(trimmed_book, ensure_ascii=False)
+def _estimate_tokens(text: str) -> int:
+    """Rough token estimate: ~4 chars per token."""
+    return len(text) // 4
 
 
 def apply_edit(
@@ -247,22 +332,45 @@ def apply_edit(
 ) -> dict:
     """
     Apply a natural-language edit instruction to the book structure.
-    Returns updated book structure dict with extra keys: edit_summary, chapters_changed.
+    
+    Strategy:
+    - Small books (< 8k tokens): send whole book to GPT in one shot
+    - Large books: edit chapter by chapter, then synthesize summary
     """
-    book_payload = _build_book_payload(book_structure, max_chars=60000)
+    chapters = book_structure.get("chapters", [])
+    book_title = book_structure.get("title", "Untitled")
+    total_chars = sum(len(ch.get("content", "")) for ch in chapters)
+    estimated_tokens = _estimate_tokens(total_chars)
 
-    # Keep last 6 turns of history to stay within context
-    recent_history = conversation_history[-6:] if len(conversation_history) > 6 else conversation_history
+    print(f"  📚 Book: {len(chapters)} chapters, ~{estimated_tokens} tokens")
 
+    # For large books, edit chapter by chapter
+    if estimated_tokens > 6000 or len(chapters) > 3:
+        return _apply_edit_chunked(book_structure, user_instruction, conversation_history)
+
+    # For small books, use the original whole-book approach
+    return _apply_edit_whole_book(book_structure, user_instruction, conversation_history)
+
+
+def _apply_edit_whole_book(
+    book_structure: dict,
+    user_instruction: str,
+    conversation_history: list[dict],
+) -> dict:
+    """Edit small books in a single API call."""
+    book_json = json.dumps(book_structure, ensure_ascii=False)
+
+    # Trim if still too large
+    if len(book_json) > 50000:
+        book_json = book_json[:50000] + '...(truncated)}'
+
+    recent_history = conversation_history[-4:] if len(conversation_history) > 4 else conversation_history
     messages = [{"role": "system", "content": EDITOR_SYSTEM}]
     for msg in recent_history:
         messages.append(msg)
     messages.append({
         "role": "user",
-        "content": (
-            f"Current book (JSON):\n{book_payload}\n\n"
-            f"Edit instruction: {user_instruction}"
-        ),
+        "content": f"Current book (JSON):\n{book_json}\n\nEdit instruction: {user_instruction}"
     })
 
     resp = client.chat.completions.create(
@@ -272,32 +380,91 @@ def apply_edit(
         temperature=0.7,
     )
     raw = resp.choices[0].message.content.strip()
-    
     raw = re.sub(r'^```json\s*', '', raw, flags=re.IGNORECASE)
     raw = re.sub(r'\s*```$', '', raw)
-    
-    # 2. Try parsing directly
+
+    result = _try_parse_json(raw)
+    if result and isinstance(result, dict) and "chapters" in result:
+        return result
+
+    raise ValueError(
+        "The AI returned an invalid response for this edit. "
+        "Try breaking your request into smaller, more specific edits."
+    )
+
+
+def _apply_edit_chunked(
+    book_structure: dict,
+    user_instruction: str,
+    conversation_history: list[dict],
+) -> dict:
+    """
+    Edit large books chapter by chapter.
+    Returns a merged result dict with edit_summary and chapters_changed.
+    """
+    chapters = book_structure.get("chapters", [])
+    book_title = book_structure.get("title", "Untitled")
+    author = book_structure.get("author", "")
+
+    updated_chapters = []
+    changed_chapter_numbers = []
+
+    print(f"  🔄 Chunked edit: processing {len(chapters)} chapters individually...")
+
+    for idx, chapter in enumerate(chapters):
+        print(f"    Chapter {idx + 1}/{len(chapters)}: {chapter.get('title', '')[:40]}")
+        result_ch = _edit_single_chapter(chapter, user_instruction, book_title, idx, len(chapters))
+
+        ch_number = result_ch.get("chapter_number", idx + 1)
+        if result_ch.pop("_changed", False):
+            changed_chapter_numbers.append(ch_number)
+
+        updated_chapters.append(result_ch)
+
+    # Generate a summary of the changes
+    edit_summary = _generate_edit_summary(user_instruction, changed_chapter_numbers, book_title)
+
+    return {
+        "title": book_title,
+        "author": author,
+        "chapters": updated_chapters,
+        "edit_summary": edit_summary,
+        "chapters_changed": changed_chapter_numbers,
+    }
+
+
+def _generate_edit_summary(instruction: str, changed_chapters: list, book_title: str) -> str:
+    """Generate a short summary of what was edited."""
+    if not changed_chapters:
+        return f"The edit '{instruction}' was applied. No chapters required significant changes."
+
+    ch_list = ", ".join(f"Chapter {n}" for n in changed_chapters[:5])
+    if len(changed_chapters) > 5:
+        ch_list += f" and {len(changed_chapters) - 5} more"
+
     try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        # 3. Fallback: Search for the first '{' and last '}'
-        s = raw.find("{"); 
-        e = raw.rfind("}") + 1
-        if s == -1 or e == 1:
-            raise ValueError("No valid JSON structure found.")
-        if s != -1 and e != 0 and e > s:
-            try:
-                return json.loads(raw[s:e])
-            except Exception:
-                pass
-        
-        # If response was truncated (no closing brace)
-        if len(raw) > 4000:
-            raise ValueError("Edit failed: Output truncated. Please try a smaller, more specific edit request.")
-        raise ValueError("Edit failed: AI returned invalid JSON format.")
+        resp = client.chat.completions.create(
+            model=MODEL,
+            messages=[{
+                "role": "user",
+                "content": (
+                    f"Write a 2-sentence summary of this book edit:\n"
+                    f"Book: '{book_title}'\n"
+                    f"Edit instruction: '{instruction}'\n"
+                    f"Chapters modified: {ch_list}\n"
+                    f"Keep it concise and professional."
+                )
+            }],
+            max_tokens=150,
+            temperature=0.5,
+        )
+        return resp.choices[0].message.content.strip()
+    except Exception:
+        return f"Applied '{instruction}' to {ch_list}."
+
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Theme definitions for PDF/DOCX rendering
+# Theme definitions (unchanged)
 # ─────────────────────────────────────────────────────────────────────────────
 
 THEMES = {
@@ -320,20 +487,18 @@ def _hex_to_rgb(h: str):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# PDF generator (theme-aware)
+# PDF generator (unchanged)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def generate_edited_pdf(book: dict, output_path: str, theme_name: str = "premium") -> str:
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.units import mm
     from reportlab.lib.styles import ParagraphStyle
-    from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT
+    from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY
     from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, HRFlowable
-    from reportlab.lib.colors import HexColor, Color, white, black
+    from reportlab.lib.colors import HexColor
 
     theme = THEMES.get(theme_name, THEMES["premium"])
-    is_dark = _hex_to_rgb(theme["bg"])[0] < 0.5
-
     BG     = HexColor(theme["bg"])
     ACCENT = HexColor(theme["accent"])
     TITLE  = HexColor(theme["title_col"])
@@ -382,7 +547,6 @@ def generate_edited_pdf(book: dict, output_path: str, theme_name: str = "premium
         topMargin=MARGIN, bottomMargin=18 * mm,
         title=book.get("title", "Book"),
     )
-    doc.title = book.get("title", "Book")
 
     story = []
     story.append(Spacer(1, 52 * mm))
@@ -402,7 +566,6 @@ def generate_edited_pdf(book: dict, output_path: str, theme_name: str = "premium
         for para in ch.get("content", "").split("\n\n"):
             para = para.strip()
             if para:
-                # Escape XML special characters for ReportLab
                 safe = para.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
                 story.append(Paragraph(safe, body_s))
         story.append(PageBreak())
@@ -412,7 +575,7 @@ def generate_edited_pdf(book: dict, output_path: str, theme_name: str = "premium
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# DOCX generator (theme-aware)
+# DOCX generator (unchanged)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def generate_edited_docx(book: dict, output_path: str, theme_name: str = "premium") -> str:
@@ -444,7 +607,6 @@ def generate_edited_docx(book: dict, output_path: str, theme_name: str = "premiu
     style_n.font.name = "Courier New" if is_courier else "Calibri"
     style_n.font.size = Pt(11)
 
-    # Cover
     for _ in range(4): doc.add_paragraph()
     t = doc.add_paragraph(); t.alignment = WD_ALIGN_PARAGRAPH.CENTER
     r = t.add_run(book.get("title", "Untitled"))
@@ -482,7 +644,7 @@ def generate_edited_docx(book: dict, output_path: str, theme_name: str = "premiu
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Main orchestrator: process one chat turn
+# Main orchestrator
 # ─────────────────────────────────────────────────────────────────────────────
 
 def process_editor_turn(
@@ -493,22 +655,8 @@ def process_editor_turn(
     theme: str = "premium",
     job_id: str = "",
 ) -> dict:
-    """
-    Process one conversational editing turn.
-    Returns:
-    {
-        "updated_book": <new book structure dict>,
-        "edit_summary": "...",
-        "chapters_changed": [...],
-        "pdf_path": "...",
-        "docx_path": "...",
-        "version": <int>,
-        "theme": "..."
-    }
-    """
     os.makedirs(output_dir, exist_ok=True)
 
-    # Detect if user wants a theme change in the message
     theme_keywords = list(THEMES.keys())
     detected_theme = theme
     msg_lower = user_message.lower()
@@ -517,14 +665,14 @@ def process_editor_turn(
             detected_theme = kw
             break
 
-    # Apply the edit
-    updated = apply_edit(book_structure, user_message, conversation_history)
+    try:
+        updated = apply_edit(book_structure, user_message, conversation_history)
+    except Exception as e:
+        raise ValueError(f"Edit failed: {str(e)}")
 
-    # Extract edit metadata
     edit_summary = updated.pop("edit_summary", "Changes applied.")
     chapters_changed = updated.pop("chapters_changed", [])
 
-    # Generate outputs
     safe_title = "".join(c for c in updated.get("title", "book") if c.isalnum() or c in (" ", "-", "_")).strip() or "book"
     version_id = job_id or uuid.uuid4().hex
     pdf_path  = os.path.join(output_dir, f"{safe_title}_{version_id}.pdf")
