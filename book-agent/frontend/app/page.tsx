@@ -48,7 +48,7 @@ export default function Home() {
           >
             <FileText size={14} color="white" />
           </div>
-          <span style={{ fontWeight: "700", fontSize: "15px" }}>
+          <span style={{ fontWeight: "700", fontSize: "15px", color: "#2a2929ff" }}>
             Editorial AI
           </span>
         </div>
@@ -133,7 +133,7 @@ export default function Home() {
           style={{
             fontSize: "56px",
             fontWeight: "800",
-            color: '#2b2b2bff',
+            color: '#2d2c2cff',
             lineHeight: "1.1",
             letterSpacing: "-0.03em",
             marginTop: "36px",
@@ -569,7 +569,7 @@ export default function Home() {
           <span style={{ cursor: "pointer" }}>Documentation</span>
         </div>
         <span style={{ fontSize: "12px", color: "#aaa" }}>
-          © 2024 Editorial AI Suite. Powered by OpenAI.
+          © 2026 Editorial AI Suite
         </span>
       </footer>
     </div>
