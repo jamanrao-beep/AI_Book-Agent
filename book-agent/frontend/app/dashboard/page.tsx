@@ -81,7 +81,7 @@ export default function DashboardHome() {
       key: "editor",
       icon: PencilLine,
       label: "Book Editor",
-      tag: "NEW",
+      tag: "EXPERT",
       tagColor: "#f472b6",
       tagBg: "rgba(244,114,182,0.12)",
       description:
@@ -123,7 +123,7 @@ export default function DashboardHome() {
       key: "translate",
       icon: Languages,
       label: "Book Translator",
-      tag: "NEW",
+      tag: "MULTILINGUAL",
       tagColor: "#0ea5e9",
       tagBg: "rgba(14,165,233,0.12)",
       description:
@@ -166,7 +166,7 @@ export default function DashboardHome() {
       key: "layout",
       icon: LayoutTemplate,
       label: "Layout Designer",
-      tag: "NEW",
+      tag: "DESIGNER",
       tagColor: "#f59e0b",
       tagBg: "rgba(245,158,11,0.12)",
       description:
@@ -474,10 +474,14 @@ export default function DashboardHome() {
         {/* Row 1 — 3 equal columns */}
         <div
           style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(3, 1fr)",
+            display: "flex",
+            flexDirection: "row",
             gap: "20px",
             marginBottom: "20px",
+            justifyContent: "center",
+            alignItems: "center",
+            justifyItems: "center",
+
           }}
         >
           {row1.map((tool) => (
@@ -500,7 +504,15 @@ export default function DashboardHome() {
         </div>
 
         {/* Row 3 — Layout Designer full-width feature card */}
-        <div style={{ marginBottom: "20px" }}>
+        <div style={{
+          display: "flex",
+          flexDirection: "row",
+          gap: "20px",
+          marginBottom: "20px",
+          justifyContent: "center",
+          alignItems: "center",
+          justifyItems: "center",
+        }}>
           {row3.map((tool) => (
             <Card key={tool.key} tool={tool} wide />
           ))}
