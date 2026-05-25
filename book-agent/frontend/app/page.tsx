@@ -14,7 +14,7 @@ export default function Home() {
   return (
     <div
       style={{
-        background: "#ffffff",
+        background: "#f7f2e4ff",
         minHeight: "100vh",
         fontFamily: "'DM Sans', sans-serif",
       }}
@@ -27,7 +27,7 @@ export default function Home() {
           justifyContent: "space-between",
           padding: "0 48px",
           height: "56px",
-          borderBottom: "1px solid #e8e8e4",
+          borderBottom: "1px solid #efefcfff",
           position: "sticky",
           top: 0,
           background: "white",
@@ -56,7 +56,7 @@ export default function Home() {
           <span
             style={{
               fontSize: "12px",
-              color: "#888",
+              color: "#262626ff",
               display: "flex",
               alignItems: "center",
               gap: "6px",
@@ -76,7 +76,7 @@ export default function Home() {
           <Link
             href="/login"
             style={{
-              color: "#555",
+              color: "#262626ff",
               fontSize: "14px",
               fontWeight: "500",
               padding: "6px 14px",
@@ -133,6 +133,7 @@ export default function Home() {
           style={{
             fontSize: "56px",
             fontWeight: "800",
+            color: '#2b2b2bff',
             lineHeight: "1.1",
             letterSpacing: "-0.03em",
             marginTop: "36px",
@@ -286,7 +287,7 @@ export default function Home() {
             <div
               style={{
                 fontSize: "10px",
-                color: "#2563eb",
+                color: "#0c43bbff",
                 fontWeight: "700",
                 letterSpacing: "0.1em",
                 marginBottom: "8px",
@@ -300,11 +301,12 @@ export default function Home() {
                 fontWeight: "800",
                 letterSpacing: "-0.02em",
                 fontFamily: "Playfair Display, serif",
+                color: '#2b2b2bff',
               }}
             >
               {s.value}
             </div>
-            <div style={{ fontSize: "13px", color: "#888", marginTop: "4px" }}>
+            <div style={{ fontSize: "13px", color: "#2a2929ff", marginTop: "4px" }}>
               {s.sub}
             </div>
           </div>
@@ -319,7 +321,7 @@ export default function Home() {
           <div
             style={{
               fontSize: "11px",
-              color: "#2563eb",
+              color: "#0c43bbff",
               fontWeight: "700",
               letterSpacing: "0.1em",
               marginBottom: "12px",
@@ -331,6 +333,7 @@ export default function Home() {
             style={{
               fontSize: "40px",
               fontWeight: "800",
+              color: '#2b2b2bff',
               letterSpacing: "-0.02em",
               fontFamily: "Playfair Display, serif",
             }}
@@ -370,7 +373,7 @@ export default function Home() {
                 width: "48px",
                 height: "48px",
                 borderRadius: "8px",
-                background: i === 0 ? "#1a1a1a" : "#f4f4f0",
+                background: "#1a1a1a",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
@@ -381,7 +384,7 @@ export default function Home() {
                 style={{
                   fontSize: "15px",
                   fontWeight: "700",
-                  color: i === 0 ? "white" : "#888",
+                  color: "white",
                 }}
               >
                 {s.n}
@@ -393,6 +396,7 @@ export default function Home() {
                   fontWeight: "700",
                   fontSize: "18px",
                   marginBottom: "8px",
+                  color: '#2b2b2bff',
                 }}
               >
                 {s.title}
@@ -472,6 +476,7 @@ export default function Home() {
                   fontWeight: "600",
                   fontSize: "15px",
                   marginBottom: "6px",
+                  color: '#2b2b2bff',
                 }}
               >
                 {f.title}
