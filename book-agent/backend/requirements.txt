@@ -10,6 +10,5 @@ python-multipart
 pdfplumber
 striprtf
 pypdf
-pdfplumber
 pymupdf
 pdf2image
