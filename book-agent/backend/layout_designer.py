@@ -38,7 +38,12 @@ from dotenv import load_dotenv
 from openai import OpenAI
 
 load_dotenv()
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+_api_key = os.getenv("OPENAI_API_KEY")
+if not _api_key:
+    raise RuntimeError(
+        "OPENAI_API_KEY is not set. Add it to your .env file or environment variables."
+    )
+client = OpenAI(api_key=_api_key)
 MODEL = "gpt-4o"
 
 
@@ -483,15 +488,18 @@ def generate_layout_concept(
             {"role": "user",   "content": user_msg},
         ],
         temperature=0.7,
-        max_tokens=1000,
+        max_tokens=1500,
     )
     raw = response.choices[0].message.content.strip()
     raw = raw.replace("```json", "").replace("```", "").strip()
     s = raw.find("{")
     e = raw.rfind("}") + 1
     if s == -1 or e == 0:
-        raise ValueError("No JSON returned by the layout AI.")
-    concept = json.loads(raw[s:e])
+        raise ValueError(f"No JSON returned by the layout AI. Raw response: {raw[:300]}")
+    try:
+        concept = json.loads(raw[s:e])
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Layout AI returned invalid JSON: {exc}. Raw snippet: {raw[s:s+200]}") from exc
 
     # ── Normalise & clamp ─────────────────────────────────────────────────────
     # Use profile defaults as fallbacks, then hard-coded universal fallbacks
@@ -874,6 +882,10 @@ def design_layout(
     if body_font_size:       override_hints.append(f"body font size MUST be {body_font_size}pt")
     if chapter_font_size:    override_hints.append(f"chapter font size MUST be {chapter_font_size}pt")
     if line_spacing:         override_hints.append(f"line spacing MUST be {line_spacing}×")
+    if margin_top_mm is not None:    override_hints.append(f"margin top MUST be {margin_top_mm}mm")
+    if margin_bottom_mm is not None: override_hints.append(f"margin bottom MUST be {margin_bottom_mm}mm")
+    if margin_left_mm is not None:   override_hints.append(f"margin left MUST be {margin_left_mm}mm")
+    if margin_right_mm is not None:  override_hints.append(f"margin right MUST be {margin_right_mm}mm")
     if show_drop_cap is not None:
         override_hints.append("drop caps: " + ("ENABLED" if show_drop_cap else "DISABLED"))
     if show_page_numbers is not None:
@@ -881,21 +893,23 @@ def design_layout(
 
     effective_instructions = design_instructions or ""
 
-    # Visual template description (injected as extra instruction)
-    if visual_template and not effective_instructions:
-        _TEMPLATE_HINTS = {
-            "classic_novel":    "Classic cream pages with serif fonts, generous margins, drop caps and ornamental chapter dividers — think vintage Penguin Classics.",
-            "premium_hardcover":"Luxury dark background (#0f0f0f), cream/gold text, gold accent (#c8a200), wide margins — elegant premium edition.",
-            "modern_minimal":   "Pure white page, clean Helvetica, minimal decoration, thin accent rule under chapter titles, airy spacing.",
-            "sanskrit_style":   "Warm ivory page, saffron/gold accent (#c8830a), ornate ornament dividers, classic serif — traditional sacred text aesthetic.",
-            "school_guide":     "White page, structured sans-serif layout, blue accent (#2563eb), numbered chapters, no drop cap — clear academic style.",
-            "thriller_dark":    "Dark page (#111827) with near-white body text (#f3f4f6), red accent (#ef4444), high contrast, sharp Helvetica headings.",
-            "retro_vintage":    "Warm sepia page (#f5ead0), brown text, antique brown accent, italic serif body, diagonal/decorative ornament.",
-            "poetry_bloom":     "Soft blush page (#fff0f5), purple/magenta accent (#d63384), italic serif body, floral ornaments, wide margins.",
-        }
+    # Visual template description — always injected, prepended before any
+    # user design_instructions so both are honoured together.
+    _TEMPLATE_HINTS = {
+        "classic_novel":    "Classic cream pages with serif fonts, generous margins, drop caps and ornamental chapter dividers — think vintage Penguin Classics.",
+        "premium_hardcover":"Luxury dark background (#0f0f0f), cream/gold text, gold accent (#c8a200), wide margins — elegant premium edition.",
+        "modern_minimal":   "Pure white page, clean Helvetica, minimal decoration, thin accent rule under chapter titles, airy spacing.",
+        "sanskrit_style":   "Warm ivory page, saffron/gold accent (#c8830a), ornate ornament dividers, classic serif — traditional sacred text aesthetic.",
+        "school_guide":     "White page, structured sans-serif layout, blue accent (#2563eb), numbered chapters, no drop cap — clear academic style.",
+        "thriller_dark":    "Dark page (#111827) with near-white body text (#f3f4f6), red accent (#ef4444), high contrast, sharp Helvetica headings.",
+        "retro_vintage":    "Warm sepia page (#f5ead0), brown text, antique brown accent, italic serif body, diagonal/decorative ornament.",
+        "poetry_bloom":     "Soft blush page (#fff0f5), purple/magenta accent (#d63384), italic serif body, floral ornaments, wide margins.",
+    }
+    if visual_template:
         hint = _TEMPLATE_HINTS.get(visual_template, "")
         if hint:
-            effective_instructions = hint
+            # Prepend template hint; user instructions (if any) refine further
+            effective_instructions = hint + (("\n" + effective_instructions) if effective_instructions else "")
 
     if override_hints:
         hint_str = "; ".join(override_hints)
