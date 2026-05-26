@@ -1007,6 +1007,8 @@ def _run_layout_job(
     page_height_mm: float,
     book_title: str,
     design_instructions: str,
+    book_type: Optional[str] = None,
+    visual_template: Optional[str] = None,
     # Typography overrides — None means "let AI decide"
     body_font: Optional[str] = None,
     chapter_font: Optional[str] = None,
@@ -1034,6 +1036,8 @@ def _run_layout_job(
             page_height_mm=page_height_mm,
             book_title=book_title,
             design_instructions=design_instructions,
+            book_type=book_type,
+            visual_template=visual_template,
             progress_callback=progress,
             # pass overrides through
             body_font=body_font,
@@ -1078,6 +1082,8 @@ async def design_layout_endpoint(
     page_height_mm: float = Form(default=297.0),
     book_title: str = Form(default=""),
     design_instructions: str = Form(default=""),
+    book_type: Optional[str] = Form(default=None),  
+    visual_template: Optional[str] = Form(default=None),
     # Typography overrides — all optional, empty string = let AI decide
     body_font: Optional[str] = Form(default=None),
     chapter_font: Optional[str] = Form(default=None),
@@ -1154,6 +1160,8 @@ async def design_layout_endpoint(
             design_instructions.strip(),
         ),
         kwargs=dict(
+            book_type=book_type if book_type else None,
+            visual_template=visual_template if visual_template else None,
             body_font=body_font if body_font else None,
             chapter_font=chapter_font if chapter_font else None,
             body_font_size=_float_or_none(body_font_size),
