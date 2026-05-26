@@ -1,5 +1,5 @@
 "use client";
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import {
     ArrowLeft,
@@ -55,7 +55,7 @@ const BOOK_TYPES = [
         bg: "rgba(99,102,241,0.08)",
         border: "rgba(99,102,241,0.3)",
         defaultSize: { label: "5×8 (127 × 203 mm)", w: 127, h: 203 },
-        aiHint: "Novels के लिए 5×8 trim size popular है",
+        aiHint: "5×8 trim size is most popular for novels",
         designHint: "Classic readable serif typography with generous margins and drop caps",
     },
     {
@@ -68,46 +68,46 @@ const BOOK_TYPES = [
         bg: "rgba(14,165,233,0.08)",
         border: "rgba(14,165,233,0.3)",
         defaultSize: { label: "A4 (210 × 297 mm)", w: 210, h: 297 },
-        aiHint: "Academic books के लिए A4 या 6×9 best है",
+        aiHint: "A4 or 6×9 works best for academic books",
         designHint: "School Guide Style — clean headers, structured layout, academic typography",
     },
     {
         key: "religious",
         icon: "🕌",
         label: "Religious / Spiritual",
-        subtitle: "Granth / Pravachan / Dharmik",
+        subtitle: "Scripture / Discourse / Devotional",
         description: "Decorative headings, ornate chapter dividers",
         accent: "#f59e0b",
         bg: "rgba(245,158,11,0.08)",
         border: "rgba(245,158,11,0.3)",
         defaultSize: { label: "A5 (148 × 210 mm)", w: 148, h: 210 },
-        aiHint: "Dharmik granths के लिए A5 traditional है",
+        aiHint: "A5 is the traditional size for religious texts",
         designHint: "Bhagavad Gita Style — warm cream pages, decorative ornaments, classic serif",
     },
     {
         key: "poetry",
         icon: "✍️",
         label: "Poetry / Shayari",
-        subtitle: "Kavita / Nazm / Ghazal",
+        subtitle: "Verse / Lyric / Ghazal",
         description: "Preserved line breaks, elegant spacing",
         accent: "#ec4899",
         bg: "rgba(236,72,153,0.08)",
         border: "rgba(236,72,153,0.3)",
         defaultSize: { label: "5×8 (127 × 203 mm)", w: 127, h: 203 },
-        aiHint: "Poetry के लिए 5×8 intimate size perfect है",
+        aiHint: "5×8 is the perfect intimate size for poetry",
         designHint: "Romance — elegant serif, generous whitespace, preserved poetic line breaks",
     },
     {
         key: "children",
         icon: "👶",
         label: "Children's Book",
-        subtitle: "Bacchon ki Kahani",
+        subtitle: "Stories / Picture Books",
         description: "Large fonts, image spaces, playful layout",
         accent: "#10b981",
         bg: "rgba(16,185,129,0.08)",
         border: "rgba(16,185,129,0.3)",
         defaultSize: { label: "Square (210 × 210 mm)", w: 210, h: 210 },
-        aiHint: "Children's books के लिए square format fun लगता है",
+        aiHint: "Square format is fun and popular for children's books",
         designHint: "Children's book — large playful fonts, pastel colours, wide margins for illustrations",
     },
     {
@@ -120,8 +120,21 @@ const BOOK_TYPES = [
         bg: "rgba(139,92,246,0.08)",
         border: "rgba(139,92,246,0.3)",
         defaultSize: { label: "US Trade 6×9 (152 × 229 mm)", w: 152, h: 229 },
-        aiHint: "Business books के लिए 6×9 professional standard है",
+        aiHint: "6×9 is the professional standard for business books",
         designHint: "Modern minimalist — clean sans-serif, bold chapter headings, structured layout",
+    },
+    {
+        key: "custom",
+        icon: "✏️",
+        label: "Custom / Other",
+        subtitle: "Define your own style",
+        description: "Describe exactly what you want — AI follows your instructions",
+        accent: "#64748b",
+        bg: "rgba(100,116,139,0.08)",
+        border: "rgba(100,116,139,0.3)",
+        defaultSize: { label: "A4 (210 × 297 mm)", w: 210, h: 297 },
+        aiHint: "You'll provide a custom description — AI will follow your exact instructions",
+        designHint: "",
     },
 ];
 
@@ -207,6 +220,16 @@ const VISUAL_TEMPLATES = [
         mood: "Romantic · Delicate · Poetic",
         designText: "Romance — blush tones, italic serif, floral ornaments, poetic spacing",
     },
+    {
+        key: "custom",
+        name: "Custom / Other",
+        emoji: "✏️",
+        desc: "Describe your own style",
+        colors: ["#1e293b", "#e2e8f0", "#f59e0b", "#475569"],
+        font: "",
+        mood: "Your Vision · AI Executed",
+        designText: "",
+    },
 ];
 
 // ─── Book Size Visual Options ─────────────────────────────────────────────────
@@ -215,6 +238,7 @@ const SIZE_VISUAL = [
     { key: "55x85", label: "5.5 × 8.5", desc: "Standard", w: 140, h: 216, popular: "Self-help" },
     { key: "6x9", label: "6 × 9", desc: "Trade size", w: 152, h: 229, popular: "Business" },
     { key: "A4", label: "A4", desc: "Print/Academic", w: 210, h: 297, popular: "Academic" },
+    { key: "custom", label: "Custom", desc: "Any size", w: 0, h: 0, popular: "" },
 ];
 
 // ─── Font Preference Buttons ──────────────────────────────────────────────────
@@ -223,6 +247,7 @@ const FONT_PREFS = [
     { key: "traditional", label: "Traditional", font: "Times-Roman", desc: "Classic serif" },
     { key: "premium", label: "Premium", font: "Times-Italic", desc: "Elegant italic" },
     { key: "readable", label: "Easy to Read", font: "Helvetica", desc: "High readability" },
+    { key: "custom", label: "Custom / Other", font: "", desc: "Describe your own preference" },
 ];
 
 // ─── Spacing Options ──────────────────────────────────────────────────────────
@@ -230,6 +255,7 @@ const SPACING_OPTS = [
     { key: "compact", label: "Compact", value: "1.3", desc: "More text per page" },
     { key: "balanced", label: "Balanced", value: "1.5", desc: "Recommended", popular: true },
     { key: "spacious", label: "Spacious", value: "1.8", desc: "Airy, easy reading" },
+    { key: "custom", label: "Custom / Other", value: "", desc: "Describe your own spacing" },
 ];
 
 // ─── Advanced font options ────────────────────────────────────────────────────
@@ -465,6 +491,10 @@ export default function LayoutDesignerPage() {
     const [file, setFile] = useState<File | null>(null);
     const [dragging, setDragging] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+    // Cleanup polling on unmount
+    useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
 
     // ── Book type & template ──────────────────────────────────────────────────
     const [bookTypeKey, setBookTypeKey] = useState<string | null>(null);
@@ -495,6 +525,14 @@ export default function LayoutDesignerPage() {
     const [pageNumbers, setPageNumbers] = useState<boolean | null>(null);
     const [showTypoPanel, setShowTypoPanel] = useState(false);
 
+    // ── Custom / Other inputs ─────────────────────────────────────────────────
+    const [customBookTypeDesc, setCustomBookTypeDesc] = useState("");
+    const [customTemplateDesc, setCustomTemplateDesc] = useState("");
+    const [customSizeW, setCustomSizeW] = useState(210);
+    const [customSizeH, setCustomSizeH] = useState(297);
+    const [customFontDesc, setCustomFontDesc] = useState("");
+    const [customSpacingDesc, setCustomSpacingDesc] = useState("");
+
     // ── Job state ─────────────────────────────────────────────────────────────
     const [jobId, setJobId] = useState<string | null>(null);
     const [stage, setStage] = useState("");
@@ -513,8 +551,13 @@ export default function LayoutDesignerPage() {
 
     const preset = PAGE_PRESETS[presetIndex];
     const isCustom = preset.label === "Custom";
-    const pageW = showAdvanced ? (isCustom ? customW : preset.w) : selectedSize.w;
-    const pageH = showAdvanced ? (isCustom ? customH : preset.h) : selectedSize.h;
+    const isCustomSizeKey = selectedSizeKey === "custom";
+    const pageW = showAdvanced
+        ? (isCustom ? customW : preset.w)
+        : (isCustomSizeKey ? customSizeW : selectedSize.w);
+    const pageH = showAdvanced
+        ? (isCustom ? customH : preset.h)
+        : (isCustomSizeKey ? customSizeH : selectedSize.h);
 
     const activeOverrides = [bodyFont, chapterFont, bodyFontSize, chapterFontSize, lineSpacing, marginTop, marginBottom, marginLeft, marginRight].filter(Boolean).length + (dropCap !== null ? 1 : 0) + (pageNumbers !== null ? 1 : 0);
 
@@ -522,10 +565,28 @@ export default function LayoutDesignerPage() {
     function buildDesignInstructions(): string {
         if (designInstructions.trim()) return designInstructions.trim();
         const parts: string[] = [];
-        if (template) parts.push(template.designText);
-        else if (bookType) parts.push(bookType.designHint);
-        if (spacingKey === "compact") parts.push("compact tight spacing");
-        if (spacingKey === "spacious") parts.push("spacious airy layout");
+        // Template (custom overrides preset)
+        if (templateKey === "custom" && customTemplateDesc.trim()) {
+            parts.push(customTemplateDesc.trim());
+        } else if (template && templateKey !== "custom") {
+            parts.push(template.designText);
+        } else if (bookTypeKey === "custom" && customBookTypeDesc.trim()) {
+            parts.push(`Book type: ${customBookTypeDesc.trim()}`);
+        } else if (bookType) {
+            parts.push(bookType.designHint);
+        }
+        // Spacing
+        if (spacingKey === "custom" && customSpacingDesc.trim()) {
+            parts.push(`spacing preference: ${customSpacingDesc.trim()}`);
+        } else if (spacingKey === "compact") {
+            parts.push("compact tight spacing");
+        } else if (spacingKey === "spacious") {
+            parts.push("spacious airy layout");
+        }
+        // Font
+        if (fontPrefKey === "custom" && customFontDesc.trim()) {
+            parts.push(`font preference: ${customFontDesc.trim()}`);
+        }
         return parts.join(". ");
     }
 
@@ -548,14 +609,20 @@ export default function LayoutDesignerPage() {
 
     // ── Poll ──────────────────────────────────────────────────────────────────
     function startPolling(jid: string) {
-        const interval = setInterval(async () => {
+        if (pollRef.current) clearInterval(pollRef.current);
+        pollRef.current = setInterval(async () => {
             try {
                 const res = await fetch(`${API_BASE}/layout/${jid}/status`);
                 const data = await res.json();
                 setStage(data.stage); setPct(data.pct); setStatusMsg(data.message);
-                if (data.stage === "done" && data.result) { clearInterval(interval); setResult(data.result); setLoading(false); }
-                else if (data.stage === "error") { clearInterval(interval); setError(data.message || "Layout generation failed."); setLoading(false); }
-            } catch { /* transient */ }
+                if (data.stage === "done" && data.result) {
+                    clearInterval(pollRef.current!); pollRef.current = null;
+                    setResult(data.result); setLoading(false);
+                } else if (data.stage === "error") {
+                    clearInterval(pollRef.current!); pollRef.current = null;
+                    setError(data.message || "Layout generation failed."); setLoading(false);
+                }
+            } catch { /* transient network error — keep polling */ }
         }, 1800);
     }
 
@@ -573,9 +640,19 @@ export default function LayoutDesignerPage() {
             form.append("book_title", bookTitle.trim());
             form.append("design_instructions", buildDesignInstructions());
 
+            // Book type — send to backend (skip "custom" key, description is in instructions)
+            if (bookTypeKey && bookTypeKey !== "custom") {
+                form.append("book_type", bookTypeKey);
+            }
+
+            // Visual template — send to backend (skip "custom" key)
+            if (templateKey && templateKey !== "custom") {
+                form.append("visual_template", templateKey);
+            }
+
             // Typography overrides (advanced only)
-            const effectiveBodyFont = bodyFont || (!showAdvanced ? fontPref.font : "");
-            const effectiveLineSpacing = lineSpacing || (!showAdvanced ? spacing.value : "");
+            const effectiveBodyFont = bodyFont || (!showAdvanced && fontPrefKey !== "custom" ? fontPref.font : "");
+            const effectiveLineSpacing = lineSpacing || (!showAdvanced && spacingKey !== "custom" ? spacing.value : "");
             if (effectiveBodyFont) form.append("body_font", effectiveBodyFont);
             if (chapterFont) form.append("chapter_font", chapterFont);
             if (bodyFontSize) form.append("body_font_size", bodyFontSize);
@@ -611,19 +688,22 @@ export default function LayoutDesignerPage() {
     };
 
     function reset() {
+        if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
         setFile(null); setJobId(null); setResult(null); setError(null); setLoading(false);
         setStage(""); setPct(0); setStatusMsg(""); setBookTitle("");
         setBookTypeKey(null); setTemplateKey(null); setWizardStep(0);
         setBodyFont(""); setChapterFont(""); setBodyFontSize(""); setChapterFontSize("");
         setLineSpacing(""); setMarginTop(""); setMarginBottom(""); setMarginLeft(""); setMarginRight("");
         setDropCap(null); setPageNumbers(null); setDesignInstructions("");
+        setCustomBookTypeDesc(""); setCustomTemplateDesc(""); setCustomFontDesc(""); setCustomSpacingDesc("");
+        setCustomSizeW(210); setCustomSizeH(297);
     }
 
     // ── AI suggestion text ────────────────────────────────────────────────────
     function getAISuggestion() {
         const lines: string[] = [];
-        if (bookType) lines.push(`यह एक ${bookType.label} है।`);
-        lines.push(`हम ${selectedSize.label} trim size${fontPref ? ` और ${fontPref.label} fonts` : ""} suggest करते हैं।`);
+        if (bookType) lines.push(`This is a ${bookType.label}.`);
+        lines.push(`We suggest ${selectedSize.label} trim size${fontPref ? ` with ${fontPref.label} fonts` : ""}.`);
         const estPages = file ? Math.round(file.size / 3000) : null;
         if (estPages) lines.push(`Estimated ${estPages}+ pages · ${spacing.label} spacing`);
         lines.push(`Estimated printing cost: ₹${estPages ? Math.round(estPages * 0.38) : "~80"}/book`);
@@ -691,10 +771,10 @@ export default function LayoutDesignerPage() {
                         <Wand2 size={11} /> AI PUBLISHING ASSISTANT
                     </div>
                     <h1 style={{ fontSize: "38px", fontWeight: "800", letterSpacing: "-0.03em", fontFamily: "'Playfair Display', serif", lineHeight: "1.1", marginBottom: "10px" }}>
-                        आपकी किताब तैयार करें
+                        Design Your Book Layout
                     </h1>
                     <p style={{ color: "#64748b", fontSize: "15px", lineHeight: "1.6" }}>
-                        बस अपनी manuscript upload करें — AI बाकी सब संभाल लेगा।
+                        Upload your manuscript — AI handles everything else.
                     </p>
                 </div>
 
@@ -796,7 +876,7 @@ export default function LayoutDesignerPage() {
                         {/* ── STEP 1: Upload ── */}
                         <section style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "14px", padding: "28px" }}>
                             <h3 style={{ fontSize: "14px", fontWeight: "700", marginBottom: "18px", display: "flex", alignItems: "center", gap: "8px" }}>
-                                <Upload size={15} color="#f59e0b" /> अपनी Manuscript Upload करें
+                                <Upload size={15} color="#f59e0b" /> Upload Your Manuscript
                             </h3>
                             <div
                                 onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
@@ -828,10 +908,10 @@ export default function LayoutDesignerPage() {
                             {/* Book title input */}
                             <div style={{ marginTop: "16px" }}>
                                 <label style={{ fontSize: "12px", color: "#64748b", display: "block", marginBottom: "8px" }}>
-                                    किताब का नाम <span style={{ color: "#334155" }}>(optional — auto-detected)</span>
+                                    Book Title <span style={{ color: "#334155" }}>(optional — auto-detected)</span>
                                 </label>
                                 <input type="text" value={bookTitle} onChange={(e) => setBookTitle(e.target.value)}
-                                    placeholder="e.g. मेरी कहानियाँ"
+                                    placeholder="e.g. My Book Title"
                                     style={{ ...inputStyle, fontSize: "14px", padding: "11px 14px" }}
                                     onFocus={focusBorder} onBlur={blurBorder} />
                             </div>
@@ -840,9 +920,9 @@ export default function LayoutDesignerPage() {
                         {/* ── STEP 2: Book Type Selection (MOST IMPORTANT) ── */}
                         <section style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "14px", padding: "28px" }}>
                             <h3 style={{ fontSize: "16px", fontWeight: "700", marginBottom: "6px", display: "flex", alignItems: "center", gap: "8px" }}>
-                                <BookOpen size={16} color="#f59e0b" /> अपनी किताब का प्रकार चुनें
+                                <BookOpen size={16} color="#f59e0b" /> Select Your Book Type
                             </h3>
-                            <p style={{ fontSize: "13px", color: "#475569", marginBottom: "20px" }}>यह सबसे जरूरी step है — AI इसी से layout design करेगा।</p>
+                            <p style={{ fontSize: "13px", color: "#475569", marginBottom: "20px" }}>This is the most important step — AI will base the entire layout on this.</p>
                             <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "12px" }}>
                                 {BOOK_TYPES.map((bt) => (
                                     <button
@@ -874,14 +954,24 @@ export default function LayoutDesignerPage() {
                                     <span style={{ fontSize: "12px", color: "#fbbf24" }}>AI Suggestion: {bookType.aiHint}</span>
                                 </div>
                             )}
+                            {bookTypeKey === "custom" && (
+                                <div style={{ marginTop: "14px" }}>
+                                    <label style={{ fontSize: "12px", color: "#64748b", display: "block", marginBottom: "8px" }}>Describe your book type / genre <span style={{ color: "#f59e0b" }}>*</span></label>
+                                    <textarea value={customBookTypeDesc} onChange={(e) => setCustomBookTypeDesc(e.target.value)}
+                                        placeholder="e.g. A travel memoir with personal stories and photographs, needs an elegant journalistic style..."
+                                        rows={3}
+                                        style={{ ...inputStyle, fontSize: "13px", resize: "vertical", lineHeight: "1.55", fontFamily: "inherit", padding: "12px 14px" }}
+                                        onFocus={focusBorder} onBlur={blurBorder} />
+                                </div>
+                            )}
                         </section>
 
                         {/* ── STEP 3: Visual Template (Canva-style) ── */}
                         <section style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "14px", padding: "28px" }}>
                             <h3 style={{ fontSize: "16px", fontWeight: "700", marginBottom: "6px", display: "flex", alignItems: "center", gap: "8px" }}>
-                                <Paintbrush size={16} color="#f59e0b" /> Look & Feel चुनें
+                                <Paintbrush size={16} color="#f59e0b" /> Choose a Look & Feel
                             </h3>
-                            <p style={{ fontSize: "13px", color: "#475569", marginBottom: "20px" }}>देखकर चुनें — AI इसी style में आपकी किताब तैयार करेगा।</p>
+                            <p style={{ fontSize: "13px", color: "#475569", marginBottom: "20px" }}>Pick a visual style — AI will design your book in this aesthetic.</p>
                             <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "12px" }}>
                                 {VISUAL_TEMPLATES.map((tmpl) => (
                                     <button
@@ -913,7 +1003,17 @@ export default function LayoutDesignerPage() {
                             </div>
                             {!templateKey && (
                                 <div style={{ marginTop: "12px", fontSize: "12px", color: "#475569" }}>
-                                    Template नहीं चुना? — AI खुद best style choose करेगा।
+                                    No template selected? — AI will automatically pick the best style for you.
+                                </div>
+                            )}
+                            {templateKey === "custom" && (
+                                <div style={{ marginTop: "14px" }}>
+                                    <label style={{ fontSize: "12px", color: "#64748b", display: "block", marginBottom: "8px" }}>Describe your desired visual style <span style={{ color: "#f59e0b" }}>*</span></label>
+                                    <textarea value={customTemplateDesc} onChange={(e) => setCustomTemplateDesc(e.target.value)}
+                                        placeholder="e.g. Warm earthy tones, handwritten-feel headings, lots of whitespace, minimalist ornaments between sections..."
+                                        rows={3}
+                                        style={{ ...inputStyle, fontSize: "13px", resize: "vertical", lineHeight: "1.55", fontFamily: "inherit", padding: "12px 14px" }}
+                                        onFocus={focusBorder} onBlur={blurBorder} />
                                 </div>
                             )}
                         </section>
@@ -923,11 +1023,11 @@ export default function LayoutDesignerPage() {
                             <h3 style={{ fontSize: "16px", fontWeight: "700", marginBottom: "6px", display: "flex", alignItems: "center", gap: "8px" }}>
                                 <Sparkles size={16} color="#f59e0b" /> Quick Setup — 3 Simple Questions
                             </h3>
-                            <p style={{ fontSize: "13px", color: "#475569", marginBottom: "24px" }}>बस यह बताएं — बाकी AI handle करेगा।</p>
+                            <p style={{ fontSize: "13px", color: "#475569", marginBottom: "24px" }}>Just answer these — AI will handle the rest.</p>
 
                             {/* 4a: Book size */}
                             <div style={{ marginBottom: "24px" }}>
-                                <div style={{ fontSize: "13px", fontWeight: "600", color: "#cbd5e1", marginBottom: "12px" }}>📐 किताब का आकार?</div>
+                                <div style={{ fontSize: "13px", fontWeight: "600", color: "#cbd5e1", marginBottom: "12px" }}>📐 What size should your book be?</div>
                                 <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "10px" }}>
                                     {SIZE_VISUAL.map((sz) => (
                                         <button
@@ -964,11 +1064,24 @@ export default function LayoutDesignerPage() {
                                         {bookType.aiHint}
                                     </div>
                                 )}
+                                {selectedSizeKey === "custom" && (
+                                    <div style={{ marginTop: "14px", display: "flex", gap: "14px" }}>
+                                        {[{ label: "Width (mm)", val: customSizeW, set: setCustomSizeW }, { label: "Height (mm)", val: customSizeH, set: setCustomSizeH }].map(({ label, val, set }) => (
+                                            <div key={label} style={{ flex: 1 }}>
+                                                <label style={{ fontSize: "11px", color: "#64748b", display: "block", marginBottom: "6px" }}>{label}</label>
+                                                <input type="number" min={50} max={600} value={val}
+                                                    onChange={(e) => set(Number(e.target.value))}
+                                                    style={{ ...inputStyle, fontSize: "14px" }}
+                                                    onFocus={focusBorder} onBlur={blurBorder} />
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
                             </div>
 
                             {/* 4b: Font preference */}
                             <div style={{ marginBottom: "24px" }}>
-                                <div style={{ fontSize: "13px", fontWeight: "600", color: "#cbd5e1", marginBottom: "12px" }}>✍️ Font कैसा चाहिए?</div>
+                                <div style={{ fontSize: "13px", fontWeight: "600", color: "#cbd5e1", marginBottom: "12px" }}>✍️ What font style do you prefer?</div>
                                 <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
                                     {FONT_PREFS.map((fp) => (
                                         <button
@@ -986,7 +1099,16 @@ export default function LayoutDesignerPage() {
                                         </button>
                                     ))}
                                 </div>
-                                <div style={{ marginTop: "8px", fontSize: "11px", color: "#475569" }}>AI खुद आपके लिए best font choose करेगा।</div>
+                                <div style={{ marginTop: "8px", fontSize: "11px", color: "#475569" }}>AI will choose the best font based on your book type.</div>
+                                {fontPrefKey === "custom" && (
+                                    <div style={{ marginTop: "12px" }}>
+                                        <label style={{ fontSize: "12px", color: "#64748b", display: "block", marginBottom: "8px" }}>Describe your font preference</label>
+                                        <input type="text" value={customFontDesc} onChange={(e) => setCustomFontDesc(e.target.value)}
+                                            placeholder="e.g. Something bold and editorial, or a warm handwritten feel..."
+                                            style={{ ...inputStyle, fontSize: "13px", padding: "10px 14px" }}
+                                            onFocus={focusBorder} onBlur={blurBorder} />
+                                    </div>
+                                )}
                             </div>
 
                             {/* 4c: Spacing */}
@@ -1013,6 +1135,15 @@ export default function LayoutDesignerPage() {
                                         </button>
                                     ))}
                                 </div>
+                                {spacingKey === "custom" && (
+                                    <div style={{ marginTop: "12px" }}>
+                                        <label style={{ fontSize: "12px", color: "#64748b", display: "block", marginBottom: "8px" }}>Describe your spacing preference</label>
+                                        <input type="text" value={customSpacingDesc} onChange={(e) => setCustomSpacingDesc(e.target.value)}
+                                            placeholder="e.g. Very wide margins with generous paragraph spacing, or tight academic style..."
+                                            style={{ ...inputStyle, fontSize: "13px", padding: "10px 14px" }}
+                                            onFocus={focusBorder} onBlur={blurBorder} />
+                                    </div>
+                                )}
                             </div>
                         </section>
 
@@ -1021,7 +1152,7 @@ export default function LayoutDesignerPage() {
                             <section style={{ background: "linear-gradient(135deg, rgba(245,158,11,0.07) 0%, rgba(99,102,241,0.04) 100%)", border: "1px solid rgba(245,158,11,0.2)", borderRadius: "14px", padding: "24px 28px" }}>
                                 <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "14px" }}>
                                     <Wand2 size={15} color="#f59e0b" />
-                                    <span style={{ fontSize: "13px", fontWeight: "700", color: "#fbbf24" }}>AI का सुझाव</span>
+                                    <span style={{ fontSize: "13px", fontWeight: "700", color: "#fbbf24" }}>AI Suggestion</span>
                                 </div>
                                 <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                                     {getAISuggestion().map((line, i) => (
@@ -1040,7 +1171,7 @@ export default function LayoutDesignerPage() {
                                 <div style={{ background: "rgba(245,158,11,0.07)", padding: "14px 20px", display: "flex", alignItems: "center", gap: "8px" }}>
                                     <Settings2 size={14} color="#fbbf24" />
                                     <span style={{ fontSize: "13px", fontWeight: "700", color: "#fbbf24" }}>Advanced Settings</span>
-                                    <span style={{ fontSize: "11px", color: "#64748b", marginLeft: "4px" }}>— Professionals के लिए</span>
+                                    <span style={{ fontSize: "11px", color: "#64748b", marginLeft: "4px" }}>— For professionals & power users</span>
                                 </div>
                                 <div style={{ background: "rgba(0,0,0,0.2)", padding: "24px 28px", display: "flex", flexDirection: "column", gap: "20px" }}>
 
@@ -1129,7 +1260,7 @@ export default function LayoutDesignerPage() {
                                             rows={3}
                                             style={{ ...inputStyle, fontSize: "13px", resize: "vertical", lineHeight: "1.55", fontFamily: "inherit", padding: "12px 14px" }}
                                             onFocus={focusBorder} onBlur={blurBorder} />
-                                        <p style={{ fontSize: "11px", color: "#334155", marginTop: "6px" }}>यह field भरने पर AI wizard selections override हो जाएंगी।</p>
+                                        <p style={{ fontSize: "11px", color: "#334155", marginTop: "6px" }}>Filling this field will override the wizard selections above.</p>
                                     </div>
                                 </div>
                             </div>
@@ -1152,7 +1283,7 @@ export default function LayoutDesignerPage() {
                             onMouseOut={(e) => { (e.currentTarget as HTMLButtonElement).style.opacity = "1"; }}
                         >
                             <Wand2 size={18} />
-                            {file ? "AI से Layout Generate करें" : "पहले Manuscript Upload करें"}
+                            {file ? "Generate Layout with AI" : "Upload Your Manuscript First"}
                         </button>
 
                         <p style={{ textAlign: "center", fontSize: "12px", color: "#334155" }}>
