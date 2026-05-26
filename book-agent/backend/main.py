@@ -24,8 +24,10 @@ from agent import run_book_agent
 from proofreader import (
     extract_text,
     proofread_text,
+    apply_selective_corrections,
     save_corrected_docx,
     save_corrected_txt,
+    save_corrected_pdf,
 )
 from cover_designer import design_cover
 
@@ -230,6 +232,8 @@ async def proofread_document(file: UploadFile = File(...)):
 
         _proofread_jobs[job_id] = {
             "original_filename": filename,
+            "original_text": original_text,
+            "original_title": os.path.splitext(filename)[0],
             "corrected_path": corrected_path,
             "ext": ext,
         }
@@ -276,7 +280,68 @@ def download_proofread(job_id: str):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Cover Designer  —  helpers
+# Proofreading — selective PDF generation
+# ─────────────────────────────────────────────────────────────────────────────
+
+class SelectivePDFRequest(BaseModel):
+    apply_grammar: bool = True
+    apply_punctuation: bool = True
+    apply_style: bool = True
+
+
+@app.post("/proofread/{job_id}/generate-pdf")
+def generate_selective_pdf(job_id: str, req: SelectivePDFRequest):
+    """
+    Re-run proofreading on the original uploaded text using only the correction
+    types the user selected (grammar / punctuation / style), then return a PDF.
+    """
+    job = _proofread_jobs.get(job_id)
+    if not job:
+        raise HTTPException(
+            404,
+            "Proofreading job not found. It may have expired — re-upload to proofread again.",
+        )
+
+    if not req.apply_grammar and not req.apply_punctuation and not req.apply_style:
+        raise HTTPException(400, "Please select at least one correction type.")
+
+    original_text = job.get("original_text", "")
+    if not original_text.strip():
+        raise HTTPException(400, "Original document text is no longer available.")
+
+    original_title = job.get("original_title", "Corrected Document")
+
+    # Apply only the selected correction types
+    selective_text = apply_selective_corrections(
+        original_text,
+        apply_grammar=req.apply_grammar,
+        apply_punctuation=req.apply_punctuation,
+        apply_style=req.apply_style,
+    )
+
+    # Generate a fresh PDF
+    pdf_filename = f"selective_{job_id}.pdf"
+    pdf_path = os.path.join(OUTPUT_DIR, pdf_filename)
+
+    save_corrected_pdf(
+        selective_text,
+        pdf_path,
+        original_title=original_title,
+        apply_grammar=req.apply_grammar,
+        apply_punctuation=req.apply_punctuation,
+        apply_style=req.apply_style,
+    )
+
+    # Store the path so the download endpoint can serve it
+    job[f"selective_pdf_{job_id}"] = pdf_path
+
+    return FileResponse(
+        pdf_path,
+        media_type="application/pdf",
+        filename=f"corrected_{original_title}.pdf",
+    )
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 
 COVER_ALLOWED_DIRECT = {".pdf", ".docx"}

@@ -138,6 +138,44 @@ Respond with ONLY valid JSON (no markdown, no code fences). Structure:
 For each category, list up to 20 of the most significant issues. Keep snippets short (max 15 words each). Be specific in explanations."""
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Selective correction system prompt
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _build_selective_system_prompt(apply_grammar: bool, apply_punctuation: bool, apply_style: bool) -> str:
+    """Build a system prompt that instructs the AI to apply only the selected fix types."""
+    tasks = []
+    if apply_grammar:
+        tasks.append("Fix all grammar and spelling errors")
+    if apply_punctuation:
+        tasks.append("Correct punctuation (commas, semicolons, apostrophes, quotation marks, etc.)")
+    if apply_style:
+        tasks.append("Improve style and readability: simplify overly complex sentences, improve flow, remove redundancy")
+
+    task_list = "\n".join(f"{i+1}. {t}" for i, t in enumerate(tasks))
+
+    skipped = []
+    if not apply_grammar:
+        skipped.append("grammar/spelling errors (leave them as-is)")
+    if not apply_punctuation:
+        skipped.append("punctuation issues (leave them as-is)")
+    if not apply_style:
+        skipped.append("style/readability (leave as-is)")
+
+    skip_note = ""
+    if skipped:
+        skip_note = f"\n\nIMPORTANT: Do NOT fix {', '.join(skipped)}. Only apply the correction types listed above."
+
+    return f"""You are an expert editor and proofreader. When given a document, you:
+{task_list}
+4. Preserve the author's voice and meaning{skip_note}
+
+Respond with ONLY valid JSON (no markdown, no code fences). Structure:
+{{
+  "corrected_text": "<the corrected document text with ONLY the selected fix types applied>"
+}}"""
+
+
 def _chunk_text(text: str, max_chars: int = 50000) -> list[str]:
     """Split long documents into overlapping chunks so we stay within token limits."""
     if len(text) <= max_chars:
@@ -215,7 +253,57 @@ def proofread_text(text: str) -> dict:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Save corrected file
+# NEW: Selective correction — re-runs AI with only chosen fix types
+# ─────────────────────────────────────────────────────────────────────────────
+
+def apply_selective_corrections(
+    original_text: str,
+    apply_grammar: bool = True,
+    apply_punctuation: bool = True,
+    apply_style: bool = True,
+) -> str:
+    """
+    Re-run AI proofreading on `original_text` applying only the selected
+    correction categories. Returns the selectively corrected text.
+    """
+    if not any([apply_grammar, apply_punctuation, apply_style]):
+        # Nothing selected — return original unchanged
+        return original_text
+
+    system_prompt = _build_selective_system_prompt(apply_grammar, apply_punctuation, apply_style)
+    chunks = _chunk_text(original_text)
+    all_corrected = []
+
+    for i, chunk in enumerate(chunks):
+        prompt = f"Apply the requested corrections to the following document{f' (part {i+1}/{len(chunks)})' if len(chunks) > 1 else ''}:\n\n{chunk}"
+
+        response = client.chat.completions.create(
+            model=MODEL,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.3,
+            max_tokens=4096,
+        )
+
+        raw = response.choices[0].message.content.strip()
+        raw = raw.replace("```json", "").replace("```", "").strip()
+        s = raw.find("{")
+        e = raw.rfind("}") + 1
+        if s == -1 or e == 0:
+            # Fall back to the chunk as-is
+            all_corrected.append(chunk)
+            continue
+
+        data = json.loads(raw[s:e])
+        all_corrected.append(data.get("corrected_text", chunk))
+
+    return "\n\n".join(all_corrected)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Save corrected file helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
 def save_corrected_docx(corrected_text: str, output_path: str, original_title: str = "Corrected Document"):
@@ -252,4 +340,118 @@ def save_corrected_docx(corrected_text: str, output_path: str, original_title: s
 def save_corrected_txt(corrected_text: str, output_path: str):
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(corrected_text)
+    return output_path
+
+
+def save_corrected_pdf(
+    corrected_text: str,
+    output_path: str,
+    original_title: str = "Corrected Document",
+    apply_grammar: bool = True,
+    apply_punctuation: bool = True,
+    apply_style: bool = True,
+) -> str:
+    """
+    Generate a styled PDF from `corrected_text` using reportlab.
+    The correction types that were applied are noted in the document header.
+    """
+    # pyrefly: ignore [missing-import]
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import mm
+    from reportlab.lib import colors
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.enums import TA_LEFT, TA_CENTER
+    from reportlab.platypus import (
+        SimpleDocTemplate, Paragraph, Spacer, HRFlowable, Table, TableStyle
+    )
+
+    PAGE_W, PAGE_H = A4
+    MARGIN = 22 * mm
+
+    doc = SimpleDocTemplate(
+        output_path,
+        pagesize=A4,
+        leftMargin=MARGIN,
+        rightMargin=MARGIN,
+        topMargin=MARGIN,
+        bottomMargin=MARGIN,
+    )
+
+    styles = getSampleStyleSheet()
+
+    # ── Custom styles ──────────────────────────────────────────────────────
+    title_style = ParagraphStyle(
+        "DocTitle",
+        parent=styles["Title"],
+        fontSize=22,
+        leading=28,
+        textColor=colors.HexColor("#0f172a"),
+        spaceAfter=4,
+        fontName="Helvetica-Bold",
+    )
+    subtitle_style = ParagraphStyle(
+        "DocSubtitle",
+        parent=styles["Normal"],
+        fontSize=10,
+        leading=14,
+        textColor=colors.HexColor("#64748b"),
+        spaceAfter=2,
+        fontName="Helvetica",
+    )
+    badge_style = ParagraphStyle(
+        "Badge",
+        parent=styles["Normal"],
+        fontSize=9,
+        leading=12,
+        textColor=colors.HexColor("#10b981"),
+        fontName="Helvetica-Bold",
+        spaceAfter=0,
+    )
+    body_style = ParagraphStyle(
+        "DocBody",
+        parent=styles["Normal"],
+        fontSize=11,
+        leading=18,
+        textColor=colors.HexColor("#1e293b"),
+        fontName="Helvetica",
+        spaceAfter=8,
+        spaceBefore=0,
+    )
+
+    # ── Applied corrections badge text ─────────────────────────────────────
+    applied = []
+    if apply_grammar:
+        applied.append("Grammar")
+    if apply_punctuation:
+        applied.append("Punctuation")
+    if apply_style:
+        applied.append("Style")
+    applied_str = " · ".join(applied) if applied else "No corrections"
+
+    story = []
+
+    # Title block
+    story.append(Paragraph(original_title, title_style))
+    story.append(Paragraph("Proofread and corrected by Editorial AI", subtitle_style))
+    story.append(Spacer(1, 4))
+    story.append(Paragraph(f"Corrections applied: {applied_str}", badge_style))
+    story.append(Spacer(1, 6))
+    story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor("#e2e8f0"), spaceAfter=14))
+
+    # Body paragraphs
+    for para_text in corrected_text.split("\n"):
+        para_text = para_text.strip()
+        if para_text:
+            # Escape XML special chars for reportlab
+            safe = (
+                para_text
+                .replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+            )
+            story.append(Paragraph(safe, body_style))
+        else:
+            story.append(Spacer(1, 6))
+
+    doc.build(story)
     return output_path
