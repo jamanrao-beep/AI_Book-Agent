@@ -1,1 +1,1 @@
-web: uvicorn main:app --reload --limit-max-requests 10000 --host 0.0.0.0 --port $PORT
+web: uvicorn main:app --host 0.0.0.0 --port $PORT
