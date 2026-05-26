@@ -48,6 +48,13 @@ export default function ProofreadPage() {
   const [activeTab, setActiveTab] = useState<TabType>("summary");
   const [expandedErrors, setExpandedErrors] = useState<Set<string>>(new Set());
 
+  // Selective PDF generation state
+  const [applyGrammar, setApplyGrammar] = useState(true);
+  const [applyPunctuation, setApplyPunctuation] = useState(true);
+  const [applyStyle, setApplyStyle] = useState(true);
+  const [pdfGenerating, setPdfGenerating] = useState(false);
+  const [pdfError, setPdfError] = useState("");
+
   const toggleError = (key: string) => {
     setExpandedErrors((prev) => {
       const next = new Set(prev);
@@ -94,6 +101,11 @@ export default function ProofreadPage() {
     if (!file) return;
     setLoading(true);
     setError("");
+    // Reset selections to all-on for each new upload
+    setApplyGrammar(true);
+    setApplyPunctuation(true);
+    setApplyStyle(true);
+    setPdfError("");
     try {
       const res = await proofreadDocument(file);
       setResult(res.data);
@@ -107,6 +119,45 @@ export default function ProofreadPage() {
       setError(message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleGeneratePdf = async () => {
+    if (!result) return;
+    if (!applyGrammar && !applyPunctuation && !applyStyle) {
+      setPdfError("Please select at least one correction type.");
+      return;
+    }
+    setPdfGenerating(true);
+    setPdfError("");
+    try {
+      const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+      const res = await fetch(`${API_BASE}/proofread/${result.job_id}/generate-pdf`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          apply_grammar: applyGrammar,
+          apply_punctuation: applyPunctuation,
+          apply_style: applyStyle,
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.detail ?? `Server error ${res.status}`);
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `corrected_${result.original_filename.replace(/\.[^.]+$/, "")}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err: unknown) {
+      setPdfError(err instanceof Error ? err.message : "PDF generation failed.");
+    } finally {
+      setPdfGenerating(false);
     }
   };
 
@@ -446,28 +497,199 @@ export default function ProofreadPage() {
                   {result.original_filename}
                 </p>
               </div>
-              <button
-                onClick={() =>
-                  downloadProofreadDoc(result.job_id, result.original_filename)
-                }
+            </div>
+
+            {/* ── Selective PDF Generator ─────────────────────────────────── */}
+            <div
+              style={{
+                background: "rgba(255,255,255,0.03)",
+                border: "1px solid rgba(255,255,255,0.1)",
+                borderRadius: "14px",
+                padding: "22px 24px",
+                marginBottom: "28px",
+              }}
+            >
+              <p
                 style={{
-                  marginLeft: "auto",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "6px",
-                  background: "#10b981",
-                  color: "white",
-                  border: "none",
-                  borderRadius: "8px",
-                  padding: "8px 16px",
                   fontSize: "13px",
-                  fontWeight: "600",
-                  cursor: "pointer",
+                  fontWeight: "700",
+                  letterSpacing: "0.06em",
+                  textTransform: "uppercase",
+                  color: "#94a3b8",
+                  marginBottom: "14px",
                 }}
               >
-                <Download size={14} /> Download Corrected
+                Generate Corrected PDF
+              </p>
+              <p style={{ fontSize: "13px", color: "#64748b", marginBottom: "16px", lineHeight: "1.6" }}>
+                Choose which types of corrections to include in your downloaded PDF:
+              </p>
+
+              {/* Checkboxes */}
+              <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginBottom: "18px" }}>
+                {[
+                  {
+                    key: "grammar" as const,
+                    label: "Grammar Fixes",
+                    count: result.grammar_fixes,
+                    color: "#6366f1",
+                    bg: "rgba(99,102,241,0.1)",
+                    border: "rgba(99,102,241,0.25)",
+                    icon: "✦",
+                    checked: applyGrammar,
+                    set: setApplyGrammar,
+                  },
+                  {
+                    key: "punctuation" as const,
+                    label: "Punctuation Fixes",
+                    count: result.punctuation_fixes,
+                    color: "#f59e0b",
+                    bg: "rgba(245,158,11,0.1)",
+                    border: "rgba(245,158,11,0.25)",
+                    icon: "✎",
+                    checked: applyPunctuation,
+                    set: setApplyPunctuation,
+                  },
+                  {
+                    key: "style" as const,
+                    label: "Style Suggestions",
+                    count: result.style_suggestions,
+                    color: "#10b981",
+                    bg: "rgba(16,185,129,0.1)",
+                    border: "rgba(16,185,129,0.25)",
+                    icon: "◈",
+                    checked: applyStyle,
+                    set: setApplyStyle,
+                  },
+                ].map((opt) => (
+                  <label
+                    key={opt.key}
+                    onClick={() => opt.set(!opt.checked)}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "14px",
+                      padding: "12px 16px",
+                      borderRadius: "10px",
+                      border: `1px solid ${opt.checked ? opt.border : "rgba(255,255,255,0.07)"}`,
+                      background: opt.checked ? opt.bg : "transparent",
+                      cursor: "pointer",
+                      transition: "all 0.15s",
+                      userSelect: "none",
+                    }}
+                  >
+                    {/* Custom checkbox */}
+                    <div
+                      style={{
+                        width: "18px",
+                        height: "18px",
+                        borderRadius: "5px",
+                        border: `2px solid ${opt.checked ? opt.color : "rgba(255,255,255,0.2)"}`,
+                        background: opt.checked ? opt.color : "transparent",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        flexShrink: 0,
+                        transition: "all 0.15s",
+                      }}
+                    >
+                      {opt.checked && (
+                        <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
+                          <path d="M1 4L3.5 6.5L9 1" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      )}
+                    </div>
+
+                    {/* Icon + Label */}
+                    <span style={{ fontSize: "16px", opacity: 0.8 }}>{opt.icon}</span>
+                    <span style={{ flex: 1, fontSize: "13px", fontWeight: "600", color: opt.checked ? "#e2e8f0" : "#64748b" }}>
+                      {opt.label}
+                    </span>
+
+                    {/* Count badge */}
+                    <span
+                      style={{
+                        background: opt.checked ? `${opt.color}22` : "rgba(255,255,255,0.05)",
+                        color: opt.checked ? opt.color : "#475569",
+                        borderRadius: "20px",
+                        padding: "2px 10px",
+                        fontSize: "12px",
+                        fontWeight: "700",
+                        transition: "all 0.15s",
+                      }}
+                    >
+                      {opt.count}
+                    </span>
+                  </label>
+                ))}
+              </div>
+
+              {/* PDF error */}
+              {pdfError && (
+                <div
+                  style={{
+                    background: "rgba(239,68,68,0.1)",
+                    border: "1px solid rgba(239,68,68,0.2)",
+                    borderRadius: "8px",
+                    padding: "10px 14px",
+                    color: "#f87171",
+                    fontSize: "12px",
+                    marginBottom: "14px",
+                  }}
+                >
+                  {pdfError}
+                </div>
+              )}
+
+              {/* Generate PDF button */}
+              <button
+                onClick={handleGeneratePdf}
+                disabled={pdfGenerating || (!applyGrammar && !applyPunctuation && !applyStyle)}
+                style={{
+                  width: "100%",
+                  background:
+                    pdfGenerating || (!applyGrammar && !applyPunctuation && !applyStyle)
+                      ? "rgba(99,102,241,0.3)"
+                      : "linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)",
+                  color: "white",
+                  border: "none",
+                  borderRadius: "10px",
+                  padding: "12px 20px",
+                  fontSize: "13px",
+                  fontWeight: "700",
+                  cursor:
+                    pdfGenerating || (!applyGrammar && !applyPunctuation && !applyStyle)
+                      ? "not-allowed"
+                      : "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: "8px",
+                  transition: "background 0.2s",
+                  letterSpacing: "0.01em",
+                }}
+              >
+                {pdfGenerating ? (
+                  <>
+                    <Loader size={15} style={{ animation: "spin 1s linear infinite" }} />
+                    Generating PDF…
+                  </>
+                ) : (
+                  <>
+                    <Download size={15} />
+                    Download Selective PDF
+                  </>
+                )}
               </button>
+
+              {/* Helper note */}
+              {!applyGrammar && !applyPunctuation && !applyStyle && (
+                <p style={{ fontSize: "11px", color: "#ef4444", marginTop: "8px", textAlign: "center" }}>
+                  Select at least one correction type above.
+                </p>
+              )}
             </div>
+            {/* ── End Selective PDF Generator ──────────────────────────────── */}
 
             {/* Stat cards — clickable to jump to that tab */}
             <div
