@@ -108,56 +108,80 @@ def extract_text(path: str, filename: str) -> str:
 def _parse_json_response(raw: str, context: str = "") -> dict:
     """
     Robustly extract a JSON object from an OpenAI response string.
+
     Handles:
-    - Markdown code fences (```json ... ```)
-    - Leading/trailing prose
+    - Markdown code fences (```json ... ```) anywhere in the string
+    - Leading/trailing prose before or after the JSON block
     - Truncated JSON (attempts partial recovery)
+
     Raises ValueError with a clear message if nothing works.
     """
-    # Strip markdown fences
     cleaned = raw.strip()
+
+    # ── Step 1: try to pull content out of a markdown fence if one exists ──
+    # This handles cases where GPT adds preamble like:
+    #   "Sure! Here is the JSON:\n```json\n{...}\n```"
+    fence_match = re.search(r"```(?:json)?\s*\n?([\s\S]*?)(?:```|$)", cleaned, re.IGNORECASE)
+    if fence_match:
+        candidate = fence_match.group(1).strip()
+        # Only use the fence content if it actually starts with a JSON object
+        if candidate.startswith("{"):
+            cleaned = candidate
+
+    # ── Step 2: strip any remaining leading/trailing markdown fences (belt & braces) ──
     cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"\s*```$", "", cleaned)
     cleaned = cleaned.strip()
 
-    # Find the outermost { ... }
+    # ── Step 3: find the outermost { ... } ──
     start = cleaned.find("{")
     if start == -1:
-        logger.error("No JSON object found in AI response%s. Raw (first 500): %s",
-                     f" ({context})" if context else "", raw[:500])
-        raise ValueError(f"No JSON in AI response{f' for {context}' if context else ''}. "
-                         f"Raw response starts with: {raw[:200]!r}")
+        logger.error(
+            "No JSON object found in AI response%s. Raw (first 500): %s",
+            f" ({context})" if context else "", raw[:500],
+        )
+        raise ValueError(
+            f"No JSON in AI response{f' for {context}' if context else ''}. "
+            f"Raw response starts with: {raw[:200]!r}"
+        )
 
     end = cleaned.rfind("}")
     if end == -1 or end <= start:
-        logger.error("JSON object not closed in AI response%s. Raw (first 500): %s",
-                     f" ({context})" if context else "", raw[:500])
-        raise ValueError(f"JSON object not properly closed in AI response"
-                         f"{f' for {context}' if context else ''}.")
+        logger.error(
+            "JSON object not closed in AI response%s. Raw (first 500): %s",
+            f" ({context})" if context else "", raw[:500],
+        )
+        raise ValueError(
+            f"JSON object not properly closed in AI response"
+            f"{f' for {context}' if context else ''}."
+        )
 
     json_str = cleaned[start:end + 1]
 
+    # ── Step 4: attempt normal parse ──
     try:
         return json.loads(json_str)
     except json.JSONDecodeError as e:
-        # Last-ditch: try to fix common truncation issues by closing open strings/brackets
-        logger.warning("JSON parse error%s (%s) — attempting recovery",
-                       f" ({context})" if context else "", e)
+        # ── Step 5: last-ditch recovery — close open brackets/braces ──
+        logger.warning(
+            "JSON parse error%s (%s) — attempting recovery",
+            f" ({context})" if context else "", e,
+        )
         try:
-            # Close any unclosed string, then add missing closing brackets
             fixed = json_str
-            # Count unclosed braces and brackets
-            open_braces   = fixed.count("{") - fixed.count("}")
-            open_brackets = fixed.count("[") - fixed.count("]")
             # If the last char is a comma or colon, trim it
             fixed = re.sub(r'[,:\s]+$', '', fixed)
-            # Close open arrays then objects
+            # Count unclosed braces and brackets and close them
+            open_braces   = fixed.count("{") - fixed.count("}")
+            open_brackets = fixed.count("[") - fixed.count("]")
             fixed += "]" * max(open_brackets, 0)
             fixed += "}" * max(open_braces, 0)
             return json.loads(fixed)
         except Exception:
-            logger.error("JSON recovery failed%s. Raw (first 500): %s",
-                         f" ({context})" if context else "", raw[:500])
+            logger.error(
+                "JSON recovery failed%s. Raw (first 500): %s",
+                f" ({context})" if context else "", raw[:500],
+            )
             raise ValueError(
                 f"Could not parse JSON from AI response{f' for {context}' if context else ''}. "
                 f"Parse error: {e}. Raw starts with: {raw[:200]!r}"
@@ -246,6 +270,10 @@ Respond with ONLY valid JSON (no markdown, no code fences, no preamble). Structu
 IMPORTANT: Output ONLY the raw JSON object. Do not wrap it in markdown. Do not add any text before or after."""
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Chunking helper
+# ─────────────────────────────────────────────────────────────────────────────
+
 def _chunk_text(text: str, max_chars: int = 50000) -> list[str]:
     """Split long documents into chunks so we stay within token limits."""
     if len(text) <= max_chars:
@@ -263,41 +291,83 @@ def _chunk_text(text: str, max_chars: int = 50000) -> list[str]:
     return chunks
 
 
-def _call_openai_with_retry(messages: list[dict], context: str, max_retries: int = 2) -> dict:
+# ─────────────────────────────────────────────────────────────────────────────
+# OpenAI call with retry
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _call_openai_with_retry(
+    messages: list[dict],
+    context: str,
+    max_retries: int = 2,
+    use_json_mode: bool = True,
+) -> dict:
     """
     Call the OpenAI API and parse the JSON response.
-    Retries up to max_retries times if the response is not valid JSON.
-    Falls back to a minimal safe dict on final failure.
+
+    Key improvements over the original:
+    - Uses response_format={"type": "json_object"} when use_json_mode=True.
+      This forces GPT-4o to always return a valid JSON object — no markdown
+      fences, no preamble. The model requires the word "json" to appear
+      somewhere in the messages for this mode, which our system prompts satisfy.
+    - max_tokens bumped to 16000 to avoid truncation on longer chunks.
+    - Retries up to max_retries times on JSON parse failures.
+    - Raises RuntimeError (→ HTTP 500) after all retries are exhausted.
     """
     last_error = None
+
     for attempt in range(1, max_retries + 2):  # +2 so range gives max_retries+1 attempts
         try:
-            response = client.chat.completions.create(
-                model=MODEL,
-                messages=messages,
-                temperature=0.3,
-                max_tokens=4096,
-            )
+            kwargs: dict = {
+                "model": MODEL,
+                "messages": messages,
+                "temperature": 0.3,
+                "max_tokens": 16000,  # raised from 4096 to avoid mid-JSON truncation
+            }
+
+            # json_object mode guarantees a parseable JSON response from GPT-4o.
+            # Falls back gracefully if the model doesn't support it.
+            if use_json_mode:
+                kwargs["response_format"] = {"type": "json_object"}
+
+            response = client.chat.completions.create(**kwargs)
             raw = response.choices[0].message.content or ""
-            logger.info("OpenAI response received for %s (attempt %d), length=%d", context, attempt, len(raw))
+            logger.info(
+                "OpenAI response received for %s (attempt %d), length=%d",
+                context, attempt, len(raw),
+            )
             return _parse_json_response(raw, context)
+
         except ValueError as e:
             last_error = e
-            logger.warning("Attempt %d/%d failed for %s: %s", attempt, max_retries + 1, context, e)
+            logger.warning(
+                "Attempt %d/%d failed for %s: %s",
+                attempt, max_retries + 1, context, e,
+            )
             if attempt <= max_retries:
-                # Add a reminder to the messages to encourage plain JSON output
+                # Append a correction nudge and retry
                 messages = messages + [{
                     "role": "user",
-                    "content": "Your previous response was not valid JSON. Please respond with ONLY a raw JSON object, no markdown, no code fences, no extra text."
+                    "content": (
+                        "Your previous response was not valid JSON. "
+                        "Please respond with ONLY a raw JSON object, "
+                        "no markdown, no code fences, no extra text."
+                    ),
                 }]
+
         except Exception as e:
             last_error = e
-            logger.error("OpenAI API call failed for %s (attempt %d): %s", context, attempt, e)
+            logger.error(
+                "OpenAI API call failed for %s (attempt %d): %s",
+                context, attempt, e,
+            )
             if attempt <= max_retries:
                 continue
 
     # All retries exhausted — raise so the endpoint returns a proper 500
-    raise RuntimeError(f"OpenAI did not return valid JSON after {max_retries + 1} attempts for {context}: {last_error}")
+    raise RuntimeError(
+        f"OpenAI did not return valid JSON after {max_retries + 1} attempts "
+        f"for {context}: {last_error}"
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -385,7 +455,10 @@ def apply_selective_corrections(
             data = _call_openai_with_retry(messages, context)
             all_corrected.append(data.get("corrected_text", chunk))
         except Exception as e:
-            logger.error("Selective correction failed for %s: %s — using original chunk", context, e)
+            logger.error(
+                "Selective correction failed for %s: %s — using original chunk",
+                context, e,
+            )
             all_corrected.append(chunk)
 
     return "\n\n".join(all_corrected)

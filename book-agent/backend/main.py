@@ -45,16 +45,69 @@ app = FastAPI(
     version="4.1.0",
 )
 
+# ─────────────────────────────────────────────────────────────────────────────
+# CORS — must be added FIRST, before any other middleware or routes.
+# Using explicit origin list instead of "*" so Railway's proxy correctly
+# echoes the origin back on both preflight (OPTIONS) and actual requests.
+# ─────────────────────────────────────────────────────────────────────────────
+
+ALLOWED_ORIGINS = [
+    "https://ai-book-agent-23.vercel.app",  # production frontend
+    "http://localhost:3000",                 # local dev
+    "http://localhost:3001",                 # alternate local dev port
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,  # must be False when allow_origins=["*"]
-    allow_methods=["*"],
+    allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
     expose_headers=["*"],
+    max_age=3600,  # cache preflight for 1 hour
 )
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Explicit OPTIONS catch-all — Railway's proxy can swallow preflight requests
+# before they reach FastAPI's CORS middleware. This handler ensures every
+# OPTIONS preflight gets a 200 response with the correct headers attached
+# by the CORSMiddleware above.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# pyrefly: ignore [missing-import]
+from fastapi.requests import Request
+# pyrefly: ignore [missing-import]
+from fastapi.responses import JSONResponse
+
+
+@app.options("/{rest_of_path:path}")
+async def preflight_handler(rest_of_path: str, request: Request):
+    """Handle all CORS preflight OPTIONS requests."""
+    return JSONResponse(content={}, status_code=200)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Global exception handler — turns unhandled crashes into readable JSON 500s
+# instead of silently closing the TCP connection (which looks like "Network Error")
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logger.error(
+        "Unhandled exception on %s %s: %s\n%s",
+        request.method, request.url.path, exc, traceback.format_exc(),
+    )
+    return JSONResponse(
+        status_code=500,
+        content={"detail": f"Internal server error: {exc}"},
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # In-memory job stores (use Redis/DB in production)
+# ─────────────────────────────────────────────────────────────────────────────
+
 _proofread_jobs: dict[str, dict] = {}
 _cover_jobs:     dict[str, dict] = {}
 _scan_jobs: dict[str, dict] = {}
@@ -67,28 +120,6 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 MAX_FILE_SIZE = 150 * 1024 * 1024  # 150 MB
 STREAM_CHUNK  = 1 * 1024 * 1024    # 1 MB read chunks
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Global exception handler — turns unhandled crashes into readable JSON 500s
-# instead of silently closing the TCP connection (which looks like "Network Error")
-# ─────────────────────────────────────────────────────────────────────────────
-    
-# pyrefly: ignore [missing-import]
-from fastapi.requests import Request
-# pyrefly: ignore [missing-import]
-from fastapi.responses import JSONResponse
-
-@app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception):
-    logger.error(
-        "Unhandled exception on %s %s: %s\n%s",
-        request.method, request.url.path, exc, traceback.format_exc(),
-    )
-    return JSONResponse(
-        status_code=500,
-        content={"detail": f"Internal server error: {exc}"},
-    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -626,13 +657,14 @@ def download_cover_doc(job_id: str):
 
     return FileResponse(path, media_type=media_type, filename=download_name)
 
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Handwritten Book Scanner
 # ─────────────────────────────────────────────────────────────────────────────
- 
+
 SCAN_ALLOWED_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff", ".tif", ".gif", ".pdf", ".docx", ".zip"}
- 
- 
+
+
 @app.post("/scan-handwritten")
 async def scan_handwritten(
     file: Optional[UploadFile] = File(default=None),
@@ -641,31 +673,31 @@ async def scan_handwritten(
 ):
     """
     Transcribe handwritten pages into a clean book.
- 
+
     Accepts:
     - Single file: image (jpg/png/webp/bmp/tiff/gif), PDF scan, DOCX with images, or ZIP of images
     - Multiple files: list of image files (multi-upload)
- 
+
     Returns job metadata + download URLs for PDF and DOCX.
     """
     import tempfile, zipfile as _zipfile
- 
+
     # Normalise: single file vs multiple
     all_uploads: list[UploadFile] = []
     if file and file.filename:
         all_uploads.append(file)
     if files:
         all_uploads.extend(files)
- 
+
     if not all_uploads:
         raise HTTPException(400, "No file(s) uploaded.")
- 
+
     # Validate extensions
     for u in all_uploads:
         ext = os.path.splitext(u.filename or "")[1].lower()
         if ext not in SCAN_ALLOWED_EXTS:
             raise HTTPException(400, f"Unsupported file type '{ext}'. Accepted: images, .pdf, .docx, .zip")
- 
+
     # If multiple image files, bundle them into a temporary ZIP
     if len(all_uploads) > 1:
         zip_job_id = uuid.uuid4().hex
@@ -703,14 +735,14 @@ async def scan_handwritten(
         finally:
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
- 
+
     job_id = result["job_id"]
     _scan_jobs[job_id] = {
         "pdf_path": result["pdf_path"],
         "docx_path": result["docx_path"],
         "title": result["title"],
     }
- 
+
     return {
         "job_id": job_id,
         "title": result["title"],
@@ -723,8 +755,8 @@ async def scan_handwritten(
         "pdf_url": f"/scan-handwritten/{job_id}/download/pdf",
         "docx_url": f"/scan-handwritten/{job_id}/download/docx",
     }
- 
- 
+
+
 @app.get("/scan-handwritten/{job_id}/download/pdf")
 def download_scan_pdf(job_id: str):
     job = _scan_jobs.get(job_id)
@@ -736,8 +768,8 @@ def download_scan_pdf(job_id: str):
     title = job.get("title", "manuscript")
     safe = "".join(c for c in title if c.isalnum() or c in (" ", "-", "_")).strip()
     return FileResponse(path, media_type="application/pdf", filename=f"{safe}.pdf")
- 
- 
+
+
 @app.get("/scan-handwritten/{job_id}/download/docx")
 def download_scan_docx(job_id: str):
     job = _scan_jobs.get(job_id)
@@ -754,13 +786,14 @@ def download_scan_docx(job_id: str):
         filename=f"{safe}.docx",
     )
 
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Book Editor — session management
 # ─────────────────────────────────────────────────────────────────────────────
- 
+
 EDITOR_ALLOWED_EXTS = {".pdf", ".docx", ".zip", ".txt", ".md"}
- 
- 
+
+
 @app.post("/editor/upload")
 async def editor_upload(
     file: UploadFile = File(...),
@@ -774,20 +807,20 @@ async def editor_upload(
     ext = os.path.splitext(filename)[1].lower()
     if ext not in EDITOR_ALLOWED_EXTS:
         raise HTTPException(400, f"Unsupported file type '{ext}'. Upload .pdf, .docx, .zip, .txt, or .md")
- 
+
     tmp_path = os.path.join(OUTPUT_DIR, f"editor_upload_{uuid.uuid4().hex}{ext}")
     try:
         await _stream_upload_to_disk(file, tmp_path)
- 
+
         raw_text = extract_book_text(tmp_path, filename)
         if not raw_text.strip():
             raise HTTPException(400, "Document appears empty or unreadable.")
- 
+
         book_structure = parse_book_structure(raw_text, filename)
     finally:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
- 
+
     session_id = uuid.uuid4().hex
     _editor_sessions[session_id] = {
         "book": book_structure,
@@ -797,7 +830,7 @@ async def editor_upload(
         "turn": 0,
         "original_filename": filename,
     }
- 
+
     return {
         "session_id": session_id,
         "title": book_structure.get("title", "Untitled"),
@@ -808,8 +841,8 @@ async def editor_upload(
         "available_themes": list(THEMES.keys()),
         "message": f"Book loaded successfully. {len(book_structure.get('chapters', []))} chapters found. What would you like to edit?",
     }
- 
- 
+
+
 @app.post("/editor/{session_id}/chat")
 async def editor_chat(
     session_id: str,
@@ -823,15 +856,15 @@ async def editor_chat(
     session = _editor_sessions.get(session_id)
     if not session:
         raise HTTPException(404, "Editor session not found. Please re-upload your book.")
- 
+
     current_book = session["book"]
     current_theme = theme or session["theme"]
     session["turn"] += 1
     turn = session["turn"]
- 
+
     # Add user message to history
     session["history"].append({"role": "user", "content": user_message})
- 
+
     try:
         result = process_editor_turn(
             book_structure=current_book,
@@ -848,11 +881,11 @@ async def editor_chat(
             "content": f"I encountered an error applying that edit: {str(e)}. Please try rephrasing your request.",
         })
         raise HTTPException(500, f"Edit failed: {str(e)}")
- 
+
     # Update session state
     session["book"]  = result["updated_book"]
     session["theme"] = result["theme"]
- 
+
     version_record = {
         "turn": turn,
         "pdf_path": result["pdf_path"],
@@ -864,7 +897,7 @@ async def editor_chat(
         "docx_url": f"/editor/{session_id}/download/docx/{turn}",
     }
     session["versions"].append(version_record)
- 
+
     # Add assistant response to history
     assistant_msg = (
         f"{result['edit_summary']}\n\n"
@@ -873,7 +906,7 @@ async def editor_chat(
         f"Version {turn} ready to download."
     )
     session["history"].append({"role": "assistant", "content": assistant_msg})
- 
+
     return {
         "turn": turn,
         "edit_summary": result["edit_summary"],
@@ -885,8 +918,8 @@ async def editor_chat(
         "docx_url": version_record["docx_url"],
         "assistant_message": assistant_msg,
     }
- 
- 
+
+
 @app.get("/editor/{session_id}/download/pdf/{turn}")
 def editor_download_pdf(session_id: str, turn: int):
     session = _editor_sessions.get(session_id)
@@ -898,8 +931,8 @@ def editor_download_pdf(session_id: str, turn: int):
     title = session["book"].get("title", "book")
     safe = "".join(c for c in title if c.isalnum() or c in (" ", "-", "_")).strip()
     return FileResponse(version["pdf_path"], media_type="application/pdf", filename=f"{safe}_v{turn}.pdf")
- 
- 
+
+
 @app.get("/editor/{session_id}/download/docx/{turn}")
 def editor_download_docx(session_id: str, turn: int):
     session = _editor_sessions.get(session_id)
@@ -915,8 +948,8 @@ def editor_download_docx(session_id: str, turn: int):
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         filename=f"{safe}_v{turn}.docx",
     )
- 
- 
+
+
 @app.get("/editor/{session_id}/history")
 def editor_history(session_id: str):
     session = _editor_sessions.get(session_id)
@@ -940,8 +973,8 @@ def editor_history(session_id: str):
         ],
         "messages": session["history"],
     }
- 
- 
+
+
 @app.delete("/editor/{session_id}")
 def editor_delete_session(session_id: str):
     session = _editor_sessions.pop(session_id, None)
@@ -954,21 +987,21 @@ def editor_delete_session(session_id: str):
                     try: os.remove(p)
                     except: pass
     return {"deleted": True}
- 
+
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Book Translator  
+# Book Translator
 # ─────────────────────────────────────────────────────────────────────────────
- 
+
 TRANSLATE_ALLOWED_EXTS = {".pdf", ".docx", ".zip"}
- 
- 
+
+
 def _run_translation_job(job_id: str, file_path: str, filename: str,
                          target_language: str, source_language: str) -> None:
     """Background thread worker for translation."""
     def progress(stage: str, pct: int, message: str) -> None:
         _translate_jobs[job_id].update({"stage": stage, "pct": pct, "message": message})
- 
+
     try:
         result = translate_book(
             file_path=file_path,
@@ -999,8 +1032,8 @@ def _run_translation_job(job_id: str, file_path: str, filename: str,
                 os.remove(file_path)
             except Exception:
                 pass
- 
- 
+
+
 @app.post("/translate")
 async def translate_book_endpoint(
     file: UploadFile = File(...),
@@ -1013,7 +1046,7 @@ async def translate_book_endpoint(
     """
     filename = file.filename or "document.pdf"
     ext = os.path.splitext(filename)[1].lower()
- 
+
     if ext not in TRANSLATE_ALLOWED_EXTS:
         raise HTTPException(
             400,
@@ -1021,42 +1054,42 @@ async def translate_book_endpoint(
         )
     if not target_language.strip():
         raise HTTPException(400, "target_language is required.")
- 
+
     job_id = uuid.uuid4().hex
     tmp_path = os.path.join(OUTPUT_DIR, f"translate_upload_{job_id}{ext}")
     await _stream_upload_to_disk(file, tmp_path)
- 
+
     _translate_jobs[job_id] = {
         "stage": "extracting",
         "pct": 5,
         "message": "Upload received — starting extraction…",
         "result": None,
     }
- 
+
     thread = threading.Thread(
         target=_run_translation_job,
         args=(job_id, tmp_path, filename, target_language.strip(), source_language.strip()),
         daemon=True,
     )
     thread.start()
- 
+
     return {"job_id": job_id, "status": "started"}
- 
- 
+
+
 @app.get("/translate/{job_id}/status")
 def translate_status(job_id: str):
     """Poll this endpoint for translation progress."""
     job = _translate_jobs.get(job_id)
     if not job:
         raise HTTPException(404, "Translation job not found.")
- 
+
     resp: dict = {
         "job_id": job_id,
         "stage": job["stage"],
         "pct": job["pct"],
         "message": job["message"],
     }
- 
+
     if job["stage"] == "done" and job.get("result"):
         r = job["result"]
         resp["result"] = {
@@ -1070,10 +1103,10 @@ def translate_status(job_id: str):
             "pdf_url": f"/translate/{job_id}/download/pdf",
             "docx_url": f"/translate/{job_id}/download/docx",
         }
- 
+
     return resp
- 
- 
+
+
 @app.get("/translate/{job_id}/download/pdf")
 def download_translate_pdf(job_id: str):
     job = _translate_jobs.get(job_id)
@@ -1085,8 +1118,8 @@ def download_translate_pdf(job_id: str):
     title = job.get("title", "translated_book")
     safe = "".join(c for c in title if c.isalnum() or c in (" ", "-", "_")).strip()
     return FileResponse(path, media_type="application/pdf", filename=f"{safe}_translated.pdf")
- 
- 
+
+
 @app.get("/translate/{job_id}/download/docx")
 def download_translate_docx(job_id: str):
     job = _translate_jobs.get(job_id)
@@ -1102,13 +1135,15 @@ def download_translate_docx(job_id: str):
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         filename=f"{safe}_translated.docx",
     )
- 
+
+
 # ─────────────────────────────────────────────────────────────────────────────
-# Internal Layout Designer 
-# ────────────────────────────────────────────────────────────────────────────
+# Internal Layout Designer
+# ─────────────────────────────────────────────────────────────────────────────
 
 LAYOUT_ALLOWED_EXTS = {".pdf", ".docx", ".zip"}
- 
+
+
 def _run_layout_job(
     job_id: str,
     file_path: str,
@@ -1183,8 +1218,8 @@ def _run_layout_job(
                 os.remove(file_path)
             except Exception:
                 pass
- 
- 
+
+
 @app.post("/design-layout")
 async def design_layout_endpoint(
     file: UploadFile = File(...),
@@ -1192,7 +1227,7 @@ async def design_layout_endpoint(
     page_height_mm: float = Form(default=297.0),
     book_title: str = Form(default=""),
     design_instructions: str = Form(default=""),
-    book_type: Optional[str] = Form(default=None),  
+    book_type: Optional[str] = Form(default=None),
     visual_template: Optional[str] = Form(default=None),
     # Typography overrides — all optional, empty string = let AI decide
     body_font: Optional[str] = Form(default=None),
@@ -1284,22 +1319,22 @@ async def design_layout_endpoint(
     thread.start()
 
     return {"job_id": job_id, "status": "started"}
- 
- 
+
+
 @app.get("/layout/{job_id}/status")
 def layout_status(job_id: str):
     """Poll this endpoint for layout-design progress."""
     job = _layout_jobs.get(job_id)
     if not job:
         raise HTTPException(404, "Layout job not found.")
- 
+
     resp: dict = {
         "job_id": job_id,
         "stage": job["stage"],
         "pct": job["pct"],
         "message": job["message"],
     }
- 
+
     if job["stage"] == "done" and job.get("result"):
         r = job["result"]
         resp["result"] = {
@@ -1312,10 +1347,10 @@ def layout_status(job_id: str):
             "pdf_url": f"/layout/{job_id}/download/pdf",
             "docx_url": f"/layout/{job_id}/download/docx",
         }
- 
+
     return resp
- 
- 
+
+
 @app.get("/layout/{job_id}/download/pdf")
 def download_layout_pdf(job_id: str):
     job = _layout_jobs.get(job_id)
@@ -1327,8 +1362,8 @@ def download_layout_pdf(job_id: str):
     title = job.get("title", "book_layout")
     safe = "".join(c for c in title if c.isalnum() or c in (" ", "-", "_")).strip()
     return FileResponse(path, media_type="application/pdf", filename=f"{safe}_layout.pdf")
- 
- 
+
+
 @app.get("/layout/{job_id}/download/docx")
 def download_layout_docx(job_id: str):
     job = _layout_jobs.get(job_id)
