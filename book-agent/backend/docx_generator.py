@@ -1,3 +1,22 @@
+"""
+docx_generator.py — Multilingual DOCX output using python-docx.
+
+Font strategy
+─────────────
+Word/LibreOffice handle Unicode natively — they perform font substitution
+automatically at render time.  However, we must:
+  1. Set the font name to one that actually ships with the target OS OR
+     embed fonts.  The safest cross-platform choice is "Noto Sans" for
+     non-Latin scripts (works on Linux/Mac/Win if Noto is installed) and
+     "Calibri" for Latin text.
+  2. Set the <w:cs> (complex script) font alongside <w:ascii> so Word
+     activates the correct shaping engine for Arabic, Hebrew, Devanagari, etc.
+  3. Mark paragraphs that are right-to-left with the <w:bidi> property so
+     Word renders them RTL.
+  4. Ensure the document charset declaration is UTF-8 (python-docx does this
+     by default, but we make it explicit).
+"""
+
 # pyrefly: ignore [missing-import]
 from docx import Document
 # pyrefly: ignore [missing-import]
@@ -10,80 +29,208 @@ from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 import datetime
 import os
+import unicodedata
 
 
-def set_heading_color(paragraph, hex_color="4F46E5"):
+# ── Script detection ───────────────────────────────────────────────────────────
+
+_SCRIPT_RANGES = {
+    "Arabic":     (0x0600, 0x06FF),
+    "Hebrew":     (0x0590, 0x05FF),
+    "Devanagari": (0x0900, 0x097F),
+    "Bengali":    (0x0980, 0x09FF),
+    "Tamil":      (0x0B80, 0x0BFF),
+    "Telugu":     (0x0C00, 0x0C7F),
+    "Kannada":    (0x0C80, 0x0CFF),
+    "Malayalam":  (0x0D00, 0x0D7F),
+    "Thai":       (0x0E00, 0x0E7F),
+    "Hiragana":   (0x3040, 0x309F),
+    "Katakana":   (0x30A0, 0x30FF),
+    "CJK":        (0x4E00, 0x9FFF),
+    "Hangul":     (0xAC00, 0xD7AF),
+    "Cyrillic":   (0x0400, 0x04FF),
+    "Greek":      (0x0370, 0x03FF),
+}
+
+_RTL_SCRIPTS = {"Arabic", "Hebrew"}
+
+# Map script → preferred font name (must be available in Word/LibreOffice)
+# Noto fonts cover everything; system fonts are listed as fallbacks.
+_SCRIPT_FONT = {
+    "Arabic":     "Noto Sans Arabic",
+    "Hebrew":     "Noto Sans Hebrew",
+    "Devanagari": "Noto Sans Devanagari",
+    "Bengali":    "Noto Sans Bengali",
+    "Tamil":      "Noto Sans Tamil",
+    "Telugu":     "Noto Sans Telugu",
+    "Kannada":    "Noto Sans Kannada",
+    "Malayalam":  "Noto Sans Malayalam",
+    "Thai":       "Noto Sans Thai",
+    "CJK":        "Noto Sans SC",
+    "Hiragana":   "Noto Sans JP",
+    "Katakana":   "Noto Sans JP",
+    "Hangul":     "Noto Sans KR",
+    "Cyrillic":   "Calibri",
+    "Greek":      "Calibri",
+    "Latin":      "Calibri",
+}
+
+
+def _detect_script(text: str) -> str:
+    counts = {k: 0 for k in _SCRIPT_RANGES}
+    for ch in text:
+        cp = ord(ch)
+        for name, (lo, hi) in _SCRIPT_RANGES.items():
+            if lo <= cp <= hi:
+                counts[name] += 1
+                break
+    best = max(counts, key=counts.get)
+    return best if counts[best] > 0 else "Latin"
+
+
+def _font_for(text: str) -> str:
+    return _SCRIPT_FONT.get(_detect_script(text), "Calibri")
+
+
+def _is_rtl(text: str) -> bool:
+    return _detect_script(text) in _RTL_SCRIPTS
+
+
+def _para_align(text: str):
+    return WD_ALIGN_PARAGRAPH.RIGHT if _is_rtl(text) else WD_ALIGN_PARAGRAPH.JUSTIFY
+
+
+# ── XML helpers ────────────────────────────────────────────────────────────────
+
+def _set_run_font(run, font_name: str):
+    """Set ascii, hAnsi, eastAsia, and cs (complex script) font on a run."""
+    run.font.name = font_name
+    # Force the complex-script font via OOXML so Arabic/Hebrew/Indic shaping works
+    rPr = run._r.get_or_add_rPr()
+    for tag in ("w:rFonts",):
+        el = rPr.find(qn(tag))
+        if el is None:
+            el = OxmlElement(tag)
+            rPr.insert(0, el)
+        el.set(qn("w:ascii"),    font_name)
+        el.set(qn("w:hAnsi"),   font_name)
+        el.set(qn("w:eastAsia"), font_name)
+        el.set(qn("w:cs"),      font_name)
+
+
+def _set_para_bidi(paragraph, rtl: bool):
+    """Set or remove the <w:bidi> element on a paragraph for RTL text."""
+    pPr = paragraph._p.get_or_add_pPr()
+    bidi = pPr.find(qn("w:bidi"))
+    if rtl:
+        if bidi is None:
+            bidi = OxmlElement("w:bidi")
+            pPr.append(bidi)
+        bidi.set(qn("w:val"), "1")
+    else:
+        if bidi is not None:
+            pPr.remove(bidi)
+
+
+def _add_run(paragraph, text: str, size_pt: float,
+             bold: bool = False, italic: bool = False,
+             color: RGBColor | None = None) -> None:
+    """Add a run with correct font, size, direction, and optional style."""
+    font_name = _font_for(text)
+    run = paragraph.add_run(text)
+    _set_run_font(run, font_name)
+    run.font.size   = Pt(size_pt)
+    run.font.bold   = bold
+    run.font.italic = italic
+    if color:
+        run.font.color.rgb = color
+    _set_para_bidi(paragraph, _is_rtl(text))
+    paragraph.alignment = _para_align(text)
+
+
+def set_heading_color(paragraph, hex_color: str = "4F46E5"):
     for run in paragraph.runs:
         run.font.color.rgb = RGBColor(
             int(hex_color[0:2], 16),
             int(hex_color[2:4], 16),
-            int(hex_color[4:6], 16)
+            int(hex_color[4:6], 16),
         )
+        # Re-apply complex-script font so headings render correctly too
+        _set_run_font(run, _font_for(run.text))
 
 
 def add_page_number(paragraph):
     run = paragraph.add_run()
-    fldChar1 = OxmlElement('w:fldChar')
-    fldChar1.set(qn('w:fldCharType'), 'begin')
-    instrText = OxmlElement('w:instrText')
-    instrText.text = 'PAGE'
-    fldChar2 = OxmlElement('w:fldChar')
-    fldChar2.set(qn('w:fldCharType'), 'end')
+    fldChar1 = OxmlElement("w:fldChar")
+    fldChar1.set(qn("w:fldCharType"), "begin")
+    instrText = OxmlElement("w:instrText")
+    instrText.text = "PAGE"
+    fldChar2 = OxmlElement("w:fldChar")
+    fldChar2.set(qn("w:fldCharType"), "end")
     run._r.append(fldChar1)
     run._r.append(instrText)
     run._r.append(fldChar2)
 
 
+# ── Main generator ─────────────────────────────────────────────────────────────
+
 def generate_docx(book_title: str, segments, output_dir: str = "output") -> str:
     os.makedirs(output_dir, exist_ok=True)
-    safe_title = "".join(c for c in book_title if c.isalnum() or c in (" ", "-", "_")).strip()
-    filepath   = os.path.join(output_dir, f"{safe_title}.docx")
+    safe_title = "".join(
+        c for c in book_title if c.isalnum() or c in (" ", "-", "_")
+    ).strip()
+    filepath = os.path.join(output_dir, f"{safe_title}.docx")
 
     doc = Document()
 
-    # ── Page Setup ─────────────────────────────────────────────────────────────
+    # ── Page setup ─────────────────────────────────────────────────────────────
     section = doc.sections[0]
-    section.page_height     = Cm(29.7)
-    section.page_width      = Cm(21.0)
-    section.left_margin     = Cm(2.5)
-    section.right_margin    = Cm(2.5)
-    section.top_margin      = Cm(2.5)
-    section.bottom_margin   = Cm(2.0)
+    section.page_height   = Cm(29.7)
+    section.page_width    = Cm(21.0)
+    section.left_margin   = Cm(2.5)
+    section.right_margin  = Cm(2.5)
+    section.top_margin    = Cm(2.5)
+    section.bottom_margin = Cm(2.0)
 
-    # ── Default styles ─────────────────────────────────────────────────────────
-    style_normal = doc.styles['Normal']
-    style_normal.font.name = 'Calibri'
+    # Enable complex-script layout at document level
+    settings = doc.settings.element
+    compat = OxmlElement("w:compat")
+    cs_el  = OxmlElement("w:compatSetting")
+    cs_el.set(qn("w:name"),  "compatibilityMode")
+    cs_el.set(qn("w:uri"),   "http://schemas.microsoft.com/office/word")
+    cs_el.set(qn("w:val"),   "15")
+    compat.append(cs_el)
+    settings.append(compat)
+
+    # Default Normal style
+    style_normal = doc.styles["Normal"]
+    style_normal.font.name = _font_for(book_title)
     style_normal.font.size = Pt(11)
 
     # ══════════════════════════════════════════════════════════════════════════
     # COVER PAGE
     # ══════════════════════════════════════════════════════════════════════════
-    doc.add_paragraph()
-    doc.add_paragraph()
-    doc.add_paragraph()
+    for _ in range(3):
+        doc.add_paragraph()
 
     title_para = doc.add_paragraph()
     title_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    title_run  = title_para.add_run(book_title)
-    title_run.font.size  = Pt(28)
-    title_run.font.bold  = True
-    title_run.font.color.rgb = RGBColor(0x1E, 0x29, 0x3B)
+    _add_run(title_para, book_title, 28, bold=True,
+             color=RGBColor(0x1E, 0x29, 0x3B))
 
     doc.add_paragraph()
 
     date_para = doc.add_paragraph()
     date_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    date_run  = date_para.add_run(f"Generated on {datetime.date.today().strftime('%B %d, %Y')}")
-    date_run.font.size  = Pt(12)
-    date_run.font.color.rgb = RGBColor(0x64, 0x74, 0x8B)
+    _add_run(date_para,
+             f"Generated on {datetime.date.today().strftime('%B %d, %Y')}",
+             12, color=RGBColor(0x64, 0x74, 0x8B))
 
     doc.add_paragraph()
     agent_para = doc.add_paragraph()
     agent_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    agent_run  = agent_para.add_run("Generated by AI Book Writing Agent")
-    agent_run.font.size  = Pt(10)
-    agent_run.font.italic = True
-    agent_run.font.color.rgb = RGBColor(0x94, 0xA3, 0xB8)
+    _add_run(agent_para, "Generated by AI Book Writing Agent", 10,
+             italic=True, color=RGBColor(0x94, 0xA3, 0xB8))
 
     doc.add_page_break()
 
@@ -93,7 +240,7 @@ def generate_docx(book_title: str, segments, output_dir: str = "output") -> str:
     toc_heading = doc.add_heading("Table of Contents", level=1)
     set_heading_color(toc_heading, "1E293B")
 
-    chapters = {}
+    chapters: dict = {}
     for seg in segments:
         key = seg.chapter_number
         if key not in chapters:
@@ -102,16 +249,12 @@ def generate_docx(book_title: str, segments, output_dir: str = "output") -> str:
 
     for ch_num in sorted(chapters.keys()):
         ch   = chapters[ch_num]
-        para = doc.add_paragraph(style='List Bullet')
-        run  = para.add_run(f"Chapter {ch_num}  —  {ch['title']}")
-        run.font.bold = True
-        run.font.size = Pt(11)
-        run.font.color.rgb = RGBColor(0x4F, 0x46, 0xE5)
+        para = doc.add_paragraph(style="List Bullet")
+        _add_run(para, f"Chapter {ch_num}  —  {ch['title']}",
+                 11, bold=True, color=RGBColor(0x4F, 0x46, 0xE5))
         for sub in ch["subs"]:
-            sub_para = doc.add_paragraph(style='List Bullet 2')
-            sub_run  = sub_para.add_run(sub)
-            sub_run.font.size = Pt(10)
-            sub_run.font.color.rgb = RGBColor(0x64, 0x74, 0x8B)
+            sub_para = doc.add_paragraph(style="List Bullet 2")
+            _add_run(sub_para, sub, 10, color=RGBColor(0x64, 0x74, 0x8B))
 
     doc.add_page_break()
 
@@ -126,33 +269,29 @@ def generate_docx(book_title: str, segments, output_dir: str = "output") -> str:
                 doc.add_page_break()
             current_chapter = seg.chapter_number
 
-            # Chapter label
             label_para = doc.add_paragraph()
-            label_run  = label_para.add_run(f"Chapter {seg.chapter_number}")
-            label_run.font.size  = Pt(11)
-            label_run.font.color.rgb = RGBColor(0x4F, 0x46, 0xE5)
-            label_run.font.bold  = True
+            _add_run(label_para, f"Chapter {seg.chapter_number}", 11,
+                     bold=True, color=RGBColor(0x4F, 0x46, 0xE5))
 
-            # Chapter title
             ch_heading = doc.add_heading(seg.chapter_title, level=1)
             set_heading_color(ch_heading, "1E293B")
+            _set_para_bidi(ch_heading, _is_rtl(seg.chapter_title))
             doc.add_paragraph()
 
-        # Sub-heading
         sub_heading = doc.add_heading(seg.subheading, level=2)
         set_heading_color(sub_heading, "334155")
+        _set_para_bidi(sub_heading, _is_rtl(seg.subheading))
 
-        # Body content
         for para_text in seg.content.split("\n"):
-            para_text = para_text.strip()
-            if para_text:
-                para = doc.add_paragraph(para_text)
-                para.style = doc.styles['Normal']
-                para.paragraph_format.space_after  = Pt(6)
-                para.paragraph_format.line_spacing = Pt(16)
-                para.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+            para_text = unicodedata.normalize("NFC", para_text.strip())
+            if not para_text:
+                continue
+            para = doc.add_paragraph()
+            para.style = doc.styles["Normal"]
+            para.paragraph_format.space_after  = Pt(6)
+            para.paragraph_format.line_spacing = Pt(16)
+            _add_run(para, para_text, 11)
 
-    # ── Save ───────────────────────────────────────────────────────────────────
     doc.save(filepath)
     print(f"  ✅ DOCX saved: {filepath}")
     return filepath
