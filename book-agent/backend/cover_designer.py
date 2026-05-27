@@ -38,6 +38,7 @@ import uuid
 import shutil
 import random
 import tempfile
+import urllib.request
 from pathlib import Path
 
 from openai import OpenAI           # pyrefly: ignore [missing-import]
@@ -114,6 +115,88 @@ def _extract_docx_image(docx_path: str) -> bytes | None:
 
 def _image_to_b64(img_bytes: bytes) -> str:
     return base64.b64encode(img_bytes).decode()
+
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DALL-E 3: Generate illustrated cover image
+# ─────────────────────────────────────────────────────────────────────────────
+
+DALLE_PROMPT_SYSTEM = """You are an expert book cover art director.
+Given a book title, genre, style, and design brief, write a single vivid
+DALL-E 3 image-generation prompt that will produce a stunning, professional
+illustrated book cover background image.
+
+Rules:
+- No text, letters, words, or titles in the image — ONLY illustration/art.
+- The image will be portrait orientation (2:3 ratio, like a book cover).
+- Describe the main visual scene, characters, atmosphere, color palette,
+  lighting, art style (e.g. "detailed digital painting", "ink wash",
+  "vibrant illustration", "realistic oil painting", "watercolor").
+- For historical/biography books: dramatic scene or iconic portrait.
+- For fantasy: epic landscape or character art.
+- For science/tech: futuristic visualization.
+- For romance: warm, emotional scene.
+- Be very specific and vivid. 3-5 sentences max.
+- Do NOT mention any text or typography.
+- End with: "No text, no words, no letters in the image."
+"""
+
+
+def generate_dalle_prompt(concept: dict, book_title: str) -> str:
+    """Ask GPT-4o to craft the best DALL-E 3 prompt for this cover."""
+    genre   = concept.get("genre_label", "")
+    style   = concept.get("style", "premium")
+    tagline = concept.get("tagline", "")
+    palette = concept.get("palette", {})
+    bg1     = palette.get("bg_primary", "#1a1a2e")
+    acc     = palette.get("accent", "#f59e0b")
+
+    user_msg = (
+        f"Book title: {book_title}\n"
+        f"Genre: {genre}\n"
+        f"Style: {style}\n"
+        f"Tagline: {tagline}\n"
+        f"Primary palette color: {bg1}, accent: {acc}\n"
+        f"Design rationale: {concept.get('design_rationale', '')}\n"
+        "Write a DALL-E 3 prompt for the cover background illustration."
+    )
+    resp = client.chat.completions.create(
+        model=MODEL,
+        messages=[
+            {"role": "system", "content": DALLE_PROMPT_SYSTEM},
+            {"role": "user",   "content": user_msg},
+        ],
+        temperature=0.85,
+        max_tokens=300,
+    )
+    return resp.choices[0].message.content.strip()
+
+
+def generate_cover_image(concept: dict, book_title: str) -> bytes | None:
+    """
+    Generate a professional illustrated cover image with DALL-E 3.
+    Returns raw PNG bytes, or None on failure.
+    """
+    try:
+        dalle_prompt = generate_dalle_prompt(concept, book_title)
+        print(f"  🎨 DALL-E 3 prompt: {dalle_prompt[:120]}…")
+
+        resp = client.images.generate(
+            model="dall-e-3",
+            prompt=dalle_prompt,
+            size="1024x1792",
+            quality="hd",
+            n=1,
+        )
+        image_url = resp.data[0].url
+        print("  ✅ DALL-E 3 image generated")
+
+        with urllib.request.urlopen(image_url) as r:
+            return r.read()
+    except Exception as ex:
+        print(f"  ⚠️  DALL-E 3 image generation failed: {ex}")
+        return None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -376,11 +459,262 @@ def _draw_image_on_canvas(c, img_bytes: bytes, x: float, y: float,
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# PDF cover renderer
+# PDF cover renderer  (v5 — DALL-E 3 image as full-bleed background)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def render_cover_pdf(concept: dict, output_path: str,
-                     book_image_bytes: bytes | None = None) -> str:
+                     book_image_bytes: bytes | None = None,
+                     dalle_image_bytes: bytes | None = None) -> str:
+    """
+    Render a professional A4 book cover PDF.
+
+    Priority:
+      1. If dalle_image_bytes supplied → use as full-bleed illustrated background
+      2. Else if book_image_bytes supplied → use blurred/tinted book page as bg
+      3. Else → pure gradient background
+
+    All text (title, subtitle, tagline, author) is composited with Pillow on
+    top of the background, then embedded into a ReportLab PDF page.
+    """
+    from reportlab.pdfgen import canvas as rl_canvas   # pyrefly: ignore [missing-import]
+    from reportlab.lib.pagesizes import A4              # pyrefly: ignore [missing-import]
+    from reportlab.lib.utils import ImageReader         # pyrefly: ignore [missing-import]
+
+    W_pt, H_pt = A4   # 595 × 842 pts
+
+    # Work in pixels for Pillow compositing
+    DPI  = 150
+    W_px = int(W_pt / 72 * DPI)   # ~1240 px
+    H_px = int(H_pt / 72 * DPI)   # ~1754 px
+
+    palette = concept.get("palette", {})
+
+    def _hex_to_rgb(h: str) -> tuple:
+        h = h.lstrip("#")
+        if len(h) == 3: h = "".join(c * 2 for c in h)
+        return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
+
+    bg1_rgb   = _hex_to_rgb(palette.get("bg_primary",    "#0f172a"))
+    bg2_rgb   = _hex_to_rgb(palette.get("bg_secondary",  "#1e3a5f"))
+    acc_rgb   = _hex_to_rgb(palette.get("accent",        "#f59e0b"))
+    acc2_rgb  = _hex_to_rgb(palette.get("accent2",       "#fbbf24"))
+    tcol_rgb  = _hex_to_rgb(palette.get("title_color",   "#ffffff"))
+    scol_rgb  = _hex_to_rgb(palette.get("subtitle_color","#e2e8f0"))
+    tgcol_rgb = _hex_to_rgb(palette.get("tagline_color", "#94a3b8"))
+
+    try:
+        # pyrefly: ignore [missing-import]
+        from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageEnhance, ImageOps
+    except ImportError:
+        print("  ⚠️  Pillow not available; using legacy ReportLab renderer")
+        return _render_cover_pdf_legacy(concept, output_path, book_image_bytes)
+
+    # ── Build background canvas ───────────────────────────────────────────────
+    if dalle_image_bytes:
+        ai_img = Image.open(io.BytesIO(dalle_image_bytes)).convert("RGBA")
+        ratio  = max(W_px / ai_img.width, H_px / ai_img.height)
+        nw, nh = int(ai_img.width * ratio), int(ai_img.height * ratio)
+        ai_img = ai_img.resize((nw, nh), Image.LANCZOS)
+        left   = (nw - W_px) // 2
+        top    = (nh - H_px) // 2
+        bg     = ai_img.crop((left, top, left + W_px, top + H_px)).convert("RGBA")
+        print("  ✅ DALL-E 3 image composited as cover background")
+
+    elif book_image_bytes:
+        bk_img = Image.open(io.BytesIO(book_image_bytes)).convert("RGBA")
+        ratio  = max(W_px / bk_img.width, H_px / bk_img.height)
+        nw, nh = int(bk_img.width * ratio), int(bk_img.height * ratio)
+        bk_img = bk_img.resize((nw, nh), Image.LANCZOS).crop(
+            ((nw - W_px)//2, (nh - H_px)//2,
+             (nw - W_px)//2 + W_px, (nh - H_px)//2 + H_px)
+        ).convert("RGBA")
+        bk_img = bk_img.filter(ImageFilter.GaussianBlur(radius=18))
+        bk_img = ImageEnhance.Brightness(bk_img).enhance(0.40)
+        grad   = Image.new("RGBA", (W_px, H_px))
+        gd     = ImageDraw.Draw(grad)
+        for yi in range(H_px):
+            t = yi / H_px
+            r = int(bg1_rgb[0]*(1-t) + bg2_rgb[0]*t)
+            g = int(bg1_rgb[1]*(1-t) + bg2_rgb[1]*t)
+            b = int(bg1_rgb[2]*(1-t) + bg2_rgb[2]*t)
+            gd.line([(0, yi), (W_px, yi)], fill=(r, g, b, 170))
+        bg = Image.alpha_composite(bk_img, grad)
+
+    else:
+        bg = Image.new("RGBA", (W_px, H_px))
+        gd = ImageDraw.Draw(bg)
+        for yi in range(H_px):
+            t = yi / H_px
+            r = int(bg1_rgb[0]*(1-t) + bg2_rgb[0]*t)
+            g = int(bg1_rgb[1]*(1-t) + bg2_rgb[1]*t)
+            b = int(bg1_rgb[2]*(1-t) + bg2_rgb[2]*t)
+            gd.line([(0, yi), (W_px, yi)], fill=(r, g, b, 255))
+
+    draw = ImageDraw.Draw(bg, "RGBA")
+
+    # ── Dark gradient at bottom for text legibility ───────────────────────────
+    overlay = Image.new("RGBA", (W_px, H_px), (0, 0, 0, 0))
+    od = ImageDraw.Draw(overlay)
+    grad_start = int(H_px * 0.40)
+    for yi in range(grad_start, H_px):
+        t     = (yi - grad_start) / (H_px - grad_start)
+        alpha = int(215 * (t ** 0.65))
+        od.line([(0, yi), (W_px, yi)], fill=(0, 0, 0, alpha))
+    bg   = Image.alpha_composite(bg, overlay)
+    draw = ImageDraw.Draw(bg, "RGBA")
+
+    # ── Left accent bar ───────────────────────────────────────────────────────
+    bar_w = max(8, int(W_px * 0.012))
+    draw.rectangle([0, 0, bar_w, H_px],               fill=acc_rgb  + (255,))
+    draw.rectangle([bar_w, 0, bar_w + max(3, int(W_px * 0.004)), H_px],
+                                                        fill=acc2_rgb + (200,))
+
+    # ── Font loading ──────────────────────────────────────────────────────────
+    def _load_font(size: int, bold: bool = False) -> ImageFont.ImageFont:
+        candidates = [
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"     if bold else
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf" if bold else
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+            "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf"         if bold else
+            "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+            "C:/Windows/Fonts/arialbd.ttf" if bold else "C:/Windows/Fonts/arial.ttf",
+            "/System/Library/Fonts/Helvetica.ttc",
+        ]
+        for path in candidates:
+            if path and os.path.exists(path):
+                try:
+                    return ImageFont.truetype(path, size)
+                except Exception:
+                    continue
+        return ImageFont.load_default()
+
+    # ── Text helpers ──────────────────────────────────────────────────────────
+    def _wrap_text(text: str, font: ImageFont.ImageFont, max_width: int) -> list:
+        words, lines, current = text.split(), [], ""
+        for w in words:
+            test = (current + " " + w).strip()
+            bb   = draw.textbbox((0, 0), test, font=font)
+            if bb[2] - bb[0] <= max_width:
+                current = test
+            else:
+                if current: lines.append(current)
+                current = w
+        if current: lines.append(current)
+        return lines or [text]
+
+    def _shadow_text(xy: tuple, text: str, font, fill: tuple, offset: int = 3, alpha: int = 140):
+        draw.text((xy[0] + offset, xy[1] + offset), text, font=font, fill=(0, 0, 0, alpha))
+        draw.text(xy, text, font=font, fill=fill + (255,))
+
+    # ── Genre badge ───────────────────────────────────────────────────────────
+    genre = concept.get("genre_label", "").upper()[:20].strip()
+    if genre:
+        bf    = _load_font(int(H_px * 0.014), bold=True)
+        bx, by = int(W_px * 0.065), int(H_px * 0.032)
+        bb    = draw.textbbox((0, 0), genre, font=bf)
+        bw    = bb[2] - bb[0] + int(W_px * 0.035)
+        bh    = bb[3] - bb[1] + int(H_px * 0.010)
+        draw.rounded_rectangle([bx, by, bx + bw, by + bh],
+                                radius=int(bh * 0.3), fill=(0, 0, 0, 160))
+        draw.rounded_rectangle([bx, by, bx + int(W_px * 0.008), by + bh],
+                                radius=int(bh * 0.3), fill=acc_rgb + (255,))
+        draw.text((bx + int(W_px * 0.012), by + int(H_px * 0.004)),
+                  genre, font=bf, fill=acc_rgb + (255,))
+
+    # ── Title ─────────────────────────────────────────────────────────────────
+    title_lines_raw = [ln.strip() for ln in concept.get("title", "Book Title").split("\n") if ln.strip()]
+    max_chars  = max(len(ln) for ln in title_lines_raw)
+    title_size = (
+        int(H_px * 0.082) if max_chars <= 10 else
+        int(H_px * 0.068) if max_chars <= 16 else
+        int(H_px * 0.055) if max_chars <= 22 else
+        int(H_px * 0.044)
+    )
+    title_font = _load_font(title_size, bold=True)
+    text_left  = int(W_px * 0.065)
+    text_width = W_px - text_left - int(W_px * 0.065)
+
+    title_lines = []
+    for raw_ln in title_lines_raw:
+        title_lines.extend(_wrap_text(raw_ln, title_font, text_width))
+
+    BOTTOM_BAND_H = int(H_px * 0.085)
+    line_gap      = int(title_size * 1.15)
+    total_title_h = len(title_lines) * line_gap
+    ty_bottom     = H_px - BOTTOM_BAND_H - int(H_px * 0.025)
+    ty_start      = ty_bottom - total_title_h
+
+    for i, ln in enumerate(title_lines):
+        _shadow_text((text_left, ty_start + i * line_gap), ln, title_font, tcol_rgb)
+
+    rule_y = ty_bottom + int(H_px * 0.005)
+    draw.rectangle([text_left, rule_y,
+                    text_left + int(text_width * 0.72), rule_y + int(H_px * 0.004)],
+                   fill=acc_rgb + (230,))
+    draw.rectangle([text_left, rule_y + int(H_px * 0.007),
+                    text_left + int(text_width * 0.42), rule_y + int(H_px * 0.009)],
+                   fill=acc2_rgb + (180,))
+
+    # ── Subtitle ──────────────────────────────────────────────────────────────
+    subtitle = concept.get("subtitle", "").strip()
+    sub_y    = rule_y + int(H_px * 0.016)
+    if subtitle:
+        sub_font = _load_font(int(H_px * 0.026))
+        for ln in _wrap_text(subtitle, sub_font, text_width):
+            draw.text((text_left, sub_y), ln, font=sub_font, fill=scol_rgb + (230,))
+            sub_y += int(H_px * 0.030)
+
+    # ── Tagline ───────────────────────────────────────────────────────────────
+    tagline = concept.get("tagline", "").strip()
+    if tagline:
+        tag_font = _load_font(int(H_px * 0.019))
+        tag_y    = sub_y + int(H_px * 0.006)
+        for ln in _wrap_text(tagline, tag_font, text_width):
+            draw.text((text_left, tag_y), ln, font=tag_font, fill=tgcol_rgb + (200,))
+            tag_y += int(H_px * 0.023)
+
+    # ── Bottom author band ────────────────────────────────────────────────────
+    band_top  = H_px - BOTTOM_BAND_H
+    band_col  = tuple(max(0, int(c * 0.25)) for c in bg1_rgb) + (230,)
+    draw.rectangle([0, band_top, W_px, H_px], fill=band_col)
+    draw.rectangle([0, band_top, W_px, band_top + int(H_px * 0.003)], fill=acc_rgb + (255,))
+
+    author_line = concept.get("author_line", "").strip()
+    if author_line:
+        auth_font = _load_font(int(H_px * 0.020))
+        draw.text((text_left, band_top + int(BOTTOM_BAND_H * 0.32)),
+                  author_line, font=auth_font, fill=scol_rgb + (230,))
+
+    pub_font = _load_font(int(H_px * 0.016), bold=True)
+    pub_text = "EDITORIAL AI"
+    pb = draw.textbbox((0, 0), pub_text, font=pub_font)
+    draw.text((W_px - text_left - (pb[2] - pb[0]),
+               band_top + int(BOTTOM_BAND_H * 0.32)),
+              pub_text, font=pub_font, fill=acc_rgb + (230,))
+
+    # ── Top highlight bar ─────────────────────────────────────────────────────
+    draw.rectangle([0, 0, W_px, int(H_px * 0.006)], fill=acc_rgb + (80,))
+
+    # ── Embed into ReportLab PDF ──────────────────────────────────────────────
+    final_buf = io.BytesIO()
+    bg.convert("RGB").save(final_buf, format="JPEG", quality=92)
+    final_buf.seek(0)
+
+    c = rl_canvas.Canvas(output_path, pagesize=A4)
+    c.drawImage(ImageReader(final_buf), 0, 0, width=W_pt, height=H_pt,
+                preserveAspectRatio=False)
+    c.showPage()
+    c.save()
+    return output_path
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PDF cover renderer (legacy fallback — used when Pillow unavailable)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _render_cover_pdf_legacy(concept: dict, output_path: str,
+                              book_image_bytes: bytes | None = None) -> str:
     from reportlab.pdfgen import canvas as rl_canvas   # pyrefly: ignore [missing-import]
     from reportlab.lib.pagesizes import A4              # pyrefly: ignore [missing-import]
     from reportlab.lib.units import mm                  # pyrefly: ignore [missing-import]
@@ -1073,7 +1407,11 @@ def design_cover(
 
     if ext == ".pdf":
         cover_pdf = os.path.join(output_dir, f"coverpage_{job_id}.pdf")
-        render_cover_pdf(concept, cover_pdf, book_image_bytes=book_image)
+        print("  🖼️  Generating illustrated cover with DALL-E 3…")
+        dalle_image = generate_cover_image(concept, book_title)
+        render_cover_pdf(concept, cover_pdf,
+                         book_image_bytes=book_image,
+                         dalle_image_bytes=dalle_image)
         prepend_cover_to_pdf(cover_pdf, file_path, out_path)
         if os.path.exists(cover_pdf): os.remove(cover_pdf)
 

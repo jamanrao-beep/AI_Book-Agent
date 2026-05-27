@@ -12,3 +12,4 @@ striprtf
 pypdf
 pymupdf
 pdf2image
+Pillow
