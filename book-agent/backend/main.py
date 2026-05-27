@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 # pyrefly: ignore [missing-import]
 from pydantic import BaseModel
 from typing import Optional
-import os, sys, uuid, zipfile, shutil,threading
+import os, sys, uuid, zipfile, shutil, threading
 from handwritten_scanner import scan_handwritten_book, SUPPORTED_IMAGE_EXTS, SUPPORTED_UPLOAD_EXTS
 from book_editor import (
     extract_book_text, parse_book_structure,
@@ -59,6 +59,32 @@ OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "output")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 MAX_FILE_SIZE = 150 * 1024 * 1024  # 150 MB
+STREAM_CHUNK  = 1 * 1024 * 1024    # 1 MB read chunks
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def _stream_upload_to_disk(file: UploadFile, dest_path: str) -> int:
+    """
+    Stream an UploadFile to disk in 1 MB chunks without loading the entire
+    file into RAM.  Returns the total number of bytes written.
+    Raises HTTPException(413) if the file exceeds MAX_FILE_SIZE.
+    """
+    total = 0
+    with open(dest_path, "wb") as f_out:
+        while True:
+            chunk = await file.read(STREAM_CHUNK)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > MAX_FILE_SIZE:
+                f_out.close()
+                os.remove(dest_path)
+                raise HTTPException(413, "File too large. Maximum size is 150 MB.")
+            f_out.write(chunk)
+    return total
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -205,14 +231,10 @@ async def proofread_document(file: UploadFile = File(...)):
     if ext not in ALLOWED_PROOFREAD_EXTENSIONS:
         raise HTTPException(400, f"Unsupported file type '{ext}'. Upload .txt, .docx, .pdf, .md, .rtf, or .zip")
 
-    content = await file.read()
-    if len(content) > MAX_FILE_SIZE:
-        raise HTTPException(413, "File too large. Maximum size is 150 MB.")
-
     tmp_path = os.path.join(OUTPUT_DIR, f"upload_{uuid.uuid4().hex}{ext}")
     try:
-        with open(tmp_path, "wb") as f_out:
-            f_out.write(content)
+        # ── Stream to disk in chunks — avoids loading the whole file into RAM ──
+        await _stream_upload_to_disk(file, tmp_path)
 
         original_text = extract_text(tmp_path, filename)
         if not original_text.strip():
@@ -465,14 +487,9 @@ async def design_cover_endpoint(
             "Upload a .pdf, .docx, or a .zip containing .pdf/.docx files."
         )
 
-    content = await file.read()
-    if len(content) > MAX_FILE_SIZE:
-        raise HTTPException(413, "File too large. Maximum 150 MB.")
-
     tmp_path = os.path.join(OUTPUT_DIR, f"upload_{uuid.uuid4().hex}{ext}")
     try:
-        with open(tmp_path, "wb") as f_out:
-            f_out.write(content)
+        await _stream_upload_to_disk(file, tmp_path)
 
         # ── Single file (PDF / DOCX) ──────────────────────────────────────────
         if ext in COVER_ALLOWED_DIRECT:
@@ -607,7 +624,6 @@ async def scan_handwritten(
  
     # If multiple image files, bundle them into a temporary ZIP
     if len(all_uploads) > 1:
-        # Read all into a temp zip
         zip_job_id = uuid.uuid4().hex
         zip_tmp = os.path.join(OUTPUT_DIR, f"upload_pages_{zip_job_id}.zip")
         try:
@@ -627,18 +643,13 @@ async def scan_handwritten(
             if os.path.exists(zip_tmp):
                 os.remove(zip_tmp)
     else:
-        # Single file upload
+        # Single file upload — stream to disk
         upload = all_uploads[0]
         filename = upload.filename or "document"
-        content = await upload.read()
-        if len(content) > MAX_FILE_SIZE:
-            raise HTTPException(413, "File too large. Maximum 150 MB.")
- 
         ext = os.path.splitext(filename)[1].lower()
         tmp_path = os.path.join(OUTPUT_DIR, f"upload_{uuid.uuid4().hex}{ext}")
         try:
-            with open(tmp_path, "wb") as f_out:
-                f_out.write(content)
+            await _stream_upload_to_disk(upload, tmp_path)
             result = scan_handwritten_book(
                 file_path=tmp_path,
                 filename=filename,
@@ -720,14 +731,9 @@ async def editor_upload(
     if ext not in EDITOR_ALLOWED_EXTS:
         raise HTTPException(400, f"Unsupported file type '{ext}'. Upload .pdf, .docx, .zip, .txt, or .md")
  
-    content = await file.read()
-    if len(content) > MAX_FILE_SIZE:
-        raise HTTPException(413, "File too large. Maximum 150 MB.")
- 
     tmp_path = os.path.join(OUTPUT_DIR, f"editor_upload_{uuid.uuid4().hex}{ext}")
     try:
-        with open(tmp_path, "wb") as f_out:
-            f_out.write(content)
+        await _stream_upload_to_disk(file, tmp_path)
  
         raw_text = extract_book_text(tmp_path, filename)
         if not raw_text.strip():
@@ -972,14 +978,9 @@ async def translate_book_endpoint(
     if not target_language.strip():
         raise HTTPException(400, "target_language is required.")
  
-    content = await file.read()
-    if len(content) > MAX_FILE_SIZE:
-        raise HTTPException(413, "File too large. Maximum 150 MB.")
- 
     job_id = uuid.uuid4().hex
     tmp_path = os.path.join(OUTPUT_DIR, f"translate_upload_{job_id}{ext}")
-    with open(tmp_path, "wb") as f_out:
-        f_out.write(content)
+    await _stream_upload_to_disk(file, tmp_path)
  
     _translate_jobs[job_id] = {
         "stage": "extracting",
@@ -1183,10 +1184,6 @@ async def design_layout_endpoint(
     page_width_mm  = max(50.0, min(600.0, page_width_mm))
     page_height_mm = max(50.0, min(600.0, page_height_mm))
 
-    content = await file.read()
-    if len(content) > MAX_FILE_SIZE:
-        raise HTTPException(413, "File too large. Maximum 150 MB.")
-
     # Safe parsers for optional numeric / bool overrides
     def _float_or_none(v: Optional[str]) -> Optional[float]:
         if not v or not v.strip():
@@ -1203,8 +1200,7 @@ async def design_layout_endpoint(
 
     job_id = uuid.uuid4().hex
     tmp_path = os.path.join(OUTPUT_DIR, f"layout_upload_{job_id}{ext}")
-    with open(tmp_path, "wb") as f_out:
-        f_out.write(content)
+    await _stream_upload_to_disk(file, tmp_path)
 
     _layout_jobs[job_id] = {
         "stage": "queued",

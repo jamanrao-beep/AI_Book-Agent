@@ -124,13 +124,28 @@ export const downloadDOCX = (id: number) =>
 // Proofreading
 // ─────────────────────────────────────────────
 
-/** Upload a .txt, .docx, .pdf, .md, .rtf, or .zip file for AI proofreading. */
-export const proofreadDocument = (file: File) => {
+/**
+ * Upload a .txt, .docx, .pdf, .md, .rtf, or .zip file for AI proofreading.
+ * @param file - The file to proofread
+ * @param onUploadProgress - Optional callback receiving upload percentage (0–100)
+ */
+export const proofreadDocument = (
+  file: File,
+  onUploadProgress?: (pct: number) => void,
+) => {
   const form = new FormData();
   form.append("file", file);
   return API.post<ProofreadResult>("/proofread", form, {
     headers: { "Content-Type": "multipart/form-data" },
-    timeout: 120000,
+    // No separate timeout here — inherits the 900s from the API instance,
+    // which is already generous enough for large AI proofreading jobs.
+    onUploadProgress: onUploadProgress
+      ? (e) => {
+        if (e.total) {
+          onUploadProgress(Math.round((e.loaded * 100) / e.total));
+        }
+      }
+      : undefined,
   });
 };
 

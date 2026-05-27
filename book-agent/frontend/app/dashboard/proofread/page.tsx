@@ -43,6 +43,7 @@ export default function ProofreadPage() {
   const [file, setFile] = useState<File | null>(null);
   const [dragging, setDragging] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [result, setResult] = useState<ProofResult | null>(null);
   const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState<TabType>("summary");
@@ -100,6 +101,7 @@ export default function ProofreadPage() {
   const handleSubmit = async () => {
     if (!file) return;
     setLoading(true);
+    setUploadProgress(0);
     setError("");
     // Reset selections to all-on for each new upload
     setApplyGrammar(true);
@@ -107,7 +109,7 @@ export default function ProofreadPage() {
     setApplyStyle(true);
     setPdfError("");
     try {
-      const res = await proofreadDocument(file);
+      const res = await proofreadDocument(file, (pct) => setUploadProgress(pct));
       setResult(res.data);
       setActiveTab("summary");
       setExpandedErrors(new Set());
@@ -119,6 +121,7 @@ export default function ProofreadPage() {
       setError(message);
     } finally {
       setLoading(false);
+      setUploadProgress(0);
     }
   };
 
@@ -217,6 +220,13 @@ export default function ProofreadPage() {
       badgeBg: "rgba(16,185,129,0.12)",
     },
   };
+
+  // Derive a human-readable loading stage label
+  const loadingLabel = (() => {
+    if (!loading) return "";
+    if (uploadProgress < 100) return `Uploading… ${uploadProgress}%`;
+    return "Analysing document — this may take a minute…";
+  })();
 
   return (
     <div
@@ -433,43 +443,81 @@ export default function ProofreadPage() {
           </div>
         )}
 
-        {/* Submit button */}
+        {/* Submit button + upload progress bar */}
         {file && !result && (
-          <button
-            onClick={handleSubmit}
-            disabled={loading}
-            style={{
-              width: "100%",
-              background: loading
-                ? "rgba(16,185,129,0.4)"
-                : "linear-gradient(135deg, #10b981 0%, #059669 100%)",
-              color: "white",
-              border: "none",
-              borderRadius: "12px",
-              padding: "14px 24px",
-              fontSize: "14px",
-              fontWeight: "700",
-              cursor: loading ? "not-allowed" : "pointer",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: "10px",
-              transition: "background 0.2s",
-              letterSpacing: "0.01em",
-              marginBottom: "32px",
-            }}
-          >
-            {loading ? (
-              <>
-                <Loader size={18} style={{ animation: "spin 1s linear infinite" }} />
-                Analysing document...
-              </>
-            ) : (
-              <>
-                <Sparkles size={18} /> Run AI Proofreader
-              </>
+          <div style={{ marginBottom: "32px" }}>
+            <button
+              onClick={handleSubmit}
+              disabled={loading}
+              style={{
+                width: "100%",
+                background: loading
+                  ? "rgba(16,185,129,0.4)"
+                  : "linear-gradient(135deg, #10b981 0%, #059669 100%)",
+                color: "white",
+                border: "none",
+                borderRadius: "12px",
+                padding: "14px 24px",
+                fontSize: "14px",
+                fontWeight: "700",
+                cursor: loading ? "not-allowed" : "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "10px",
+                transition: "background 0.2s",
+                letterSpacing: "0.01em",
+              }}
+            >
+              {loading ? (
+                <>
+                  <Loader size={18} style={{ animation: "spin 1s linear infinite" }} />
+                  {loadingLabel}
+                </>
+              ) : (
+                <>
+                  <Sparkles size={18} /> Run AI Proofreader
+                </>
+              )}
+            </button>
+
+            {/* Upload progress bar — only visible while uploading */}
+            {loading && uploadProgress > 0 && uploadProgress < 100 && (
+              <div
+                style={{
+                  marginTop: "10px",
+                  height: "4px",
+                  borderRadius: "99px",
+                  background: "rgba(255,255,255,0.07)",
+                  overflow: "hidden",
+                }}
+              >
+                <div
+                  style={{
+                    height: "100%",
+                    width: `${uploadProgress}%`,
+                    background: "linear-gradient(90deg, #10b981, #059669)",
+                    borderRadius: "99px",
+                    transition: "width 0.3s ease",
+                  }}
+                />
+              </div>
             )}
-          </button>
+
+            {/* Post-upload waiting hint */}
+            {loading && uploadProgress === 100 && (
+              <p
+                style={{
+                  marginTop: "10px",
+                  fontSize: "12px",
+                  color: "#475569",
+                  textAlign: "center",
+                }}
+              >
+                Upload complete — AI is now analysing your document. Large files may take a minute or two.
+              </p>
+            )}
+          </div>
         )}
 
         {/* ── RESULTS ── */}
