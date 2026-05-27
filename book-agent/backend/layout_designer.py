@@ -1,5 +1,5 @@
 """
-layout_designer.py  ·  v2.3 (Page Size Fix, Smart Headings & Bullet Preservation)
+layout_designer.py  ·  v2.5 (Strict Dimensions, TOC Bypass & Intro Capture)
 AI-powered internal book layout designer — with full book-type awareness
 and proper Unicode (Devanagari, Hindi, multi-script) support.
 
@@ -487,6 +487,18 @@ def parse_chapters(raw_text: str) -> list[dict]:
             if stripped and _CHAPTER_RE.match(stripped) and len(stripped) < 200:
                 splits.append(i)
 
+        # --- FIX 2: TOC Filter (Bypass Table of Contents) ---
+        bad_splits = set()
+        for i in range(1, len(splits)):
+            # If "chapters" are detected less than 12 lines apart, it's likely a TOC
+            if splits[i] - splits[i-1] < 12:
+                bad_splits.add(i)
+                bad_splits.add(i-1)
+
+        valid_splits = [s for i, s in enumerate(splits) if i not in bad_splits]
+        splits = valid_splits
+        # --------------------------------------------------
+
         if len(splits) < 2:
             # No chapter headings detected — split by word count.
             words = raw_text.split()
@@ -501,6 +513,18 @@ def parse_chapters(raw_text: str) -> list[dict]:
             return chapters
 
         chapters: list[dict] = []
+
+        # --- FIX 3: CAPTURE TOC & INTRO ---
+        # Grabs all text BEFORE the first matched "Chapter 1"
+        if splits and splits[0] > 0:
+            intro_text = "\n".join(lines[0:splits[0]]).strip()
+            if len(intro_text) > 15:
+                chapters.append({
+                    "title": "Front Matter & Introduction",
+                    "body": intro_text
+                })
+        # ------------------------------------
+
         for k, start_line in enumerate(splits[:MAX_CHAPTERS]):
             end_line = splits[k + 1] if k + 1 < len(splits) else len(lines)
             heading = lines[start_line].strip()
@@ -825,11 +849,12 @@ def render_layout_pdf(
         # ── Chapters ──────────────────────────────────────────────────────────────
         for idx, chapter in enumerate(chapters, start=1):
             
-            # FIX 2: Prevent Double Chapter Headings
+            # FIX: Prevent Double Chapter Headings & Exclude Intro
             ch_title_lower = chapter["title"].lower()
             already_has_chapter = ch_title_lower.startswith("chapter") or ch_title_lower.startswith("part")
+            is_intro = "introduction" in ch_title_lower or "front matter" in ch_title_lower
             
-            if chapter_prefix and not already_has_chapter:
+            if chapter_prefix and not already_has_chapter and not is_intro:
                 safe_prefix = chapter_prefix.replace("&", "&amp;")
                 story.append(Paragraph(f"{safe_prefix.upper()} {idx}".strip(), prefix_style))
                 
@@ -848,7 +873,7 @@ def render_layout_pdf(
                 paragraphs = ["[No content]"]
 
             for p_idx, para_text in enumerate(paragraphs):
-                # FIX 3: Smart Line Break & Bullet Handling
+                # FIX: Smart Line Break & Bullet Handling
                 lines = para_text.split('\n')
                 cleaned_lines = []
                 for line in lines:
@@ -868,12 +893,17 @@ def render_layout_pdf(
                 safe = "".join(cleaned_lines)
 
                 # Drop cap logic
-                if p_idx == 0 and show_drop and len(para_text) > 1:
-                    first_char = para_text[0]
-                    rest_orig = safe[len(first_char.replace("&", "&amp;").replace("<", "&lt;")):]
+                if p_idx == 0 and show_drop and not is_intro and len(para_text) > 1:
+                    # Work on the original text to get the first real character
+                    first_char = para_text[0]   # ← codepoint-safe (Python str)
+                    rest_orig  = safe[len(first_char.replace("&", "&amp;").replace("<", "&lt;")):]
+                    # Only do drop cap if first char is a basic Latin letter
                     if first_char.isalpha() and ord(first_char) < 0x0250:
                         first_esc = first_char.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-                        drop_html = f'<font name="{chapter_font}" size="{int(body_size * 2.8)}">{first_esc}</font>{rest_orig}'
+                        drop_html = (
+                            f'<font name="{chapter_font}" size="{int(body_size * 2.8)}">'
+                            f"{first_esc}</font>{rest_orig}"
+                        )
                         story.append(Paragraph(drop_html, body_style))
                     else:
                         story.append(Paragraph(safe, body_style))
@@ -984,9 +1014,16 @@ def render_layout_docx(
 
         # Chapters
         for idx, chapter in enumerate(chapters, start=1):
-            if prefix:
+            
+            # --- FIX: Prevent Double Headings in DOCX ---
+            ch_title_lower = chapter["title"].lower()
+            already_has_chapter = ch_title_lower.startswith("chapter") or ch_title_lower.startswith("part")
+            is_intro = "introduction" in ch_title_lower or "front matter" in ch_title_lower
+            
+            if prefix and not already_has_chapter and not is_intro:
                 add_para(f"{prefix.upper()} {idx}".strip(), body_fn, body_size * 0.82,
                          color=concept["accent_color"], space_before=6, space_after=2)
+                         
             add_para(chapter["title"], ch_fn, ch_size, bold=True,
                      italic=ch_italic,
                      color=concept["chapter_title_color"], space_after=8)
@@ -1001,18 +1038,28 @@ def render_layout_docx(
                 paragraphs = ["[No content]"]
             
             for para_text in paragraphs:
-                # --- FIX 4: Preserve bullets/single line breaks in DOCX ---
-                if "\n" in para_text:
-                    for sub_line in para_text.split("\n"):
-                        if sub_line.strip():
-                            add_para(sub_line.strip(), body_fn, body_size, italic=body_italic,
-                                     color=concept["text_color"],
-                                     align=WD_ALIGN_PARAGRAPH.LEFT, space_after=2, line_space=1.15)
-                else:
-                    add_para(para_text, body_fn, body_size, italic=body_italic,
+                # --- FIX: Smart Line Break & Bullet Handling in DOCX ---
+                lines = para_text.split('\n')
+                cleaned_lines = []
+                for line in lines:
+                    line = line.strip()
+                    if not line: continue
+                    # If it's a bullet point, force a hard break
+                    if line.startswith(('•', '-', '*')) or re.match(r'^\d+\.', line):
+                        cleaned_lines.append(line)
+                    else:
+                        # Otherwise, join physical PDF lines with a space
+                        if cleaned_lines:
+                            cleaned_lines[-1] += " " + line
+                        else:
+                            cleaned_lines.append(line)
+                            
+                for sub_line in cleaned_lines:
+                    align = WD_ALIGN_PARAGRAPH.LEFT if sub_line.startswith(('•', '-', '*')) else WD_ALIGN_PARAGRAPH.JUSTIFY
+                    add_para(sub_line, body_fn, body_size, italic=body_italic,
                              color=concept["text_color"],
-                             align=WD_ALIGN_PARAGRAPH.JUSTIFY, space_after=4, line_space=ls)
-                # ----------------------------------------------------------
+                             align=align, space_after=4, line_space=ls)
+                # -------------------------------------------------------
 
             doc.add_page_break()
 
@@ -1031,8 +1078,8 @@ def design_layout(
     file_path: str,
     filename: str,
     output_dir: str,
-    page_width_mm: float = 210.0,
-    page_height_mm: float = 297.0,
+    page_width_mm: float = 127.0,  # CRITICAL FIX: HARD DEFAULT TO 5x8 INCHES
+    page_height_mm: float = 203.2, # CRITICAL FIX: HARD DEFAULT TO 5x8 INCHES
     book_title: str = "",
     design_instructions: str = "",
     book_type: Optional[str] = None,
@@ -1071,26 +1118,10 @@ def design_layout(
         os.makedirs(output_dir, exist_ok=True)
         ext = os.path.splitext(filename)[1].lower()
 
-        # --- FIX 1: Respect User Page Size ---
-        # Only use the PDF's native size if the user left the frontend on standard A4 (210x297)
-        is_default_size = math.isclose(page_width_mm, 210.0, abs_tol=1) and math.isclose(page_height_mm, 297.0, abs_tol=1)
-        
-        if ext == ".pdf" and is_default_size:
-            try:
-                # pyrefly: ignore [missing-import]
-                from pypdf import PdfReader
-                reader = PdfReader(file_path)
-                if reader.pages:
-                    box = reader.pages[0].mediabox
-                    detected_w = float(box.width) * (25.4 / 72.0)
-                    detected_h = float(box.height) * (25.4 / 72.0)
-                    if detected_w > 0 and detected_h > 0:
-                        page_width_mm = detected_w
-                        page_height_mm = detected_h
-                        print(f"  📄 Inferred input PDF page size: {page_width_mm:.1f} x {page_height_mm:.1f} mm")
-            except Exception as e:
-                print(f"  ⚠️ Could not infer PDF page size: {e}")
-        # -----------------------------------------------
+        # --- CRITICAL FIX 1: REMOVED THE PDF NATIVE SIZE INHERITANCE ---
+        # The backend now completely ignores the original PDF's dimensions.
+        # It strictly uses the page_width_mm and page_height_mm sent by the frontend
+        # (or defaults to 127.0 x 203.2 mm / 5x8 if none are sent).
 
         if not book_title:
             book_title = Path(filename).stem.replace("_", " ").replace("-", " ").title()
@@ -1132,11 +1163,6 @@ def design_layout(
             override_hints.append("page numbers: " + ("SHOWN" if show_page_numbers else "HIDDEN"))
 
         effective_instructions = design_instructions or ""
-
-        # --- FIX 2: Default to Clean/Standard similarity ---
-        if not effective_instructions and not book_type and not visual_template:
-            effective_instructions = "[CRITICAL INSTRUCTION: The user wants the layout to be structurally identical to a clean, standard document. Use standard minimal styling (Arial/Helvetica). Do NOT use drop caps. Do NOT use massive chapter fonts, ornaments, or crazy colors.]"
-        # -----------------------------------------------
 
         _TEMPLATE_HINTS = {
             "classic_novel":    "Classic cream pages with serif fonts, generous margins, drop caps and ornamental chapter dividers — think vintage Penguin Classics.",
