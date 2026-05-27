@@ -223,6 +223,8 @@ export const designLayout = (
   designInstructions: string = "",
   bookType: string = "",
   visualTemplate: string = "",
+  pageWidthMm: number = 127.0,  // Dynamic parameter (Defaults to 5 inches)
+  pageHeightMm: number = 203.2, // Dynamic parameter (Defaults to 8 inches)
   onUploadProgress?: (pct: number) => void
 ) => {
   const form = new FormData();
@@ -231,6 +233,10 @@ export const designLayout = (
   form.append("design_instructions", designInstructions);
   form.append("book_type", bookType);
   form.append("visual_template", visualTemplate);
+
+  // ── PASS DIMENSIONS DYNAMICALLY TO BACKEND ──
+  form.append("page_width_mm", pageWidthMm.toString());
+  form.append("page_height_mm", pageHeightMm.toString());
 
   return API.post<LayoutResult>("/design-layout", form, {
     headers: { "Content-Type": "multipart/form-data" },
