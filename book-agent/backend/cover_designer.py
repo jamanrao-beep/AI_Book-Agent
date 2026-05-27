@@ -655,14 +655,30 @@ def render_cover_pdf(concept: dict, output_path: str,
 
     draw = ImageDraw.Draw(bg, "RGBA")
 
-    # ── Dark gradient at bottom for text legibility ───────────────────────────
+    # ── Overlay strategy depends on whether we have a real DALL-E image ───────
+    # For DALL-E: keep image visible in upper 65%, only darken bottom 35% for text
+    # For gradient-only: darken from 40% down (original behaviour)
+    has_dalle = dalle_image_bytes is not None
     overlay = Image.new("RGBA", (W_px, H_px), (0, 0, 0, 0))
     od = ImageDraw.Draw(overlay)
-    grad_start = int(H_px * 0.40)
-    for yi in range(grad_start, H_px):
-        t     = (yi - grad_start) / (H_px - grad_start)
-        alpha = int(215 * (t ** 0.65))
-        od.line([(0, yi), (W_px, yi)], fill=(0, 0, 0, alpha))
+
+    if has_dalle:
+        # Subtle vignette on top half; strong dark scrim starting at 65% for text
+        for yi in range(H_px):
+            t = yi / H_px
+            if t < 0.65:
+                alpha = int(20 * t)           # max ~13 alpha in top 65%
+            else:
+                tt = (t - 0.65) / 0.35
+                alpha = int(13 + 200 * (tt ** 0.6))   # ramps to ~213 at very bottom
+            od.line([(0, yi), (W_px, yi)], fill=(0, 0, 0, alpha))
+    else:
+        grad_start = int(H_px * 0.40)
+        for yi in range(grad_start, H_px):
+            t     = (yi - grad_start) / (H_px - grad_start)
+            alpha = int(215 * (t ** 0.65))
+            od.line([(0, yi), (W_px, yi)], fill=(0, 0, 0, alpha))
+
     bg   = Image.alpha_composite(bg, overlay)
     draw = ImageDraw.Draw(bg, "RGBA")
 
@@ -745,13 +761,19 @@ def render_cover_pdf(concept: dict, output_path: str,
     BOTTOM_BAND_H = int(H_px * 0.085)
     line_gap      = int(title_size * 1.15)
     total_title_h = len(title_lines) * line_gap
-    ty_bottom     = H_px - BOTTOM_BAND_H - int(H_px * 0.025)
-    ty_start      = ty_bottom - total_title_h
+
+    if has_dalle:
+        # Anchor title TOP to the dark-scrim start (65%) so art is fully visible
+        ty_start  = int(H_px * 0.655)
+        ty_bottom = ty_start + total_title_h
+    else:
+        ty_bottom = H_px - BOTTOM_BAND_H - int(H_px * 0.025)
+        ty_start  = ty_bottom - total_title_h
 
     for i, ln in enumerate(title_lines):
         _shadow_text((text_left, ty_start + i * line_gap), ln, title_font, tcol_rgb)
 
-    rule_y = ty_bottom + int(H_px * 0.005)
+    rule_y = ty_bottom + int(H_px * 0.008)
     draw.rectangle([text_left, rule_y,
                     text_left + int(text_width * 0.72), rule_y + int(H_px * 0.004)],
                    fill=acc_rgb + (230,))
@@ -1502,7 +1524,6 @@ def design_cover(
     book_title  : str = "",
     description : str = "",
     design_style: str = "",
-    replace_page1: bool = True,
 ) -> dict:
     """
     Full pipeline:
@@ -1512,7 +1533,7 @@ def design_cover(
       4. Generate deeply personalised AI cover concept (text + image aware)
       5. Generate DALL-E 3 cover illustration based on actual book scenes
       6. Render cover PDF with the AI illustration as full-bleed background
-      7. Replace page 1 of original (or prepend if replace_page1=False)
+      7. Prepend cover to original PDF
     Returns dict: output_path, concept, ext, job_id.
     """
     os.makedirs(output_dir, exist_ok=True)
@@ -1559,12 +1580,8 @@ def design_cover(
                          book_image_bytes=book_image,
                          dalle_image_bytes=dalle_image)
 
-        # Step 6: Replace page 1 (or prepend)
-        if replace_page1:
-            print("  🔄 Replacing first page of original PDF with new cover…")
-            replace_first_page_of_pdf(cover_pdf, file_path, out_path)
-        else:
-            prepend_cover_to_pdf(cover_pdf, file_path, out_path)
+        # Step 6: Prepend cover to original PDF
+        prepend_cover_to_pdf(cover_pdf, file_path, out_path)
 
         if os.path.exists(cover_pdf):
             os.remove(cover_pdf)
