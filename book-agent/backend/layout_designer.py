@@ -1,5 +1,5 @@
 """
-layout_designer.py  ·  v2.1 (Unicode/Devanagari fix)
+layout_designer.py  ·  v2.2 (Unicode + Dynamic Page Size & Similarity Fix)
 AI-powered internal book layout designer — with full book-type awareness
 and proper Unicode (Devanagari, Hindi, multi-script) support.
 
@@ -13,25 +13,6 @@ Pipeline:
   6. Render PDF  (ReportLab + registered Unicode/Noto fonts)
   7. Render DOCX (python-docx)
   8. Return paths + metadata to the caller
-
-Key fixes in v2.1:
-  - Registers NotoSerifDevanagari / NotoSansDevanagari TTF fonts so Hindi
-    text renders correctly in the PDF (was showing blank/boxes before).
-  - Extended chapter-detection regex to catch Hindi/Devanagari headings
-    (अध्याय, भाग, etc.) and numbered sections.
-  - Drop-cap logic now works on proper Unicode codepoints, not raw bytes,
-    and is disabled automatically when the first character is non-Latin to
-    avoid ReportLab font-coverage issues.
-  - Font mapping updated: ReportLab built-in names are silently replaced
-    with Unicode-capable equivalents when the text contains non-Latin chars.
-  - Fixed variable name collision: profile_defaults local var renamed from
-    `pd` (which shadowed any hypothetical pandas import) to `_pd`.
-  - Times-Italic / Helvetica-Oblique italic flag set correctly in DOCX.
-  - Ornament safety: non-renderable ornament glyphs stripped from PDF output.
-
-Supported book_type values:
-  "novel" | "academic" | "religious" | "poetry" | "children" | "business"
-  Any other / empty string → AI chooses freely.
 """
 
 from __future__ import annotations
@@ -861,6 +842,12 @@ def render_layout_pdf(
 
             for p_idx, para_text in enumerate(paragraphs):
                 safe = para_text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                
+                # --- FIX 3: Preserve bullets/single line breaks ---
+                if "•" in safe or "\n-" in "\n" + safe or "\n" in safe:
+                    safe = safe.replace("\n", "<br/>")
+                # --------------------------------------------------
+
                 # BUG FIX: drop cap only for Latin first characters, and only when
                 # show_drop is True. Use codepoint-safe slicing on the ORIGINAL
                 # (un-escaped) text so we never split a multi-byte character.
@@ -872,6 +859,11 @@ def render_layout_pdf(
                     if first_char.isalpha() and ord(first_char) < 0x0250:
                         first_esc = first_char.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
                         rest_esc  = rest_orig.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                        
+                        # Re-apply line breaks to the rest of the text if needed
+                        if "•" in rest_esc or "\n-" in "\n" + rest_orig or "\n" in rest_orig:
+                            rest_esc = rest_esc.replace("\n", "<br/>")
+
                         drop_html = (
                             f'<font name="{chapter_font}" size="{int(body_size * 2.8)}">'
                             f"{first_esc}</font>{rest_esc}"
@@ -1001,10 +993,20 @@ def render_layout_docx(
             paragraphs = [p.strip() for p in re.split(r"\n{2,}", raw_body) if p.strip()]
             if not paragraphs:
                 paragraphs = [raw_body] if raw_body else ["[No content]"]
+            
             for para_text in paragraphs:
-                add_para(para_text, body_fn, body_size, italic=body_italic,
-                         color=concept["text_color"],
-                         align=WD_ALIGN_PARAGRAPH.JUSTIFY, space_after=4, line_space=ls)
+                # --- FIX 4: Preserve bullets/single line breaks in DOCX ---
+                if "\n" in para_text:
+                    for sub_line in para_text.split("\n"):
+                        if sub_line.strip():
+                            add_para(sub_line.strip(), body_fn, body_size, italic=body_italic,
+                                     color=concept["text_color"],
+                                     align=WD_ALIGN_PARAGRAPH.LEFT, space_after=2, line_space=1.15)
+                else:
+                    add_para(para_text, body_fn, body_size, italic=body_italic,
+                             color=concept["text_color"],
+                             align=WD_ALIGN_PARAGRAPH.JUSTIFY, space_after=4, line_space=ls)
+                # ----------------------------------------------------------
 
             doc.add_page_break()
 
@@ -1061,6 +1063,25 @@ def design_layout(
 
     try:
         os.makedirs(output_dir, exist_ok=True)
+        ext = os.path.splitext(filename)[1].lower()
+
+        # --- FIX 1: Extract Exact Page Size from PDF ---
+        if ext == ".pdf":
+            try:
+                # pyrefly: ignore [missing-import]
+                from pypdf import PdfReader
+                reader = PdfReader(file_path)
+                if reader.pages:
+                    box = reader.pages[0].mediabox
+                    detected_w = float(box.width) * (25.4 / 72.0)
+                    detected_h = float(box.height) * (25.4 / 72.0)
+                    if detected_w > 0 and detected_h > 0:
+                        page_width_mm = detected_w
+                        page_height_mm = detected_h
+                        print(f"  📄 Inferred input PDF page size: {page_width_mm:.1f} x {page_height_mm:.1f} mm")
+            except Exception as e:
+                print(f"  ⚠️ Could not infer PDF page size: {e}")
+        # -----------------------------------------------
 
         if not book_title:
             book_title = Path(filename).stem.replace("_", " ").replace("-", " ").title()
@@ -1102,6 +1123,11 @@ def design_layout(
             override_hints.append("page numbers: " + ("SHOWN" if show_page_numbers else "HIDDEN"))
 
         effective_instructions = design_instructions or ""
+
+        # --- FIX 2: Default to Clean/Standard similarity ---
+        if not effective_instructions and not book_type and not visual_template:
+            effective_instructions = "[CRITICAL INSTRUCTION: The user wants the layout to be structurally identical to a clean, standard document. Use standard minimal styling (Arial/Helvetica). Do NOT use drop caps. Do NOT use massive chapter fonts, ornaments, or crazy colors.]"
+        # -----------------------------------------------
 
         _TEMPLATE_HINTS = {
             "classic_novel":    "Classic cream pages with serif fonts, generous margins, drop caps and ornamental chapter dividers — think vintage Penguin Classics.",
