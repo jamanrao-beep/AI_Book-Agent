@@ -1,20 +1,36 @@
 """
-layout_designer.py  ·  v2.0
-AI-powered internal book layout designer — with full book-type awareness.
+layout_designer.py  ·  v2.1 (Unicode/Devanagari fix)
+AI-powered internal book layout designer — with full book-type awareness
+and proper Unicode (Devanagari, Hindi, multi-script) support.
 
 Pipeline:
   1. Extract raw text from PDF / DOCX / ZIP
-  2. Detect chapter boundaries
+  2. Detect chapter boundaries (supports Hindi/Devanagari अध्याय headings)
   3. Build book-type defaults (novel, academic, religious, poetry, children, business)
   4. Ask GPT-4o to produce a complete typographic layout concept (JSON),
      seeded with type-aware defaults and any user overrides
   5. Apply hard user overrides on top of the AI concept  (user always wins)
-  6. Render PDF  (ReportLab)
+  6. Render PDF  (ReportLab + registered Unicode/Noto fonts)
   7. Render DOCX (python-docx)
   8. Return paths + metadata to the caller
 
-Supported book_type values
-  "novel"     | "academic"  | "religious" | "poetry" | "children" | "business"
+Key fixes in v2.1:
+  - Registers NotoSerifDevanagari / NotoSansDevanagari TTF fonts so Hindi
+    text renders correctly in the PDF (was showing blank/boxes before).
+  - Extended chapter-detection regex to catch Hindi/Devanagari headings
+    (अध्याय, भाग, etc.) and numbered sections.
+  - Drop-cap logic now works on proper Unicode codepoints, not raw bytes,
+    and is disabled automatically when the first character is non-Latin to
+    avoid ReportLab font-coverage issues.
+  - Font mapping updated: ReportLab built-in names are silently replaced
+    with Unicode-capable equivalents when the text contains non-Latin chars.
+  - Fixed variable name collision: profile_defaults local var renamed from
+    `pd` (which shadowed any hypothetical pandas import) to `_pd`.
+  - Times-Italic / Helvetica-Oblique italic flag set correctly in DOCX.
+  - Ornament safety: non-renderable ornament glyphs stripped from PDF output.
+
+Supported book_type values:
+  "novel" | "academic" | "religious" | "poetry" | "children" | "business"
   Any other / empty string → AI chooses freely.
 """
 
@@ -48,9 +64,78 @@ MODEL = "gpt-4o"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Unicode font registration (run once at import time)
+# ReportLab's built-in fonts (Helvetica, Times-Roman …) are Latin-only.
+# For any non-Latin script we register Noto TTF fonts and substitute them.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_NOTO_PATHS = {
+    "NotoSerifDevanagari":      "/usr/share/fonts/truetype/noto/NotoSerifDevanagari-Regular.ttf",
+    "NotoSerifDevanagari-Bold": "/usr/share/fonts/truetype/noto/NotoSerifDevanagari-Bold.ttf",
+    "NotoSansDevanagari":       "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf",
+    "NotoSansDevanagari-Bold":  "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Bold.ttf",
+    # Fallback general-purpose Unicode fonts
+    "FreeSerif":        "/usr/share/fonts/truetype/freefont/FreeSerif.ttf",
+    "FreeSerifBold":    "/usr/share/fonts/truetype/freefont/FreeSerifBold.ttf",
+    "FreeSerifItalic":  "/usr/share/fonts/truetype/freefont/FreeSerifItalic.ttf",
+    "FreeSans":         "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
+    "FreeSansBold":     "/usr/share/fonts/truetype/freefont/FreeSansOblique.ttf",
+}
+
+_FONTS_REGISTERED = False
+
+
+def _ensure_unicode_fonts() -> None:
+    """Register Noto / FreeFont TTFs with ReportLab (idempotent)."""
+    global _FONTS_REGISTERED
+    if _FONTS_REGISTERED:
+        return
+    try:
+        from reportlab.pdfbase import pdfmetrics          # pyrefly: ignore [missing-import]
+        from reportlab.pdfbase.ttfonts import TTFont       # pyrefly: ignore [missing-import]
+        for name, path in _NOTO_PATHS.items():
+            if os.path.exists(path):
+                try:
+                    pdfmetrics.registerFont(TTFont(name, path))
+                except Exception:
+                    pass  # already registered or unavailable
+        _FONTS_REGISTERED = True
+    except Exception:
+        pass
+
+
+def _has_non_latin(text: str) -> bool:
+    """Return True if *text* contains characters outside the Latin-1 range."""
+    return any(ord(c) > 0x024F for c in text if not unicodedata.category(c).startswith("Z"))
+
+
+def _unicode_body_font(rl_name: str, has_unicode: bool) -> str:
+    """
+    Map a ReportLab built-in font name to a Unicode-capable equivalent
+    when the document contains non-Latin characters (e.g. Devanagari).
+    Falls back to the original name for pure-Latin documents.
+    """
+    if not has_unicode:
+        return rl_name
+    _MAP = {
+        "Times-Roman":       "NotoSerifDevanagari",
+        "Times-Italic":      "NotoSerifDevanagari",
+        "Helvetica":         "NotoSansDevanagari",
+        "Helvetica-Oblique": "NotoSansDevanagari",
+        "Courier":           "NotoSansDevanagari",
+    }
+    mapped = _MAP.get(rl_name, rl_name)
+    # Only use mapped name if the font was actually registered
+    try:
+        from reportlab.pdfbase import pdfmetrics          # pyrefly: ignore [missing-import]
+        pdfmetrics.getFont(mapped)
+        return mapped
+    except Exception:
+        return "FreeSerif" if os.path.exists(_NOTO_PATHS.get("FreeSerif", "")) else rl_name
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Book-type default profiles
-# Every value here is a "strong suggestion" passed to the AI in the system
-# prompt.  The user can still override any single field at will.
 # ─────────────────────────────────────────────────────────────────────────────
 
 BOOK_TYPE_PROFILES: dict[str, dict] = {
@@ -80,7 +165,7 @@ BOOK_TYPE_PROFILES: dict[str, dict] = {
         "chapter_prefix":      "Chapter",
         "show_drop_cap":       True,
         "ornament":            "—◆—",
-        "header_text":         "",          # will be replaced by book title
+        "header_text":         "",
         "show_page_numbers":   True,
     },
 
@@ -314,7 +399,7 @@ def _extract_from_zip(zip_path: str) -> str:
             ]
             if not members:
                 raise ValueError("No .pdf or .docx files found inside the zip.")
-            for member in members:  # no cap — process every file in the zip
+            for member in members:
                 ext = os.path.splitext(member)[1].lower()
                 tmp = os.path.join(scratch, f"{uuid.uuid4().hex}{ext}")
                 with zf.open(member) as src, open(tmp, "wb") as dst:
@@ -338,20 +423,28 @@ def extract_text(file_path: str, filename: str) -> str:
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Step 2 — Chapter detection
+# BUG FIX: added Hindi/Devanagari chapter patterns (अध्याय, भाग, etc.)
 # ─────────────────────────────────────────────────────────────────────────────
 
 _CHAPTER_RE = re.compile(
     r"^(?:"
+    # English: "Chapter 1", "Part II", "1. Title", "ALL CAPS TITLE"
     r"chapter\s+(?:\d+|[ivxlcdm]+)[^\n]*"
     r"|part\s+(?:\d+|[ivxlcdm]+)[^\n]*"
     r"|\d{1,3}[.\)]\s+[A-Z][^\n]{3,60}"
     r"|[A-Z][A-Z\s]{4,50}$"
+    # Hindi/Devanagari: "अध्याय 1", "भाग 2", standalone Devanagari headings
+    r"|अध्याय\s*[\d\u0966-\u096F]+"       # अध्याय + digits (ASCII or Devanagari)
+    r"|भाग\s*[\d\u0966-\u096F]+"           # भाग (part)
+    r"|प्रकरण\s*[\d\u0966-\u096F]+"        # प्रकरण (section/chapter)
+    r"|खंड\s*[\d\u0966-\u096F]+"           # खंड (section)
+    r"|सर्ग\s*[\d\u0966-\u096F]+"          # सर्ग (canto)
     r")",
-    re.IGNORECASE | re.MULTILINE,
+    re.IGNORECASE | re.MULTILINE | re.UNICODE,
 )
 
-MAX_CHAPTERS = 10_000   # effectively unlimited — render everything
-MIN_CHAPTER_CHARS = 50  # keep even short chapters; don't silently merge them
+MAX_CHAPTERS = 10_000
+MIN_CHAPTER_CHARS = 50
 
 
 def parse_chapters(raw_text: str) -> list[dict]:
@@ -359,15 +452,13 @@ def parse_chapters(raw_text: str) -> list[dict]:
     splits: list[int] = []
     for i, line in enumerate(lines):
         stripped = line.strip()
-        if stripped and _CHAPTER_RE.match(stripped) and len(stripped) < 120:
+        if stripped and _CHAPTER_RE.match(stripped) and len(stripped) < 200:
             splits.append(i)
 
     if len(splits) < 2:
         # No chapter headings detected — split by word count.
-        # Use larger chunks for big books so we don't produce thousands of tiny sections.
         words = raw_text.split()
         total_words = len(words)
-        # Target ~60 sections maximum; minimum chunk 500 words.
         target_sections = min(60, max(1, total_words // 500))
         chunk_size = max(500, math.ceil(total_words / target_sections))
         chapters = []
@@ -375,7 +466,7 @@ def parse_chapters(raw_text: str) -> list[dict]:
             chunk = " ".join(words[idx: idx + chunk_size])
             if len(chunk) >= MIN_CHAPTER_CHARS:
                 chapters.append({"title": f"Section {len(chapters) + 1}", "body": chunk})
-        return chapters  # no [:MAX_CHAPTERS] cap here — all sections are kept
+        return chapters
 
     chapters: list[dict] = []
     for k, start_line in enumerate(splits[:MAX_CHAPTERS]):
@@ -464,8 +555,6 @@ def generate_layout_concept(
     profile_defaults (if supplied) are injected into the user message so the
     AI knows what field values are already 'strongly suggested'.
     """
-    # Send a generous sample: first 2 000 chars for style + last 1 000 chars so
-    # the AI sees structure from across the whole book, not just the opening.
     sample = (
         sample_text[:6_000]
         if len(sample_text) <= 6_000
@@ -481,12 +570,10 @@ def generate_layout_concept(
     )
     if book_type:
         user_msg += f"Book type: {book_type}\n"
-    if profile_defaults:
-        # Share suggested defaults so AI can align its non-overridden choices
-        subset = {
-            k: v for k, v in profile_defaults.items()
-            if not k.startswith("_")
-        }
+    # BUG FIX: renamed local variable from `pd` to `_pd` to avoid shadowing
+    _pd = profile_defaults or {}
+    if _pd:
+        subset = {k: v for k, v in _pd.items() if not k.startswith("_")}
         user_msg += f"Suggested defaults for this book type: {json.dumps(subset)}\n"
     if design_instructions:
         user_msg += f"Design instructions: {design_instructions}\n"
@@ -513,48 +600,43 @@ def generate_layout_concept(
         raise ValueError(f"Layout AI returned invalid JSON: {exc}. Raw snippet: {raw[s:s+200]}") from exc
 
     # ── Normalise & clamp ─────────────────────────────────────────────────────
-    # Use profile defaults as fallbacks, then hard-coded universal fallbacks
-    pd = profile_defaults or {}
     concept.setdefault("style_name",            "Custom Layout")
-    concept.setdefault("page_bg",               pd.get("page_bg", "#ffffff"))
-    concept.setdefault("text_color",            pd.get("text_color", "#1a1a1a"))
-    concept.setdefault("chapter_title_color",   pd.get("chapter_title_color", "#111111"))
-    concept.setdefault("accent_color",          pd.get("accent_color", "#555555"))
-    concept.setdefault("body_font",             pd.get("body_font", "Times-Roman"))
-    concept.setdefault("chapter_font",          pd.get("chapter_font", "Times-Roman"))
-    concept.setdefault("chapter_prefix",        pd.get("chapter_prefix", "Chapter"))
-    concept.setdefault("show_drop_cap",         pd.get("show_drop_cap", True))
-    concept.setdefault("ornament",              pd.get("ornament", "—◆—"))
+    concept.setdefault("page_bg",               _pd.get("page_bg", "#ffffff"))
+    concept.setdefault("text_color",            _pd.get("text_color", "#1a1a1a"))
+    concept.setdefault("chapter_title_color",   _pd.get("chapter_title_color", "#111111"))
+    concept.setdefault("accent_color",          _pd.get("accent_color", "#555555"))
+    concept.setdefault("body_font",             _pd.get("body_font", "Times-Roman"))
+    concept.setdefault("chapter_font",          _pd.get("chapter_font", "Times-Roman"))
+    concept.setdefault("chapter_prefix",        _pd.get("chapter_prefix", "Chapter"))
+    concept.setdefault("show_drop_cap",         _pd.get("show_drop_cap", True))
+    concept.setdefault("ornament",              _pd.get("ornament", "—◆—"))
     concept.setdefault("header_text",           book_title)
-    concept.setdefault("show_page_numbers",     pd.get("show_page_numbers", True))
+    concept.setdefault("show_page_numbers",     _pd.get("show_page_numbers", True))
 
-    # Clamp AI-generated values to reasonable print ranges.
-    # NOTE: hard user overrides are applied AFTER this in design_layout(), so
-    # they always win regardless of these defaults.
-    concept["body_font_size"]        = max(7,  min(20,  float(concept.get("body_font_size",  pd.get("body_font_size",  11)))))
-    concept["line_spacing"]          = max(1.0, min(3.0, float(concept.get("line_spacing",   pd.get("line_spacing",   1.5)))))
-    concept["first_para_indent_mm"]  = max(0,  min(20,  float(concept.get("first_para_indent_mm", pd.get("first_para_indent_mm", 5)))))
-    concept["chapter_font_size"]     = max(10, min(72,  float(concept.get("chapter_font_size", pd.get("chapter_font_size", 22)))))
+    concept["body_font_size"]        = max(7,  min(20,  float(concept.get("body_font_size",  _pd.get("body_font_size",  11)))))
+    concept["line_spacing"]          = max(1.0, min(3.0, float(concept.get("line_spacing",   _pd.get("line_spacing",   1.5)))))
+    concept["first_para_indent_mm"]  = max(0,  min(20,  float(concept.get("first_para_indent_mm", _pd.get("first_para_indent_mm", 5)))))
+    concept["chapter_font_size"]     = max(10, min(72,  float(concept.get("chapter_font_size", _pd.get("chapter_font_size", 22)))))
     for key, default in [
-        ("margin_top_mm",    pd.get("margin_top_mm",    20)),
-        ("margin_bottom_mm", pd.get("margin_bottom_mm", 20)),
-        ("margin_left_mm",   pd.get("margin_left_mm",   22)),
-        ("margin_right_mm",  pd.get("margin_right_mm",  22)),
+        ("margin_top_mm",    _pd.get("margin_top_mm",    20)),
+        ("margin_bottom_mm", _pd.get("margin_bottom_mm", 20)),
+        ("margin_left_mm",   _pd.get("margin_left_mm",   22)),
+        ("margin_right_mm",  _pd.get("margin_right_mm",  22)),
     ]:
         concept[key] = max(5, min(100, float(concept.get(key, default))))
 
-    # Validate font names
     _ALLOWED_FONTS = {"Helvetica", "Times-Roman", "Courier", "Helvetica-Oblique", "Times-Italic"}
     if concept["body_font"] not in _ALLOWED_FONTS:
-        concept["body_font"] = pd.get("body_font", "Times-Roman")
+        concept["body_font"] = _pd.get("body_font", "Times-Roman")
     if concept["chapter_font"] not in _ALLOWED_FONTS:
-        concept["chapter_font"] = pd.get("chapter_font", "Times-Roman")
+        concept["chapter_font"] = _pd.get("chapter_font", "Times-Roman")
 
     return concept
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Step 4 — PDF typesetting with ReportLab
+# BUG FIX: Unicode font substitution + safe Unicode drop-cap
 # ─────────────────────────────────────────────────────────────────────────────
 
 def render_layout_pdf(
@@ -565,11 +647,25 @@ def render_layout_pdf(
     page_height_mm: float,
     book_title: str,
 ) -> str:
+    _ensure_unicode_fonts()
+
     from reportlab.lib.units import mm                                       # pyrefly: ignore [missing-import]
     from reportlab.lib.colors import Color                                   # pyrefly: ignore [missing-import]
     from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak  # pyrefly: ignore [missing-import]
     from reportlab.lib.styles import ParagraphStyle                          # pyrefly: ignore [missing-import]
     from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_JUSTIFY          # pyrefly: ignore [missing-import]
+
+    # ── Detect if the document contains non-Latin (e.g. Devanagari) text ─────
+    all_text = book_title + " ".join(
+        c.get("title", "") + " " + c.get("body", "") for c in chapters
+    )
+    has_unicode = _has_non_latin(all_text)
+
+    # ── Resolve actual font names (Unicode-capable if needed) ─────────────────
+    raw_body_font    = concept["body_font"]
+    raw_chapter_font = concept["chapter_font"]
+    body_font    = _unicode_body_font(raw_body_font, has_unicode)
+    chapter_font = _unicode_body_font(raw_chapter_font, has_unicode)
 
     PW = page_width_mm * mm
     PH = page_height_mm * mm
@@ -583,14 +679,21 @@ def render_layout_pdf(
     ch_r,  ch_g,  ch_b  = _hex_to_rgb(concept["chapter_title_color"])
     ac_r,  ac_g,  ac_b  = _hex_to_rgb(concept["accent_color"])
 
-    body_font      = concept["body_font"]
     body_size      = concept["body_font_size"]
     leading        = body_size * concept["line_spacing"]
     indent_pt      = concept["first_para_indent_mm"] * mm
-    chapter_font   = concept["chapter_font"]
     chapter_size   = concept["chapter_font_size"]
-    show_drop      = concept["show_drop_cap"]
+    # BUG FIX: only show drop cap for Latin scripts — Devanagari drop caps
+    # require a Unicode-aware font that also supports large-size Devanagari,
+    # and ReportLab's inline <font> tag does not re-shape multi-byte glyphs
+    # correctly. Safe to disable for non-Latin.
+    show_drop      = concept["show_drop_cap"] and not has_unicode
+    # BUG FIX: strip ornaments that may not render in the chosen font family
     ornament       = concept.get("ornament", "")
+    if has_unicode and ornament:
+        # Keep only safe ASCII ornaments; strip complex Unicode symbols
+        safe_ornament = "".join(c for c in ornament if ord(c) < 0x0300 or c in "—–•·")
+        ornament = safe_ornament or ""
     header_text    = concept.get("header_text", book_title) or book_title
     show_pn        = concept["show_page_numbers"]
     chapter_prefix = concept.get("chapter_prefix", "Chapter")
@@ -642,6 +745,8 @@ def render_layout_pdf(
         firstLineIndent=indent_pt,
         alignment=TA_JUSTIFY,
         spaceAfter=0, spaceBefore=0,
+        # wordWrap needed for Indic scripts
+        wordWrap="CJK" if has_unicode else "LTR",
     )
     orn_style = ParagraphStyle(
         "Ornament",
@@ -661,22 +766,29 @@ def render_layout_pdf(
         leading=min(36, chapter_size * 1.6) * 1.2,
         textColor=Color(ch_r, ch_g, ch_b),
         alignment=TA_CENTER, spaceAfter=20,
+        wordWrap="CJK" if has_unicode else "LTR",
     )
     story.append(Spacer(1, PH * 0.28))
-    story.append(Paragraph(book_title, title_style))
+    # BUG FIX: escape HTML entities in the title too
+    safe_title = book_title.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    story.append(Paragraph(safe_title, title_style))
     if ornament:
         story.append(Spacer(1, 14))
-        story.append(Paragraph(ornament, orn_style))
+        safe_orn = ornament.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        story.append(Paragraph(safe_orn, orn_style))
     story.append(PageBreak())
 
     # ── Chapters ──────────────────────────────────────────────────────────────
     for idx, chapter in enumerate(chapters, start=1):
         if chapter_prefix:
-            story.append(Paragraph(f"{chapter_prefix.upper()} {idx}".strip(), prefix_style))
-        story.append(Paragraph(chapter["title"], ch_style))
+            safe_prefix = chapter_prefix.replace("&", "&amp;")
+            story.append(Paragraph(f"{safe_prefix.upper()} {idx}".strip(), prefix_style))
+        safe_ch_title = chapter["title"].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        story.append(Paragraph(safe_ch_title, ch_style))
         story.append(Spacer(1, 4))
         if ornament:
-            story.append(Paragraph(ornament, orn_style))
+            safe_orn = ornament.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            story.append(Paragraph(safe_orn, orn_style))
             story.append(Spacer(1, 6))
 
         raw_body = chapter.get("body", "").strip()
@@ -686,14 +798,24 @@ def render_layout_pdf(
 
         for p_idx, para_text in enumerate(paragraphs):
             safe = para_text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-            if p_idx == 0 and show_drop and len(safe) > 1:
-                first_char = safe[0]
-                rest = safe[1:]
-                drop_html = (
-                    f'<font name="{chapter_font}" size="{int(body_size * 2.8)}">'
-                    f"{first_char}</font>{rest}"
-                )
-                story.append(Paragraph(drop_html, body_style))
+            # BUG FIX: drop cap only for Latin first characters, and only when
+            # show_drop is True. Use codepoint-safe slicing on the ORIGINAL
+            # (un-escaped) text so we never split a multi-byte character.
+            if p_idx == 0 and show_drop and len(para_text) > 1:
+                # Work on the original text to get the first real character
+                first_char = para_text[0]   # ← codepoint-safe (Python str)
+                rest_orig  = para_text[1:]
+                # Only do drop cap if first char is a basic Latin letter
+                if first_char.isalpha() and ord(first_char) < 0x0250:
+                    first_esc = first_char.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                    rest_esc  = rest_orig.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                    drop_html = (
+                        f'<font name="{chapter_font}" size="{int(body_size * 2.8)}">'
+                        f"{first_esc}</font>{rest_esc}"
+                    )
+                    story.append(Paragraph(drop_html, body_style))
+                else:
+                    story.append(Paragraph(safe, body_style))
             else:
                 story.append(Paragraph(safe, body_style))
 
@@ -705,6 +827,7 @@ def render_layout_pdf(
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Step 5 — DOCX typesetting
+# BUG FIX: correct italic flag for Times-Italic / Helvetica-Oblique
 # ─────────────────────────────────────────────────────────────────────────────
 
 def render_layout_docx(
@@ -721,22 +844,25 @@ def render_layout_docx(
     from docx.oxml.ns import qn                                # pyrefly: ignore [missing-import]
     from docx.oxml import OxmlElement                          # pyrefly: ignore [missing-import]
 
+    # BUG FIX: map ReportLab font names to Word font names,
+    # and track italic flag correctly for oblique/italic variants.
     _FONT_MAP = {
-        "Times-Roman":       "Times New Roman",
-        "Times-Italic":      "Times New Roman",
-        "Helvetica":         "Arial",
-        "Helvetica-Oblique": "Arial",
-        "Courier":           "Courier New",
+        "Times-Roman":       ("Times New Roman", False),
+        "Times-Italic":      ("Times New Roman", True),   # ← was missing italic=True
+        "Helvetica":         ("Arial",            False),
+        "Helvetica-Oblique": ("Arial",            True),  # ← was missing italic=True
+        "Courier":           ("Courier New",      False),
     }
 
-    def docx_font(rl_name: str) -> str:
-        return _FONT_MAP.get(rl_name, "Times New Roman")
+    def docx_font(rl_name: str) -> tuple[str, bool]:
+        """Return (word_font_name, is_italic)."""
+        return _FONT_MAP.get(rl_name, ("Times New Roman", False))
 
     def rgb(hex_str: str) -> RGBColor:
         return _hex_to_docx_rgb(hex_str)
 
-    body_fn    = docx_font(concept["body_font"])
-    chapter_fn = docx_font(concept["chapter_font"])
+    body_fn, body_italic   = docx_font(concept["body_font"])
+    ch_fn,   ch_italic     = docx_font(concept["chapter_font"])
     body_size  = float(concept["body_font_size"])
     ch_size    = float(concept["chapter_font_size"])
     ls         = float(concept["line_spacing"])
@@ -783,7 +909,8 @@ def render_layout_docx(
     # Title page
     for _ in range(4):
         doc.add_paragraph()
-    add_para(book_title, chapter_fn, min(36, ch_size * 1.5), bold=True,
+    add_para(book_title, ch_fn, min(36, ch_size * 1.5), bold=True,
+             italic=ch_italic,
              color=concept["chapter_title_color"], align=WD_ALIGN_PARAGRAPH.CENTER, space_after=10)
     if ornament:
         add_para(ornament, body_fn, body_size + 2, color=concept["accent_color"],
@@ -795,7 +922,8 @@ def render_layout_docx(
         if prefix:
             add_para(f"{prefix.upper()} {idx}".strip(), body_fn, body_size * 0.82,
                      color=concept["accent_color"], space_before=6, space_after=2)
-        add_para(chapter["title"], chapter_fn, ch_size, bold=True,
+        add_para(chapter["title"], ch_fn, ch_size, bold=True,
+                 italic=ch_italic,
                  color=concept["chapter_title_color"], space_after=8)
         add_rule(concept["accent_color"])
         if ornament:
@@ -807,7 +935,8 @@ def render_layout_docx(
         if not paragraphs:
             paragraphs = [raw_body] if raw_body else ["[No content]"]
         for para_text in paragraphs:
-            add_para(para_text, body_fn, body_size, color=concept["text_color"],
+            add_para(para_text, body_fn, body_size, italic=body_italic,
+                     color=concept["text_color"],
                      align=WD_ALIGN_PARAGRAPH.JUSTIFY, space_after=4, line_space=ls)
 
         doc.add_page_break()
@@ -828,8 +957,8 @@ def design_layout(
     page_height_mm: float = 297.0,
     book_title: str = "",
     design_instructions: str = "",
-    book_type: Optional[str] = None,          # NEW — "novel"|"academic"|"religious"|"poetry"|"children"|"business"
-    visual_template: Optional[str] = None,    # NEW — template key (injected into design_instructions)
+    book_type: Optional[str] = None,
+    visual_template: Optional[str] = None,
     progress_callback: Optional[Callable[[str, int, str], None]] = None,
     # ── Typography overrides (None = AI/profile decides) ─────────────────────
     body_font: Optional[str] = None,
@@ -847,17 +976,13 @@ def design_layout(
     """
     Full pipeline — book-type aware:
       1. Extract text
-      2. Detect chapters
+      2. Detect chapters (supports Hindi/Devanagari)
       3. Look up book-type profile (smart genre defaults)
       4. Build override hints (user values + profile)
       5. Ask GPT-4o for a layout concept (seeded with profile)
       6. Apply hard user overrides (user always wins)
-      7. Render PDF (ReportLab)
+      7. Render PDF (ReportLab + Unicode fonts)
       8. Render DOCX (python-docx)
-
-    Returns dict with: title, style_name, concept, chapter_count,
-                       chapter_titles, pdf_path, docx_path, job_id,
-                       book_type, book_type_label
     """
 
     def progress(stage: str, pct: int, message: str) -> None:
@@ -907,8 +1032,6 @@ def design_layout(
 
     effective_instructions = design_instructions or ""
 
-    # Visual template description — always injected, prepended before any
-    # user design_instructions so both are honoured together.
     _TEMPLATE_HINTS = {
         "classic_novel":    "Classic cream pages with serif fonts, generous margins, drop caps and ornamental chapter dividers — think vintage Penguin Classics.",
         "premium_hardcover":"Luxury dark background (#0f0f0f), cream/gold text, gold accent (#c8a200), wide margins — elegant premium edition.",
@@ -922,7 +1045,6 @@ def design_layout(
     if visual_template:
         hint = _TEMPLATE_HINTS.get(visual_template, "")
         if hint:
-            # Prepend template hint; user instructions (if any) refine further
             effective_instructions = hint + (("\n" + effective_instructions) if effective_instructions else "")
 
     if override_hints:
@@ -968,7 +1090,6 @@ def design_layout(
     if show_page_numbers is not None:
         concept["show_page_numbers"]  = show_page_numbers
 
-    # Tag concept with book type for downstream use
     concept["_book_type"]       = book_type or "auto"
     concept["_book_type_label"] = profile["_label"] if profile else "Auto (AI chosen)"
 
