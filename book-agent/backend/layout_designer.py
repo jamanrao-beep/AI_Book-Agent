@@ -1,15 +1,16 @@
 """
-layout_designer.py  ·  v2.5 (Strict Dimensions, TOC Bypass & Smart Bullets)
+layout_designer.py  ·  v2.3 (Page Size Fix, Smart Headings & Bullet Preservation)
 AI-powered internal book layout designer — with full book-type awareness
 and proper Unicode (Devanagari, Hindi, multi-script) support.
 
 Pipeline:
   1. Extract raw text from PDF / DOCX / ZIP
-  2. Detect chapter boundaries (bypasses TOC lists automatically)
+  2. Detect chapter boundaries (supports Hindi/Devanagari अध्याय headings)
   3. Build book-type defaults (novel, academic, religious, poetry, children, business)
-  4. Ask GPT-4o to produce a complete typographic layout concept (JSON)
-  5. Apply hard user overrides on top of the AI concept (user always wins)
-  6. Render PDF (ReportLab + registered Unicode/Noto fonts)
+  4. Ask GPT-4o to produce a complete typographic layout concept (JSON),
+     seeded with type-aware defaults and any user overrides
+  5. Apply hard user overrides on top of the AI concept  (user always wins)
+  6. Render PDF  (ReportLab + registered Unicode/Noto fonts)
   7. Render DOCX (python-docx)
   8. Return paths + metadata to the caller
 """
@@ -46,6 +47,8 @@ MODEL = "gpt-4o"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Unicode font registration (run once at import time)
+# ReportLab's built-in fonts (Helvetica, Times-Roman …) are Latin-only.
+# For any non-Latin script we register Noto TTF fonts and substitute them.
 # ─────────────────────────────────────────────────────────────────────────────
 
 _NOTO_PATHS = {
@@ -53,6 +56,7 @@ _NOTO_PATHS = {
     "NotoSerifDevanagari-Bold": "/usr/share/fonts/truetype/noto/NotoSerifDevanagari-Bold.ttf",
     "NotoSansDevanagari":       "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf",
     "NotoSansDevanagari-Bold":  "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Bold.ttf",
+    # Fallback general-purpose Unicode fonts
     "FreeSerif":        "/usr/share/fonts/truetype/freefont/FreeSerif.ttf",
     "FreeSerifBold":    "/usr/share/fonts/truetype/freefont/FreeSerifBold.ttf",
     "FreeSerifItalic":  "/usr/share/fonts/truetype/freefont/FreeSerifItalic.ttf",
@@ -77,7 +81,7 @@ def _ensure_unicode_fonts() -> None:
                     pdfmetrics.registerFont(TTFont(name, path))
                 except Exception as e:
                     print(f"  ⚠️  Failed to register font {name}: {e}\n{traceback.format_exc()}")
-                    pass
+                    pass  # already registered or unavailable
         _FONTS_REGISTERED = True
     except Exception as e:
         print(f"  ⚠️  _ensure_unicode_fonts failed completely: {e}\n{traceback.format_exc()}")
@@ -93,6 +97,7 @@ def _unicode_body_font(rl_name: str, has_unicode: bool) -> str:
     """
     Map a ReportLab built-in font name to a Unicode-capable equivalent
     when the document contains non-Latin characters (e.g. Devanagari).
+    Falls back to the original name for pure-Latin documents.
     """
     if not has_unicode:
         return rl_name
@@ -104,6 +109,7 @@ def _unicode_body_font(rl_name: str, has_unicode: bool) -> str:
         "Courier":           "NotoSansDevanagari",
     }
     mapped = _MAP.get(rl_name, rl_name)
+    # Only use mapped name if the font was actually registered
     try:
         from reportlab.pdfbase import pdfmetrics          # pyrefly: ignore [missing-import]
         pdfmetrics.getFont(mapped)
@@ -448,19 +454,22 @@ def extract_text(file_path: str, filename: str) -> str:
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Step 2 — Chapter detection
+# BUG FIX: added Hindi/Devanagari chapter patterns (अध्याय, भाग, etc.)
 # ─────────────────────────────────────────────────────────────────────────────
 
 _CHAPTER_RE = re.compile(
     r"^(?:"
+    # English: "Chapter 1", "Part II", "1. Title", "ALL CAPS TITLE"
     r"chapter\s+(?:\d+|[ivxlcdm]+)[^\n]*"
     r"|part\s+(?:\d+|[ivxlcdm]+)[^\n]*"
     r"|\d{1,3}[.\)]\s+[A-Z][^\n]{3,60}"
     r"|[A-Z][A-Z\s]{4,50}$"
-    r"|अध्याय\s*[\d\u0966-\u096F]+"       
-    r"|भाग\s*[\d\u0966-\u096F]+"           
-    r"|प्रकरण\s*[\d\u0966-\u096F]+"        
-    r"|खंड\s*[\d\u0966-\u096F]+"           
-    r"|सर्ग\s*[\d\u0966-\u096F]+"          
+    # Hindi/Devanagari: "अध्याय 1", "भाग 2", standalone Devanagari headings
+    r"|अध्याय\s*[\d\u0966-\u096F]+"       # अध्याय + digits (ASCII or Devanagari)
+    r"|भाग\s*[\d\u0966-\u096F]+"           # भाग (part)
+    r"|प्रकरण\s*[\d\u0966-\u096F]+"        # प्रकरण (section/chapter)
+    r"|खंड\s*[\d\u0966-\u096F]+"           # खंड (section)
+    r"|सर्ग\s*[\d\u0966-\u096F]+"          # सर्ग (canto)
     r")",
     re.IGNORECASE | re.MULTILINE | re.UNICODE,
 )
@@ -485,12 +494,13 @@ def parse_chapters(raw_text: str) -> list[dict]:
             if splits[i] - splits[i-1] < 12:
                 bad_splits.add(i)
                 bad_splits.add(i-1)
-                
+
         valid_splits = [s for i, s in enumerate(splits) if i not in bad_splits]
         splits = valid_splits
         # --------------------------------------------------
 
         if len(splits) < 2:
+            # No chapter headings detected — split by word count.
             words = raw_text.split()
             total_words = len(words)
             target_sections = min(60, max(1, total_words // 500))
@@ -503,6 +513,18 @@ def parse_chapters(raw_text: str) -> list[dict]:
             return chapters
 
         chapters: list[dict] = []
+
+        # --- FIX: CAPTURE TOC & INTRO ---
+        # Grabs all text BEFORE the first matched "Chapter 1"
+        if splits and splits[0] > 0:
+            intro_text = "\n".join(lines[0:splits[0]]).strip()
+            if len(intro_text) > 15:
+                chapters.append({
+                    "title": "Front Matter & Introduction",
+                    "body": intro_text
+                })
+        # ------------------------------------
+
         for k, start_line in enumerate(splits[:MAX_CHAPTERS]):
             end_line = splits[k + 1] if k + 1 < len(splits) else len(lines)
             heading = lines[start_line].strip()
@@ -607,6 +629,7 @@ def generate_layout_concept(
     )
     if book_type:
         user_msg += f"Book type: {book_type}\n"
+    # BUG FIX: renamed local variable from `pd` to `_pd` to avoid shadowing
     _pd = profile_defaults or {}
     if _pd:
         subset = {k: v for k, v in _pd.items() if not k.startswith("_")}
@@ -676,6 +699,7 @@ def generate_layout_concept(
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Step 4 — PDF typesetting with ReportLab
+# BUG FIX: Unicode font substitution + safe Unicode drop-cap
 # ─────────────────────────────────────────────────────────────────────────────
 
 def render_layout_pdf(
@@ -727,13 +751,17 @@ def render_layout_pdf(
         leading        = body_size * concept["line_spacing"]
         indent_pt      = concept["first_para_indent_mm"] * mm
         chapter_size   = concept["chapter_font_size"]
+        # BUG FIX: only show drop cap for Latin scripts — Devanagari drop caps
+        # require a Unicode-aware font that also supports large-size Devanagari,
+        # and ReportLab's inline <font> tag does not re-shape multi-byte glyphs
+        # correctly. Safe to disable for non-Latin.
         show_drop      = concept["show_drop_cap"] and not has_unicode
-        
+        # BUG FIX: strip ornaments that may not render in the chosen font family
         ornament       = concept.get("ornament", "")
         if has_unicode and ornament:
+            # Keep only safe ASCII ornaments; strip complex Unicode symbols
             safe_ornament = "".join(c for c in ornament if ord(c) < 0x0300 or c in "—–•·")
             ornament = safe_ornament or ""
-            
         header_text    = concept.get("header_text", book_title) or book_title
         show_pn        = concept["show_page_numbers"]
         chapter_prefix = concept.get("chapter_prefix", "Chapter")
@@ -762,6 +790,7 @@ def render_layout_pdf(
             topMargin=mt,  bottomMargin=mb,
         )
 
+        # ── Paragraph styles ──────────────────────────────────────────────────────
         ch_style = ParagraphStyle(
             "ChapterTitle",
             fontName=chapter_font, fontSize=chapter_size,
@@ -784,6 +813,7 @@ def render_layout_pdf(
             firstLineIndent=indent_pt,
             alignment=TA_JUSTIFY,
             spaceAfter=0, spaceBefore=0,
+            # wordWrap needed for Indic scripts
             wordWrap="CJK" if has_unicode else "LTR",
         )
         orn_style = ParagraphStyle(
@@ -796,6 +826,7 @@ def render_layout_pdf(
 
         story = []
 
+        # ── Title page ────────────────────────────────────────────────────────────
         title_style = ParagraphStyle(
             "TitlePage",
             fontName=chapter_font,
@@ -806,6 +837,7 @@ def render_layout_pdf(
             wordWrap="CJK" if has_unicode else "LTR",
         )
         story.append(Spacer(1, PH * 0.28))
+        # BUG FIX: escape HTML entities in the title too
         safe_title = book_title.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         story.append(Paragraph(safe_title, title_style))
         if ornament:
@@ -816,15 +848,16 @@ def render_layout_pdf(
 
         # ── Chapters ──────────────────────────────────────────────────────────────
         for idx, chapter in enumerate(chapters, start=1):
-            
+
             # --- FIX: Prevent Double Chapter Headings ---
             ch_title_lower = chapter["title"].lower()
             already_has_chapter = ch_title_lower.startswith("chapter") or ch_title_lower.startswith("part")
-            
-            if chapter_prefix and not already_has_chapter:
+            is_intro = "introduction" in ch_title_lower or "front matter" in ch_title_lower
+
+            if chapter_prefix and not already_has_chapter and not is_intro:
                 safe_prefix = chapter_prefix.replace("&", "&amp;")
                 story.append(Paragraph(f"{safe_prefix.upper()} {idx}".strip(), prefix_style))
-                
+
             safe_ch_title = chapter["title"].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
             story.append(Paragraph(safe_ch_title, ch_style))
             story.append(Spacer(1, 4))
@@ -841,14 +874,14 @@ def render_layout_pdf(
 
             for p_idx, para_text in enumerate(paragraphs):
                 # --- FIX: Smart Line Break & Bullet Handling ---
-                lines = para_text.split('\n')
+                lines_in_para = para_text.split('\n')
                 cleaned_lines = []
-                for line in lines:
+                for line in lines_in_para:
                     line = line.strip()
                     if not line: continue
                     is_bullet = line.startswith(('•', '-', '*', '⁃', '▪')) or re.match(r'^[\w\d]+\.', line)
                     safe_line = line.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-                    
+
                     if is_bullet:
                         cleaned_lines.append('<br/>' + safe_line)
                     else:
@@ -856,17 +889,24 @@ def render_layout_pdf(
                             cleaned_lines[-1] += " " + safe_line
                         else:
                             cleaned_lines.append(safe_line)
-                
-                safe = "".join(cleaned_lines)
-                if safe.startswith('<br/>'): 
-                    safe = safe[5:]
 
-                if p_idx == 0 and show_drop and len(para_text) > 1:
-                    first_char = para_text[0]
-                    rest_orig = safe[len(first_char.replace("&", "&amp;").replace("<", "&lt;")):]
+                safe = "".join(cleaned_lines)
+                if safe.startswith('<br/>'):
+                    safe = safe[5:]
+                # ------------------------------------------------
+
+                # BUG FIX: drop cap only for Latin first characters...
+                if p_idx == 0 and show_drop and not is_intro and len(para_text) > 1:
+                    # Work on the original text to get the first real character
+                    first_char = para_text[0]   # ← codepoint-safe (Python str)
+                    rest_orig  = safe[len(first_char.replace("&", "&amp;").replace("<", "&lt;")):]
+                    # Only do drop cap if first char is a basic Latin letter
                     if first_char.isalpha() and ord(first_char) < 0x0250:
                         first_esc = first_char.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-                        drop_html = f'<font name="{chapter_font}" size="{int(body_size * 2.8)}">{first_esc}</font>{rest_orig}'
+                        drop_html = (
+                            f'<font name="{chapter_font}" size="{int(body_size * 2.8)}">'
+                            f"{first_esc}</font>{rest_orig}"
+                        )
                         story.append(Paragraph(drop_html, body_style))
                     else:
                         story.append(Paragraph(safe, body_style))
@@ -884,6 +924,7 @@ def render_layout_pdf(
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Step 5 — DOCX typesetting
+# BUG FIX: correct italic flag for Times-Italic / Helvetica-Oblique
 # ─────────────────────────────────────────────────────────────────────────────
 
 def render_layout_docx(
@@ -901,15 +942,18 @@ def render_layout_docx(
         from docx.oxml.ns import qn                                # pyrefly: ignore [missing-import]
         from docx.oxml import OxmlElement                          # pyrefly: ignore [missing-import]
 
+        # BUG FIX: map ReportLab font names to Word font names,
+        # and track italic flag correctly for oblique/italic variants.
         _FONT_MAP = {
             "Times-Roman":       ("Times New Roman", False),
-            "Times-Italic":      ("Times New Roman", True),   
+            "Times-Italic":      ("Times New Roman", True),   # ← was missing italic=True
             "Helvetica":         ("Arial",            False),
-            "Helvetica-Oblique": ("Arial",            True),  
+            "Helvetica-Oblique": ("Arial",            True),  # ← was missing italic=True
             "Courier":           ("Courier New",      False),
         }
 
         def docx_font(rl_name: str) -> tuple[str, bool]:
+            """Return (word_font_name, is_italic)."""
             return _FONT_MAP.get(rl_name, ("Times New Roman", False))
 
         def rgb(hex_str: str) -> RGBColor:
@@ -974,10 +1018,12 @@ def render_layout_docx(
         # Chapters
         for idx, chapter in enumerate(chapters, start=1):
             
-            # Prevent Double Headings in DOCX
+            # --- FIX: Prevent Double Headings in DOCX ---
             ch_title_lower = chapter["title"].lower()
             already_has_chapter = ch_title_lower.startswith("chapter") or ch_title_lower.startswith("part")
-            if prefix and not already_has_chapter:
+            is_intro = "introduction" in ch_title_lower or "front matter" in ch_title_lower
+            
+            if prefix and not already_has_chapter and not is_intro:
                 add_para(f"{prefix.upper()} {idx}".strip(), body_fn, body_size * 0.82,
                          color=concept["accent_color"], space_before=6, space_after=2)
                          
@@ -996,9 +1042,9 @@ def render_layout_docx(
             
             for para_text in paragraphs:
                 # --- FIX: Smart Line Break & Bullet Handling in DOCX ---
-                lines = para_text.split('\n')
+                lines_in_para = para_text.split('\n')
                 cleaned_lines = []
-                for line in lines:
+                for line in lines_in_para:
                     line = line.strip()
                     if not line: continue
                     is_bullet = line.startswith(('•', '-', '*', '⁃', '▪')) or re.match(r'^[\w\d]+\.', line)
@@ -1009,12 +1055,13 @@ def render_layout_docx(
                             cleaned_lines[-1] += " " + line
                         else:
                             cleaned_lines.append(line)
-                            
+
                 for sub_line in cleaned_lines:
                     align = WD_ALIGN_PARAGRAPH.LEFT if sub_line.startswith(('•', '-', '*', '⁃', '▪')) else WD_ALIGN_PARAGRAPH.JUSTIFY
                     add_para(sub_line, body_fn, body_size, italic=body_italic,
                              color=concept["text_color"],
                              align=align, space_after=4, line_space=ls)
+                # -------------------------------------------------------
 
             doc.add_page_break()
 
@@ -1033,8 +1080,10 @@ def design_layout(
     file_path: str,
     filename: str,
     output_dir: str,
-    page_width_mm: float = 210.0,
-    page_height_mm: float = 297.0,
+    # --- CRITICAL FIX: HARD DEFAULT TO 5x8 INCHES ---
+    page_width_mm: float = 127.0,
+    page_height_mm: float = 203.2,
+    # ------------------------------------------------
     book_title: str = "",
     design_instructions: str = "",
     book_type: Optional[str] = None,
@@ -1072,11 +1121,6 @@ def design_layout(
     try:
         os.makedirs(output_dir, exist_ok=True)
         ext = os.path.splitext(filename)[1].lower()
-
-        # --- FIX: NO PDF DIMENSION OVERRIDE ---
-        # The backend now 100% strictly respects `page_width_mm` and `page_height_mm` 
-        # passed exactly as configured from the frontend (e.g., 5x8).
-        # Removed the `pypdf` box-reading logic completely.
 
         if not book_title:
             book_title = Path(filename).stem.replace("_", " ").replace("-", " ").title()
@@ -1118,10 +1162,6 @@ def design_layout(
             override_hints.append("page numbers: " + ("SHOWN" if show_page_numbers else "HIDDEN"))
 
         effective_instructions = design_instructions or ""
-
-        # --- FIX: Default Instruction Fallback ---
-        if not effective_instructions and not book_type and not visual_template:
-            effective_instructions = "[CRITICAL INSTRUCTION: The user wants the layout to be structurally identical to a clean, standard document. Use standard minimal styling (Arial/Helvetica). Do NOT use drop caps. Do NOT use massive chapter fonts, ornaments, or crazy colors.]"
 
         _TEMPLATE_HINTS = {
             "classic_novel":    "Classic cream pages with serif fonts, generous margins, drop caps and ornamental chapter dividers — think vintage Penguin Classics.",
