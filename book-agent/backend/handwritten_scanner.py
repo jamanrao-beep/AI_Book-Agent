@@ -16,6 +16,7 @@ import zipfile
 import shutil
 import base64
 import tempfile
+import traceback
 from pathlib import Path
 from typing import Optional
 
@@ -57,8 +58,12 @@ def _image_to_b64(path: str) -> tuple[str, str]:
             buf = io.BytesIO()
             Image.open(path).save(buf, format="PNG")
             return base64.b64encode(buf.getvalue()).decode(), "image/png"
-        except ImportError:
+        except ImportError as e:
+            print(f"  ⚠️  Pillow import failed for image conversion. Error details: {e}\n{traceback.format_exc()}")
             pass  # fall through to raw read
+        except Exception as e:
+            print(f"  ⚠️  Unexpected error during image conversion. Error details: {e}\n{traceback.format_exc()}")
+            pass
 
     with open(path, "rb") as f:
         return base64.b64encode(f.read()).decode(), media_type
@@ -82,7 +87,8 @@ def _pdf_to_images(pdf_path: str, out_dir: str) -> list[str]:
             pix.save(img_path)
             paths.append(img_path)
         return paths
-    except ImportError:
+    except ImportError as e:
+        print(f"  ⚠️  fitz (PyMuPDF) missing, falling back to pdf2image. Error details: {e}\n{traceback.format_exc()}")
         # fallback: pdf2image
         # pyrefly: ignore [missing-import]
         from pdf2image import convert_from_path
@@ -93,6 +99,9 @@ def _pdf_to_images(pdf_path: str, out_dir: str) -> list[str]:
             img.save(img_path, "PNG")
             paths.append(img_path)
         return paths
+    except Exception as e:
+        print(f"  ⚠️  PDF to images conversion failed completely. Error details: {e}\n{traceback.format_exc()}")
+        raise
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -109,15 +118,18 @@ def _docx_to_images(docx_path: str, out_dir: str) -> list[str]:
     doc = Document(docx_path)
     paths = []
     idx = 0
-    for rel in doc.part.rels.values():
-        if "image" in rel.reltype:
-            img_data = rel.target_part.blob
-            ext = Path(rel.target_partname).suffix.lower() or ".png"
-            img_path = os.path.join(out_dir, f"image_{idx:04d}{ext}")
-            with open(img_path, "wb") as f:
-                f.write(img_data)
-            paths.append(img_path)
-            idx += 1
+    try:
+        for rel in doc.part.rels.values():
+            if "image" in rel.reltype:
+                img_data = rel.target_part.blob
+                ext = Path(rel.target_partname).suffix.lower() or ".png"
+                img_path = os.path.join(out_dir, f"image_{idx:04d}{ext}")
+                with open(img_path, "wb") as f:
+                    f.write(img_data)
+                paths.append(img_path)
+                idx += 1
+    except Exception as e:
+         print(f"  ⚠️  Error extracting embedded images from DOCX. Error details: {e}\n{traceback.format_exc()}")
 
     # If no embedded images, try converting via PDF
     if not paths:
@@ -132,7 +144,8 @@ def _docx_to_images(docx_path: str, out_dir: str) -> list[str]:
             pdf_candidate = os.path.join(out_dir, f"{base}.pdf")
             if os.path.exists(pdf_candidate):
                 return _pdf_to_images(pdf_candidate, out_dir)
-        except Exception:
+        except Exception as e:
+            print(f"  ⚠️  DOCX to PDF fallback conversion failed. Error details: {e}\n{traceback.format_exc()}")
             pass
 
     return sorted(paths)
@@ -164,45 +177,49 @@ def collect_images(file_path: str, filename: str, scratch_dir: str) -> list[str]
 
     if ext == ".zip":
         image_paths = []
-        with zipfile.ZipFile(file_path, "r") as zf:
-            members = sorted([
-                m for m in zf.namelist()
-                if Path(m).suffix.lower() in SUPPORTED_IMAGE_EXTS
-                and not m.startswith("__MACOSX")
-                and not os.path.basename(m).startswith(".")
-            ])
-            for i, member in enumerate(members):
-                member_ext = Path(member).suffix.lower()
-                dest = os.path.join(scratch_dir, f"img_{i:04d}{member_ext}")
-                with zf.open(member) as src, open(dest, "wb") as dst:
-                    shutil.copyfileobj(src, dst)
-                image_paths.append(dest)
+        try:
+            with zipfile.ZipFile(file_path, "r") as zf:
+                members = sorted([
+                    m for m in zf.namelist()
+                    if Path(m).suffix.lower() in SUPPORTED_IMAGE_EXTS
+                    and not m.startswith("__MACOSX")
+                    and not os.path.basename(m).startswith(".")
+                ])
+                for i, member in enumerate(members):
+                    member_ext = Path(member).suffix.lower()
+                    dest = os.path.join(scratch_dir, f"img_{i:04d}{member_ext}")
+                    with zf.open(member) as src, open(dest, "wb") as dst:
+                        shutil.copyfileobj(src, dst)
+                    image_paths.append(dest)
 
-            # Also handle PDF/DOCX inside zip
-            pdf_members = [m for m in zf.namelist()
-                           if Path(m).suffix.lower() in {".pdf", ".docx"}
-                           and not m.startswith("__MACOSX")]
-            for member in pdf_members:
-                member_ext = Path(member).suffix.lower()
-                tmp = os.path.join(scratch_dir, f"inner_{uuid.uuid4().hex}{member_ext}")
-                with zf.open(member) as src, open(tmp, "wb") as dst:
-                    shutil.copyfileobj(src, dst)
-                sub_dir = os.path.join(scratch_dir, f"sub_{uuid.uuid4().hex}")
-                os.makedirs(sub_dir, exist_ok=True)
-                if member_ext == ".pdf":
-                    image_paths.extend(_pdf_to_images(tmp, sub_dir))
-                else:
-                    image_paths.extend(_docx_to_images(tmp, sub_dir))
-                os.remove(tmp)
+                # Also handle PDF/DOCX inside zip
+                pdf_members = [m for m in zf.namelist()
+                               if Path(m).suffix.lower() in {".pdf", ".docx"}
+                               and not m.startswith("__MACOSX")]
+                for member in pdf_members:
+                    member_ext = Path(member).suffix.lower()
+                    tmp = os.path.join(scratch_dir, f"inner_{uuid.uuid4().hex}{member_ext}")
+                    with zf.open(member) as src, open(tmp, "wb") as dst:
+                        shutil.copyfileobj(src, dst)
+                    sub_dir = os.path.join(scratch_dir, f"sub_{uuid.uuid4().hex}")
+                    os.makedirs(sub_dir, exist_ok=True)
+                    if member_ext == ".pdf":
+                        image_paths.extend(_pdf_to_images(tmp, sub_dir))
+                    else:
+                        image_paths.extend(_docx_to_images(tmp, sub_dir))
+                    os.remove(tmp)
 
-        # Preserve insertion order (sorted(set(...)) would randomise uuid-prefixed sub-dir paths)
-        seen: set[str] = set()
-        ordered: list[str] = []
-        for p in image_paths:
-            if p not in seen:
-                seen.add(p)
-                ordered.append(p)
-        return ordered
+            # Preserve insertion order (sorted(set(...)) would randomise uuid-prefixed sub-dir paths)
+            seen: set[str] = set()
+            ordered: list[str] = []
+            for p in image_paths:
+                if p not in seen:
+                    seen.add(p)
+                    ordered.append(p)
+            return ordered
+        except Exception as e:
+            print(f"  ⚠️  ZIP file processing failed. Error details: {e}\n{traceback.format_exc()}")
+            raise
 
     raise ValueError(f"Unsupported file type: {ext}")
 
@@ -250,7 +267,7 @@ def transcribe_images(image_paths: list[str], book_title: str = "") -> list[dict
                 })
                 successful_indices.append(slot)
             except Exception as e:
-                print(f"  ⚠️  Could not encode {img_path}: {e}")
+                print(f"  ⚠️  Could not encode {img_path}. Error details: {e}\n{traceback.format_exc()}")
                 failed_indices.append(slot)
 
         # Update the text prompt to reflect actual image count sent
@@ -298,7 +315,7 @@ def transcribe_images(image_paths: list[str], book_title: str = "") -> list[dict
                         "has_content": False,
                     }
             except Exception as e:
-                print(f"  ⚠️  Transcription batch {batch_start}-{batch_start+batch_size} failed: {e}")
+                print(f"  ⚠️  Transcription batch {batch_start}-{batch_start+batch_size} failed. Error details: {e}\n{traceback.format_exc()}")
                 for slot in successful_indices:
                     batch_results[slot] = {
                         "page_num": batch_start + slot + 1,
@@ -363,7 +380,8 @@ def structure_transcription(pages: list[dict], book_title: str = "") -> dict:
             max_tokens=20,
         )
         detected_language = lang_resp.choices[0].message.content.strip()
-    except Exception:
+    except Exception as e:
+        print(f"  ⚠️  Language detection failed. Error details: {e}\n{traceback.format_exc()}")
         pass
 
     # Build full text — no truncation
@@ -437,7 +455,7 @@ def structure_transcription(pages: list[dict], book_title: str = "") -> dict:
                     detected_language = chunk_result["language"]
 
         except Exception as exc:
-            print(f"  ⚠️  Structuring chunk {chunk_idx + 1} failed: {exc}. Using flat fallback.")
+            print(f"  ⚠️  Structuring chunk {chunk_idx + 1} failed. Error details: {exc}\n{traceback.format_exc()}. Using flat fallback.")
             chapter_counter += 1
             all_chapters.append({
                 "chapter_number": chapter_counter,
@@ -463,80 +481,84 @@ def structure_transcription(pages: list[dict], book_title: str = "") -> dict:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def generate_scanned_pdf(structure: dict, output_path: str) -> str:
-    from reportlab.lib.pagesizes import A4
-    from reportlab.lib.units import mm
-    from reportlab.lib.styles import ParagraphStyle
-    from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, HRFlowable
-    from reportlab.lib.colors import HexColor, white
-    import datetime
+    try:
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.units import mm
+        from reportlab.lib.styles import ParagraphStyle
+        from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, HRFlowable
+        from reportlab.lib.colors import HexColor, white
+        import datetime
 
-    DARK   = HexColor("#1E293B")
-    ACCENT = HexColor("#7C3AED")
-    GRAY   = HexColor("#64748B")
-    MARGIN = 22 * mm
+        DARK   = HexColor("#1E293B")
+        ACCENT = HexColor("#7C3AED")
+        GRAY   = HexColor("#64748B")
+        MARGIN = 22 * mm
 
-    def on_cover(canvas, doc):
-        w, h = A4
-        canvas.setFillColor(HexColor("#0f0a1e"))
-        canvas.rect(0, 0, w, h, fill=1, stroke=0)
-        canvas.setFillColor(HexColor("#7C3AED"))
-        canvas.rect(0, h * 0.38, w, 3, fill=1, stroke=0)
-        canvas.setFillColor(HexColor("#0a0614"))
-        canvas.rect(0, 0, w, 18*mm, fill=1, stroke=0)
-        canvas.setFillColor(HexColor("#475569"))
-        canvas.setFont("Helvetica", 8)
-        canvas.drawCentredString(w/2, 7*mm, f"Transcribed by AI Scanner  ·  {datetime.date.today()}")
+        def on_cover(canvas, doc):
+            w, h = A4
+            canvas.setFillColor(HexColor("#0f0a1e"))
+            canvas.rect(0, 0, w, h, fill=1, stroke=0)
+            canvas.setFillColor(HexColor("#7C3AED"))
+            canvas.rect(0, h * 0.38, w, 3, fill=1, stroke=0)
+            canvas.setFillColor(HexColor("#0a0614"))
+            canvas.rect(0, 0, w, 18*mm, fill=1, stroke=0)
+            canvas.setFillColor(HexColor("#475569"))
+            canvas.setFont("Helvetica", 8)
+            canvas.drawCentredString(w/2, 7*mm, f"Transcribed by AI Scanner  ·  {datetime.date.today()}")
 
-    def on_page(canvas, doc):
-        w, h = A4
-        canvas.saveState()
-        canvas.setFillColor(DARK)
-        canvas.rect(0, 0, w, 9*mm, fill=1, stroke=0)
-        canvas.setFillColor(white)
-        canvas.setFont("Helvetica", 7.5)
-        canvas.drawString(MARGIN, 3*mm, structure.get("title", "Manuscript"))
-        canvas.drawRightString(w - MARGIN, 3*mm, f"Page {doc.page}")
-        canvas.restoreState()
+        def on_page(canvas, doc):
+            w, h = A4
+            canvas.saveState()
+            canvas.setFillColor(DARK)
+            canvas.rect(0, 0, w, 9*mm, fill=1, stroke=0)
+            canvas.setFillColor(white)
+            canvas.setFont("Helvetica", 7.5)
+            canvas.drawString(MARGIN, 3*mm, structure.get("title", "Manuscript"))
+            canvas.drawRightString(w - MARGIN, 3*mm, f"Page {doc.page}")
+            canvas.restoreState()
 
-    S = lambda name, **kw: ParagraphStyle(name, **kw)
-    cover_title = S("ct", fontName="Helvetica-Bold", fontSize=30, textColor=white, leading=38, alignment=TA_CENTER, spaceAfter=8)
-    cover_sub   = S("cs", fontName="Helvetica",      fontSize=12, textColor=HexColor("#94a3b8"), leading=16, alignment=TA_CENTER)
-    ch_label    = S("cl", fontName="Helvetica",      fontSize=10, textColor=ACCENT, leading=14, spaceBefore=0, spaceAfter=3)
-    ch_title    = S("cht",fontName="Helvetica-Bold", fontSize=20, textColor=DARK, leading=26, spaceBefore=2, spaceAfter=5)
-    body        = S("bs", fontName="Helvetica",      fontSize=10.5, textColor=HexColor("#334155"), leading=17, spaceAfter=8, alignment=TA_JUSTIFY)
-    lang_badge  = S("lb", fontName="Helvetica",      fontSize=9, textColor=HexColor("#7C3AED"), leading=14, alignment=TA_CENTER)
+        S = lambda name, **kw: ParagraphStyle(name, **kw)
+        cover_title = S("ct", fontName="Helvetica-Bold", fontSize=30, textColor=white, leading=38, alignment=TA_CENTER, spaceAfter=8)
+        cover_sub   = S("cs", fontName="Helvetica",      fontSize=12, textColor=HexColor("#94a3b8"), leading=16, alignment=TA_CENTER)
+        ch_label    = S("cl", fontName="Helvetica",      fontSize=10, textColor=ACCENT, leading=14, spaceBefore=0, spaceAfter=3)
+        ch_title    = S("cht",fontName="Helvetica-Bold", fontSize=20, textColor=DARK, leading=26, spaceBefore=2, spaceAfter=5)
+        body        = S("bs", fontName="Helvetica",      fontSize=10.5, textColor=HexColor("#334155"), leading=17, spaceAfter=8, alignment=TA_JUSTIFY)
+        lang_badge  = S("lb", fontName="Helvetica",      fontSize=9, textColor=HexColor("#7C3AED"), leading=14, alignment=TA_CENTER)
 
-    doc = SimpleDocTemplate(output_path, pagesize=A4,
-                            leftMargin=MARGIN, rightMargin=MARGIN,
-                            topMargin=MARGIN, bottomMargin=18*mm,
-                            title=structure.get("title", "Manuscript"))
-    doc.title = structure.get("title", "Manuscript")
+        doc = SimpleDocTemplate(output_path, pagesize=A4,
+                                leftMargin=MARGIN, rightMargin=MARGIN,
+                                topMargin=MARGIN, bottomMargin=18*mm,
+                                title=structure.get("title", "Manuscript"))
+        doc.title = structure.get("title", "Manuscript")
 
-    story = []
-    story.append(Spacer(1, 50*mm))
-    story.append(Paragraph(structure.get("title", "Manuscript"), cover_title))
-    story.append(Spacer(1, 5*mm))
-    lang = structure.get("language", "")
-    if lang:
-        story.append(Paragraph(f"Language: {lang}", cover_sub))
-    story.append(Spacer(1, 4*mm))
-    story.append(Paragraph(f"Transcribed on {datetime.date.today().strftime('%B %d, %Y')}", cover_sub))
-    story.append(PageBreak())
-
-    for ch in structure.get("chapters", []):
-        story.append(Spacer(1, 8*mm))
-        story.append(Paragraph(f"Chapter {ch['chapter_number']}", ch_label))
-        story.append(Paragraph(ch["title"], ch_title))
-        story.append(HRFlowable(width="100%", thickness=1.5, color=ACCENT, spaceAfter=10))
-        for para in ch["content"].split("\n\n"):
-            para = para.strip()
-            if para:
-                story.append(Paragraph(para, body))
+        story = []
+        story.append(Spacer(1, 50*mm))
+        story.append(Paragraph(structure.get("title", "Manuscript"), cover_title))
+        story.append(Spacer(1, 5*mm))
+        lang = structure.get("language", "")
+        if lang:
+            story.append(Paragraph(f"Language: {lang}", cover_sub))
+        story.append(Spacer(1, 4*mm))
+        story.append(Paragraph(f"Transcribed on {datetime.date.today().strftime('%B %d, %Y')}", cover_sub))
         story.append(PageBreak())
 
-    doc.build(story, onFirstPage=on_cover, onLaterPages=on_page)
-    return output_path
+        for ch in structure.get("chapters", []):
+            story.append(Spacer(1, 8*mm))
+            story.append(Paragraph(f"Chapter {ch['chapter_number']}", ch_label))
+            story.append(Paragraph(ch["title"], ch_title))
+            story.append(HRFlowable(width="100%", thickness=1.5, color=ACCENT, spaceAfter=10))
+            for para in ch["content"].split("\n\n"):
+                para = para.strip()
+                if para:
+                    story.append(Paragraph(para, body))
+            story.append(PageBreak())
+
+        doc.build(story, onFirstPage=on_cover, onLaterPages=on_page)
+        return output_path
+    except Exception as e:
+        print(f"  ⚠️  generate_scanned_pdf failed. Error details: {e}\n{traceback.format_exc()}")
+        raise
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -544,78 +566,82 @@ def generate_scanned_pdf(structure: dict, output_path: str) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def generate_scanned_docx(structure: dict, output_path: str) -> str:
-    # pyrefly: ignore [missing-import]
-    from docx import Document
-    # pyrefly: ignore [missing-import]
-    from docx.shared import Pt, RGBColor, Cm
-    # pyrefly: ignore [missing-import]
-    from docx.enum.text import WD_ALIGN_PARAGRAPH
-    # pyrefly: ignore [missing-import]
-    from docx.oxml.ns import qn
-    # pyrefly: ignore [missing-import]
-    from docx.oxml import OxmlElement
-    import datetime
+    try:
+        # pyrefly: ignore [missing-import]
+        from docx import Document
+        # pyrefly: ignore [missing-import]
+        from docx.shared import Pt, RGBColor, Cm
+        # pyrefly: ignore [missing-import]
+        from docx.enum.text import WD_ALIGN_PARAGRAPH
+        # pyrefly: ignore [missing-import]
+        from docx.oxml.ns import qn
+        # pyrefly: ignore [missing-import]
+        from docx.oxml import OxmlElement
+        import datetime
 
-    def set_color(paragraph, hex_color="7C3AED"):
-        for run in paragraph.runs:
-            run.font.color.rgb = RGBColor(int(hex_color[0:2],16), int(hex_color[2:4],16), int(hex_color[4:6],16))
+        def set_color(paragraph, hex_color="7C3AED"):
+            for run in paragraph.runs:
+                run.font.color.rgb = RGBColor(int(hex_color[0:2],16), int(hex_color[2:4],16), int(hex_color[4:6],16))
 
-    doc = Document()
-    section = doc.sections[0]
-    section.page_height = Cm(29.7)
-    section.page_width  = Cm(21.0)
-    section.left_margin = section.right_margin = Cm(2.5)
-    section.top_margin  = Cm(2.5)
-    section.bottom_margin = Cm(2.0)
+        doc = Document()
+        section = doc.sections[0]
+        section.page_height = Cm(29.7)
+        section.page_width  = Cm(21.0)
+        section.left_margin = section.right_margin = Cm(2.5)
+        section.top_margin  = Cm(2.5)
+        section.bottom_margin = Cm(2.0)
 
-    style_normal = doc.styles['Normal']
-    style_normal.font.name = 'Calibri'
-    style_normal.font.size = Pt(11)
+        style_normal = doc.styles['Normal']
+        style_normal.font.name = 'Calibri'
+        style_normal.font.size = Pt(11)
 
-    # Cover page
-    for _ in range(4): doc.add_paragraph()
-    t = doc.add_paragraph()
-    t.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    r = t.add_run(structure.get("title", "Manuscript"))
-    r.font.size = Pt(26); r.font.bold = True
-    r.font.color.rgb = RGBColor(0x1E, 0x29, 0x3B)
+        # Cover page
+        for _ in range(4): doc.add_paragraph()
+        t = doc.add_paragraph()
+        t.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        r = t.add_run(structure.get("title", "Manuscript"))
+        r.font.size = Pt(26); r.font.bold = True
+        r.font.color.rgb = RGBColor(0x1E, 0x29, 0x3B)
 
-    lang = structure.get("language", "")
-    if lang:
-        lp = doc.add_paragraph()
-        lp.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        lr = lp.add_run(f"Language: {lang}")
-        lr.font.size = Pt(11); lr.font.color.rgb = RGBColor(0x64, 0x74, 0x8B)
+        lang = structure.get("language", "")
+        if lang:
+            lp = doc.add_paragraph()
+            lp.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            lr = lp.add_run(f"Language: {lang}")
+            lr.font.size = Pt(11); lr.font.color.rgb = RGBColor(0x64, 0x74, 0x8B)
 
-    dp = doc.add_paragraph()
-    dp.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    dr = dp.add_run(f"Transcribed on {datetime.date.today().strftime('%B %d, %Y')}")
-    dr.font.size = Pt(10); dr.font.italic = True; dr.font.color.rgb = RGBColor(0x94, 0xA3, 0xB8)
-    doc.add_page_break()
-
-    for ch in structure.get("chapters", []):
-        lbl = doc.add_paragraph()
-        lr = lbl.add_run(f"Chapter {ch['chapter_number']}")
-        lr.font.size = Pt(10); lr.font.bold = True
-        lr.font.color.rgb = RGBColor(0x7C, 0x3A, 0xED)
-
-        heading = doc.add_heading(ch["title"], level=1)
-        set_color(heading, "1E293B")
-        doc.add_paragraph()
-
-        for para in ch["content"].split("\n\n"):
-            para = para.strip()
-            if para:
-                p = doc.add_paragraph(para)
-                p.style = doc.styles['Normal']
-                p.paragraph_format.space_after = Pt(6)
-                p.paragraph_format.line_spacing = Pt(16)
-                p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-
+        dp = doc.add_paragraph()
+        dp.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        dr = dp.add_run(f"Transcribed on {datetime.date.today().strftime('%B %d, %Y')}")
+        dr.font.size = Pt(10); dr.font.italic = True; dr.font.color.rgb = RGBColor(0x94, 0xA3, 0xB8)
         doc.add_page_break()
 
-    doc.save(output_path)
-    return output_path
+        for ch in structure.get("chapters", []):
+            lbl = doc.add_paragraph()
+            lr = lbl.add_run(f"Chapter {ch['chapter_number']}")
+            lr.font.size = Pt(10); lr.font.bold = True
+            lr.font.color.rgb = RGBColor(0x7C, 0x3A, 0xED)
+
+            heading = doc.add_heading(ch["title"], level=1)
+            set_color(heading, "1E293B")
+            doc.add_paragraph()
+
+            for para in ch["content"].split("\n\n"):
+                para = para.strip()
+                if para:
+                    p = doc.add_paragraph(para)
+                    p.style = doc.styles['Normal']
+                    p.paragraph_format.space_after = Pt(6)
+                    p.paragraph_format.line_spacing = Pt(16)
+                    p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+
+            doc.add_page_break()
+
+        doc.save(output_path)
+        return output_path
+    except Exception as e:
+        print(f"  ⚠️  generate_scanned_docx failed. Error details: {e}\n{traceback.format_exc()}")
+        raise
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -687,6 +713,10 @@ def scan_handwritten_book(
             "pdf_path": pdf_path,
             "docx_path": docx_path,
         }
+    except Exception as e:
+        print(f"  🚨 CRITICAL ERROR in scan_handwritten_book: {e}\n{traceback.format_exc()}")
+        if progress_callback: progress_callback("error", -1, f"Failed: {e}")
+        raise
 
     finally:
         shutil.rmtree(scratch_dir, ignore_errors=True)
