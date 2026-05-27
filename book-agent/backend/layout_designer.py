@@ -314,7 +314,7 @@ def _extract_from_zip(zip_path: str) -> str:
             ]
             if not members:
                 raise ValueError("No .pdf or .docx files found inside the zip.")
-            for member in members[:5]:
+            for member in members:  # no cap — process every file in the zip
                 ext = os.path.splitext(member)[1].lower()
                 tmp = os.path.join(scratch, f"{uuid.uuid4().hex}{ext}")
                 with zf.open(member) as src, open(tmp, "wb") as dst:
@@ -350,8 +350,8 @@ _CHAPTER_RE = re.compile(
     re.IGNORECASE | re.MULTILINE,
 )
 
-MAX_CHAPTERS = 60
-MIN_CHAPTER_CHARS = 300
+MAX_CHAPTERS = 10_000   # effectively unlimited — render everything
+MIN_CHAPTER_CHARS = 50  # keep even short chapters; don't silently merge them
 
 
 def parse_chapters(raw_text: str) -> list[dict]:
@@ -363,14 +363,19 @@ def parse_chapters(raw_text: str) -> list[dict]:
             splits.append(i)
 
     if len(splits) < 2:
+        # No chapter headings detected — split by word count.
+        # Use larger chunks for big books so we don't produce thousands of tiny sections.
         words = raw_text.split()
-        chunk_size = 1_500
+        total_words = len(words)
+        # Target ~60 sections maximum; minimum chunk 500 words.
+        target_sections = min(60, max(1, total_words // 500))
+        chunk_size = max(500, math.ceil(total_words / target_sections))
         chapters = []
-        for idx in range(0, len(words), chunk_size):
+        for idx in range(0, total_words, chunk_size):
             chunk = " ".join(words[idx: idx + chunk_size])
             if len(chunk) >= MIN_CHAPTER_CHARS:
                 chapters.append({"title": f"Section {len(chapters) + 1}", "body": chunk})
-        return chapters[:MAX_CHAPTERS]
+        return chapters  # no [:MAX_CHAPTERS] cap here — all sections are kept
 
     chapters: list[dict] = []
     for k, start_line in enumerate(splits[:MAX_CHAPTERS]):
@@ -459,7 +464,13 @@ def generate_layout_concept(
     profile_defaults (if supplied) are injected into the user message so the
     AI knows what field values are already 'strongly suggested'.
     """
-    sample = sample_text[:3_000]
+    # Send a generous sample: first 2 000 chars for style + last 1 000 chars so
+    # the AI sees structure from across the whole book, not just the opening.
+    sample = (
+        sample_text[:6_000]
+        if len(sample_text) <= 6_000
+        else sample_text[:5_000] + "\n…\n" + sample_text[-1_000:]
+    )
     system_prompt = _build_system_prompt(
         BOOK_TYPE_PROFILES.get(book_type.lower().strip()) if book_type else None
     )
@@ -517,17 +528,20 @@ def generate_layout_concept(
     concept.setdefault("header_text",           book_title)
     concept.setdefault("show_page_numbers",     pd.get("show_page_numbers", True))
 
-    concept["body_font_size"]        = max(9,  min(14, float(concept.get("body_font_size",  pd.get("body_font_size",  11)))))
-    concept["line_spacing"]          = max(1.2, min(2.0, float(concept.get("line_spacing",   pd.get("line_spacing",   1.5)))))
-    concept["first_para_indent_mm"]  = max(0,  min(10, float(concept.get("first_para_indent_mm", pd.get("first_para_indent_mm", 5)))))
-    concept["chapter_font_size"]     = max(16, min(36, float(concept.get("chapter_font_size", pd.get("chapter_font_size", 22)))))
+    # Clamp AI-generated values to reasonable print ranges.
+    # NOTE: hard user overrides are applied AFTER this in design_layout(), so
+    # they always win regardless of these defaults.
+    concept["body_font_size"]        = max(7,  min(20,  float(concept.get("body_font_size",  pd.get("body_font_size",  11)))))
+    concept["line_spacing"]          = max(1.0, min(3.0, float(concept.get("line_spacing",   pd.get("line_spacing",   1.5)))))
+    concept["first_para_indent_mm"]  = max(0,  min(20,  float(concept.get("first_para_indent_mm", pd.get("first_para_indent_mm", 5)))))
+    concept["chapter_font_size"]     = max(10, min(72,  float(concept.get("chapter_font_size", pd.get("chapter_font_size", 22)))))
     for key, default in [
         ("margin_top_mm",    pd.get("margin_top_mm",    20)),
         ("margin_bottom_mm", pd.get("margin_bottom_mm", 20)),
         ("margin_left_mm",   pd.get("margin_left_mm",   22)),
         ("margin_right_mm",  pd.get("margin_right_mm",  22)),
     ]:
-        concept[key] = max(10, min(50, float(concept.get(key, default))))
+        concept[key] = max(5, min(100, float(concept.get(key, default))))
 
     # Validate font names
     _ALLOWED_FONTS = {"Helvetica", "Times-Roman", "Courier", "Helvetica-Oblique", "Times-Italic"}

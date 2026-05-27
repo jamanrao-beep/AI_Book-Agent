@@ -170,10 +170,10 @@ def root():
 
 @app.post("/generate-book")
 async def generate_book(req: BookRequest, bg: BackgroundTasks):
-    if req.num_pages < 1 or req.num_pages > 500:
-        raise HTTPException(400, "num_pages must be between 1 and 500")
-    if req.words_per_page < 100 or req.words_per_page > 500:
-        raise HTTPException(400, "words_per_page must be between 100 and 500")
+    if req.num_pages < 1 or req.num_pages > 10_000:
+        raise HTTPException(400, "num_pages must be between 1 and 10 000")
+    if req.words_per_page < 100 or req.words_per_page > 1000:
+        raise HTTPException(400, "words_per_page must be between 100 and 1000")
 
     db = SessionLocal()
     book = Book(
