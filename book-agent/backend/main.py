@@ -7,7 +7,13 @@ from fastapi.middleware.cors import CORSMiddleware
 # pyrefly: ignore [missing-import]
 from pydantic import BaseModel
 from typing import Optional
-import os, sys, uuid, zipfile, shutil, threading
+import os, sys, uuid, zipfile, shutil, threading, logging, traceback
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
+logger = logging.getLogger("editorial_ai")
 from handwritten_scanner import scan_handwritten_book, SUPPORTED_IMAGE_EXTS, SUPPORTED_UPLOAD_EXTS
 from book_editor import (
     extract_book_text, parse_book_structure,
@@ -60,6 +66,28 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 MAX_FILE_SIZE = 150 * 1024 * 1024  # 150 MB
 STREAM_CHUNK  = 1 * 1024 * 1024    # 1 MB read chunks
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Global exception handler — turns unhandled crashes into readable JSON 500s
+# instead of silently closing the TCP connection (which looks like "Network Error")
+# ─────────────────────────────────────────────────────────────────────────────
+
+# pyrefly: ignore [missing-import]
+from fastapi.requests import Request
+# pyrefly: ignore [missing-import]
+from fastapi.responses import JSONResponse
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logger.error(
+        "Unhandled exception on %s %s: %s\n%s",
+        request.method, request.url.path, exc, traceback.format_exc(),
+    )
+    return JSONResponse(
+        status_code=500,
+        content={"detail": f"Internal server error: {exc}"},
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -227,6 +255,7 @@ ALLOWED_PROOFREAD_EXTENSIONS = {".txt", ".docx", ".pdf", ".md", ".rtf", ".zip"}
 async def proofread_document(file: UploadFile = File(...)):
     filename = file.filename or "document.txt"
     ext = os.path.splitext(filename)[1].lower()
+    logger.info("Proofread request: filename=%s size_hint=%s", filename, file.size)
 
     if ext not in ALLOWED_PROOFREAD_EXTENSIONS:
         raise HTTPException(400, f"Unsupported file type '{ext}'. Upload .txt, .docx, .pdf, .md, .rtf, or .zip")
@@ -234,13 +263,19 @@ async def proofread_document(file: UploadFile = File(...)):
     tmp_path = os.path.join(OUTPUT_DIR, f"upload_{uuid.uuid4().hex}{ext}")
     try:
         # ── Stream to disk in chunks — avoids loading the whole file into RAM ──
-        await _stream_upload_to_disk(file, tmp_path)
+        byte_count = await _stream_upload_to_disk(file, tmp_path)
+        logger.info("Upload streamed to disk: %s bytes → %s", byte_count, tmp_path)
 
         original_text = extract_text(tmp_path, filename)
         if not original_text.strip():
             raise HTTPException(400, "Document appears to be empty.")
+        logger.info("Extracted %d characters of text", len(original_text))
 
         result = proofread_text(original_text)
+        logger.info(
+            "Proofreading complete: grammar=%d punct=%d style=%d",
+            result["grammar_fixes"], result["punctuation_fixes"], result["style_suggestions"],
+        )
 
         job_id = uuid.uuid4().hex
         corrected_filename = f"corrected_{job_id}{ext}"
@@ -273,6 +308,14 @@ async def proofread_document(file: UploadFile = File(...)):
             "style_details": result.get("style_details", []),
             "download_url": f"/proofread/{job_id}/download",
         }
+
+    except HTTPException:
+        raise  # re-raise clean HTTP errors as-is
+
+    except Exception as exc:
+        # Log the full traceback so we can see exactly what crashed
+        logger.error("Proofread failed for '%s': %s\n%s", filename, exc, traceback.format_exc())
+        raise HTTPException(500, f"Proofreading failed: {exc}") from exc
 
     finally:
         if os.path.exists(tmp_path):

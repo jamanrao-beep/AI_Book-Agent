@@ -114,10 +114,37 @@ export default function ProofreadPage() {
       setActiveTab("summary");
       setExpandedErrors(new Set());
     } catch (err: unknown) {
-      const message =
-        err instanceof Error
-          ? err.message
-          : "Proofreading failed. Make sure the backend is running.";
+      // Extract the most useful error message from axios errors
+      let message = "Proofreading failed. Make sure the backend is running.";
+      if (err && typeof err === "object") {
+        const axiosErr = err as {
+          response?: { status: number; data?: { detail?: string } };
+          request?: unknown;
+          message?: string;
+          code?: string;
+        };
+        if (axiosErr.response) {
+          // Server responded with a non-2xx status
+          const status = axiosErr.response.status;
+          const detail = axiosErr.response.data?.detail ?? axiosErr.message ?? "";
+          message = `Server error ${status}${detail ? `: ${detail}` : ""}`;
+          console.error("[Proofread] Server error", status, axiosErr.response.data);
+        } else if (axiosErr.request) {
+          // Request was made but no response received (timeout, CORS, backend down)
+          const code = axiosErr.code ?? "";
+          if (code === "ECONNABORTED" || axiosErr.message?.includes("timeout")) {
+            message =
+              "Request timed out. The document may be too large for a single request — try a smaller file, or split large documents into parts.";
+          } else {
+            message =
+              "No response from server. Check that the backend is running and that there is no CORS or proxy issue. See browser console for details.";
+          }
+          console.error("[Proofread] No response received", axiosErr.request, axiosErr.message, code);
+        } else {
+          message = axiosErr.message ?? message;
+          console.error("[Proofread] Request setup error", axiosErr.message);
+        }
+      }
       setError(message);
     } finally {
       setLoading(false);
