@@ -202,3 +202,55 @@ export const downloadCoverDoc = (result: CoverResult) => {
   a.click();
   document.body.removeChild(a);
 };
+
+// ─────────────────────────────────────────────
+// Layout Designer
+// ─────────────────────────────────────────────
+
+export interface LayoutResult {
+  title: string;
+  style_name: string;
+  chapter_count: number;
+  pdf_path: string;
+  docx_path: string;
+  job_id: string;
+  book_type: string;
+}
+
+export const designLayout = (
+  file: File,
+  bookTitle: string = "",
+  designInstructions: string = "",
+  bookType: string = "",
+  visualTemplate: string = "",
+  onUploadProgress?: (pct: number) => void
+) => {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("book_title", bookTitle);
+  form.append("design_instructions", designInstructions);
+  form.append("book_type", bookType);
+  form.append("visual_template", visualTemplate);
+
+  return API.post<LayoutResult>("/design-layout", form, {
+    headers: { "Content-Type": "multipart/form-data" },
+    timeout: 120000,
+    onUploadProgress: onUploadProgress
+      ? (e) => {
+        if (e.total) {
+          onUploadProgress(Math.round((e.loaded * 100) / e.total));
+        }
+      }
+      : undefined,
+  });
+};
+
+export const downloadLayoutDoc = (jobId: string, ext: "pdf" | "docx") => {
+  const url = `${API.defaults.baseURL}/layout/${jobId}/download/${ext}`;
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `layout_${jobId}.${ext}`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+};
