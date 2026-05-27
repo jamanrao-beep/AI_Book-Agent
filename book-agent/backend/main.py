@@ -48,9 +48,10 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,  # must be False when allow_origins=["*"]
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 # In-memory job stores (use Redis/DB in production)
@@ -72,7 +73,7 @@ STREAM_CHUNK  = 1 * 1024 * 1024    # 1 MB read chunks
 # Global exception handler — turns unhandled crashes into readable JSON 500s
 # instead of silently closing the TCP connection (which looks like "Network Error")
 # ─────────────────────────────────────────────────────────────────────────────
-
+    
 # pyrefly: ignore [missing-import]
 from fastapi.requests import Request
 # pyrefly: ignore [missing-import]
