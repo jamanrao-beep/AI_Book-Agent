@@ -1,5 +1,5 @@
 """
-layout_designer.py  ·  v2.2 (Unicode + Dynamic Page Size & Similarity Fix)
+layout_designer.py  ·  v2.3 (Page Size Fix, Smart Headings & Bullet Preservation)
 AI-powered internal book layout designer — with full book-type awareness
 and proper Unicode (Devanagari, Hindi, multi-script) support.
 
@@ -824,12 +824,19 @@ def render_layout_pdf(
 
         # ── Chapters ──────────────────────────────────────────────────────────────
         for idx, chapter in enumerate(chapters, start=1):
-            if chapter_prefix:
+            
+            # FIX 2: Prevent Double Chapter Headings
+            ch_title_lower = chapter["title"].lower()
+            already_has_chapter = ch_title_lower.startswith("chapter") or ch_title_lower.startswith("part")
+            
+            if chapter_prefix and not already_has_chapter:
                 safe_prefix = chapter_prefix.replace("&", "&amp;")
                 story.append(Paragraph(f"{safe_prefix.upper()} {idx}".strip(), prefix_style))
+                
             safe_ch_title = chapter["title"].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
             story.append(Paragraph(safe_ch_title, ch_style))
             story.append(Spacer(1, 4))
+            
             if ornament:
                 safe_orn = ornament.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
                 story.append(Paragraph(safe_orn, orn_style))
@@ -838,36 +845,35 @@ def render_layout_pdf(
             raw_body = chapter.get("body", "").strip()
             paragraphs = [p.strip() for p in re.split(r"\n{2,}", raw_body) if p.strip()]
             if not paragraphs:
-                paragraphs = [raw_body] if raw_body else ["[No content]"]
+                paragraphs = ["[No content]"]
 
             for p_idx, para_text in enumerate(paragraphs):
-                safe = para_text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                # FIX 3: Smart Line Break & Bullet Handling
+                lines = para_text.split('\n')
+                cleaned_lines = []
+                for line in lines:
+                    line = line.strip()
+                    if not line: continue
+                    # If it's a bullet point, force a hard break
+                    if line.startswith(('•', '-', '*')) or re.match(r'^\d+\.', line):
+                        cleaned_lines.append('<br/>' + line.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+                    else:
+                        # Otherwise, join physical PDF lines with a space
+                        safe_line = line.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                        if cleaned_lines and not cleaned_lines[-1].startswith('<br/>'):
+                            cleaned_lines[-1] += " " + safe_line
+                        else:
+                            cleaned_lines.append(safe_line)
                 
-                # --- FIX 3: Preserve bullets/single line breaks ---
-                if "•" in safe or "\n-" in "\n" + safe or "\n" in safe:
-                    safe = safe.replace("\n", "<br/>")
-                # --------------------------------------------------
+                safe = "".join(cleaned_lines)
 
-                # BUG FIX: drop cap only for Latin first characters, and only when
-                # show_drop is True. Use codepoint-safe slicing on the ORIGINAL
-                # (un-escaped) text so we never split a multi-byte character.
+                # Drop cap logic
                 if p_idx == 0 and show_drop and len(para_text) > 1:
-                    # Work on the original text to get the first real character
-                    first_char = para_text[0]   # ← codepoint-safe (Python str)
-                    rest_orig  = para_text[1:]
-                    # Only do drop cap if first char is a basic Latin letter
+                    first_char = para_text[0]
+                    rest_orig = safe[len(first_char.replace("&", "&amp;").replace("<", "&lt;")):]
                     if first_char.isalpha() and ord(first_char) < 0x0250:
                         first_esc = first_char.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-                        rest_esc  = rest_orig.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-                        
-                        # Re-apply line breaks to the rest of the text if needed
-                        if "•" in rest_esc or "\n-" in "\n" + rest_orig or "\n" in rest_orig:
-                            rest_esc = rest_esc.replace("\n", "<br/>")
-
-                        drop_html = (
-                            f'<font name="{chapter_font}" size="{int(body_size * 2.8)}">'
-                            f"{first_esc}</font>{rest_esc}"
-                        )
+                        drop_html = f'<font name="{chapter_font}" size="{int(body_size * 2.8)}">{first_esc}</font>{rest_orig}'
                         story.append(Paragraph(drop_html, body_style))
                     else:
                         story.append(Paragraph(safe, body_style))
@@ -992,7 +998,7 @@ def render_layout_docx(
             raw_body = chapter.get("body", "").strip()
             paragraphs = [p.strip() for p in re.split(r"\n{2,}", raw_body) if p.strip()]
             if not paragraphs:
-                paragraphs = [raw_body] if raw_body else ["[No content]"]
+                paragraphs = ["[No content]"]
             
             for para_text in paragraphs:
                 # --- FIX 4: Preserve bullets/single line breaks in DOCX ---
@@ -1065,8 +1071,11 @@ def design_layout(
         os.makedirs(output_dir, exist_ok=True)
         ext = os.path.splitext(filename)[1].lower()
 
-        # --- FIX 1: Extract Exact Page Size from PDF ---
-        if ext == ".pdf":
+        # --- FIX 1: Respect User Page Size ---
+        # Only use the PDF's native size if the user left the frontend on standard A4 (210x297)
+        is_default_size = math.isclose(page_width_mm, 210.0, abs_tol=1) and math.isclose(page_height_mm, 297.0, abs_tol=1)
+        
+        if ext == ".pdf" and is_default_size:
             try:
                 # pyrefly: ignore [missing-import]
                 from pypdf import PdfReader
