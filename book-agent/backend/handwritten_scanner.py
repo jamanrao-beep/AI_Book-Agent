@@ -41,8 +41,11 @@ def _image_to_b64(path: str) -> tuple[str, str]:
     mime_map = {
         ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
         ".png": "image/png", ".webp": "image/webp",
-        ".gif": "image/gif", ".bmp": "image/png",  # convert via PIL
-        ".tiff": "image/png", ".tif": "image/png",
+        ".gif": "image/gif",
+        # BMP/TIFF are converted to PNG via Pillow below; if Pillow is absent
+        # we fall back to raw bytes and must report the correct native MIME.
+        ".bmp": "image/bmp",
+        ".tiff": "image/tiff", ".tif": "image/tiff",
     }
     media_type = mime_map.get(ext, "image/jpeg")
 
@@ -192,7 +195,14 @@ def collect_images(file_path: str, filename: str, scratch_dir: str) -> list[str]
                     image_paths.extend(_docx_to_images(tmp, sub_dir))
                 os.remove(tmp)
 
-        return sorted(set(image_paths))
+        # Preserve insertion order (sorted(set(...)) would randomise uuid-prefixed sub-dir paths)
+        seen: set[str] = set()
+        ordered: list[str] = []
+        for p in image_paths:
+            if p not in seen:
+                seen.add(p)
+                ordered.append(p)
+        return ordered
 
     raise ValueError(f"Unsupported file type: {ext}")
 
@@ -225,57 +235,78 @@ def transcribe_images(image_paths: list[str], book_title: str = "") -> list[dict
 
     for batch_start in range(0, len(image_paths), batch_size):
         batch = image_paths[batch_start: batch_start + batch_size]
-        
-        # Build multi-image message
-        content = [{"type": "text", "text": f"Transcribe the handwritten text from the following {len(batch)} page image(s). Separate each page's content with the marker ---PAGE_BREAK--- on its own line."}]
-        
-        for img_path in batch:
+
+        # Track which slots within the batch encoded successfully vs failed
+        successful_indices: list[int] = []
+        failed_indices: list[int] = []
+        api_content: list[dict] = [{"type": "text", "text": ""}]  # placeholder updated below
+
+        for slot, img_path in enumerate(batch):
             try:
                 b64, mime = _image_to_b64(img_path)
-                content.append({
+                api_content.append({
                     "type": "image_url",
-                    "image_url": {
-                        "url": f"data:{mime};base64,{b64}",
-                        "detail": "high"
-                    }
+                    "image_url": {"url": f"data:{mime};base64,{b64}", "detail": "high"},
                 })
+                successful_indices.append(slot)
             except Exception as e:
                 print(f"  ⚠️  Could not encode {img_path}: {e}")
-                results.append({
-                    "page_num": batch_start + len(results) + 1,
-                    "text": "[illegible - could not process image]",
-                    "has_content": False,
-                })
-                continue
+                failed_indices.append(slot)
 
-        try:
-            response = client.chat.completions.create(
-                model=MODEL,
-                messages=[
-                    {"role": "system", "content": TRANSCRIPTION_SYSTEM},
-                    {"role": "user", "content": content},
-                ],
-                max_tokens=4096,
-            )
-            raw = response.choices[0].message.content.strip()
-            pages = raw.split("---PAGE_BREAK---")
-            
-            for i, page_text in enumerate(pages):
-                page_text = page_text.strip()
-                has_content = bool(page_text) and "[PAGE: no text]" not in page_text
-                results.append({
-                    "page_num": batch_start + i + 1,
-                    "text": page_text if has_content else "",
-                    "has_content": has_content,
-                })
-        except Exception as e:
-            print(f"  ⚠️  Transcription batch {batch_start}-{batch_start+batch_size} failed: {e}")
-            for i in range(len(batch)):
-                results.append({
-                    "page_num": batch_start + i + 1,
-                    "text": "[transcription failed for this page]",
-                    "has_content": False,
-                })
+        # Update the text prompt to reflect actual image count sent
+        n_sent = len(successful_indices)
+        api_content[0]["text"] = (
+            f"Transcribe the handwritten text from the following {n_sent} page image(s). "
+            "Separate each page's content with the marker ---PAGE_BREAK--- on its own line."
+        )
+
+        # Pre-allocate result slots so ordering stays aligned with image_paths
+        batch_results: list[dict] = [{}] * len(batch)
+        for slot in failed_indices:
+            batch_results[slot] = {
+                "page_num": batch_start + slot + 1,
+                "text": "[illegible - could not process image]",
+                "has_content": False,
+            }
+
+        if successful_indices:
+            try:
+                response = client.chat.completions.create(
+                    model=MODEL,
+                    messages=[
+                        {"role": "system", "content": TRANSCRIPTION_SYSTEM},
+                        {"role": "user", "content": api_content},
+                    ],
+                    max_tokens=4096,
+                )
+                raw = response.choices[0].message.content.strip()
+                gpt_pages = raw.split("---PAGE_BREAK---")
+
+                for i, slot in enumerate(successful_indices):
+                    page_text = gpt_pages[i].strip() if i < len(gpt_pages) else ""
+                    has_content = bool(page_text) and "[PAGE: no text]" not in page_text
+                    batch_results[slot] = {
+                        "page_num": batch_start + slot + 1,
+                        "text": page_text if has_content else "",
+                        "has_content": has_content,
+                    }
+                # GPT returned fewer splits than images sent — fill remaining
+                for slot in successful_indices[len(gpt_pages):]:
+                    batch_results[slot] = {
+                        "page_num": batch_start + slot + 1,
+                        "text": "[transcription incomplete for this page]",
+                        "has_content": False,
+                    }
+            except Exception as e:
+                print(f"  ⚠️  Transcription batch {batch_start}-{batch_start+batch_size} failed: {e}")
+                for slot in successful_indices:
+                    batch_results[slot] = {
+                        "page_num": batch_start + slot + 1,
+                        "text": "[transcription failed for this page]",
+                        "has_content": False,
+                    }
+
+        results.extend(r for r in batch_results if r)
 
     return results
 

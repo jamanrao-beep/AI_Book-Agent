@@ -698,17 +698,20 @@ async def scan_handwritten(
         if ext not in SCAN_ALLOWED_EXTS:
             raise HTTPException(400, f"Unsupported file type '{ext}'. Accepted: images, .pdf, .docx, .zip")
 
-    # If multiple image files, bundle them into a temporary ZIP
+    # If multiple image files, stream each to a temp file then bundle into ZIP
     if len(all_uploads) > 1:
         zip_job_id = uuid.uuid4().hex
         zip_tmp = os.path.join(OUTPUT_DIR, f"upload_pages_{zip_job_id}.zip")
+        staged: list[str] = []   # temp files to clean up
         try:
-            with _zipfile.ZipFile(zip_tmp, "w") as zf:
-                for upload in all_uploads:
-                    data = await upload.read()
-                    if len(data) > MAX_FILE_SIZE:
-                        raise HTTPException(413, f"File '{upload.filename}' exceeds 150 MB limit.")
-                    zf.writestr(upload.filename or f"page_{uuid.uuid4().hex}.jpg", data)
+            with _zipfile.ZipFile(zip_tmp, "w", _zipfile.ZIP_DEFLATED) as zf:
+                for i, upload in enumerate(all_uploads):
+                    fname = upload.filename or f"page_{i:04d}.jpg"
+                    ext_i = os.path.splitext(fname)[1].lower() or ".jpg"
+                    tmp_i = os.path.join(OUTPUT_DIR, f"mup_{zip_job_id}_{i}{ext_i}")
+                    staged.append(tmp_i)
+                    await _stream_upload_to_disk(upload, tmp_i)  # honours MAX_FILE_SIZE
+                    zf.write(tmp_i, arcname=fname)
             result = scan_handwritten_book(
                 file_path=zip_tmp,
                 filename=f"pages_{zip_job_id}.zip",
@@ -716,6 +719,10 @@ async def scan_handwritten(
                 book_title=book_title,
             )
         finally:
+            for p in staged:
+                if os.path.exists(p):
+                    try: os.remove(p)
+                    except Exception: pass
             if os.path.exists(zip_tmp):
                 os.remove(zip_tmp)
     else:
