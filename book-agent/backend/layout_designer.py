@@ -45,6 +45,7 @@ import shutil
 import unicodedata
 import uuid
 import zipfile
+import traceback
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -97,10 +98,12 @@ def _ensure_unicode_fonts() -> None:
             if os.path.exists(path):
                 try:
                     pdfmetrics.registerFont(TTFont(name, path))
-                except Exception:
+                except Exception as e:
+                    print(f"  ⚠️  Failed to register font {name}: {e}\n{traceback.format_exc()}")
                     pass  # already registered or unavailable
         _FONTS_REGISTERED = True
-    except Exception:
+    except Exception as e:
+        print(f"  ⚠️  _ensure_unicode_fonts failed completely: {e}\n{traceback.format_exc()}")
         pass
 
 
@@ -130,7 +133,8 @@ def _unicode_body_font(rl_name: str, has_unicode: bool) -> str:
         from reportlab.pdfbase import pdfmetrics          # pyrefly: ignore [missing-import]
         pdfmetrics.getFont(mapped)
         return mapped
-    except Exception:
+    except Exception as e:
+        print(f"  ⚠️  Failed mapping font to {mapped}: {e}\n{traceback.format_exc()}")
         return "FreeSerif" if os.path.exists(_NOTO_PATHS.get("FreeSerif", "")) else rl_name
 
 
@@ -380,7 +384,8 @@ def _extract_from_pdf(path: str) -> str:
             if t:
                 pages.append(t)
         text = "\n\n".join(pages)
-    except Exception:
+    except Exception as e:
+        print(f"  ⚠️  pypdf extraction failed: {e}\n{traceback.format_exc()}")
         pass
 
     # Fallback/supplement: pdfplumber (better at complex layouts)
@@ -395,8 +400,9 @@ def _extract_from_pdf(path: str) -> str:
                         pages.append(t)
             text = "\n\n".join(pages)
         except Exception as exc:
+            print(f"  ⚠️  pdfplumber fallback failed: {exc}\n{traceback.format_exc()}")
             if not text:
-                raise RuntimeError(f"PDF extraction failed: {exc}") from exc
+                raise RuntimeError(f"PDF extraction failed: {exc}\n{traceback.format_exc()}") from exc
 
     return text
 
@@ -407,7 +413,8 @@ def _extract_from_docx(path: str) -> str:
         doc = Document(path)
         return "\n\n".join(p.text for p in doc.paragraphs if p.text.strip())
     except Exception as exc:
-        raise RuntimeError(f"DOCX extraction failed: {exc}") from exc
+        print(f"  ⚠️  DOCX extraction failed: {exc}\n{traceback.format_exc()}")
+        raise RuntimeError(f"DOCX extraction failed: {exc}\n{traceback.format_exc()}") from exc
 
 
 def _extract_from_zip(zip_path: str) -> str:
@@ -430,6 +437,9 @@ def _extract_from_zip(zip_path: str) -> str:
                 with zf.open(member) as src, open(tmp, "wb") as dst:
                     shutil.copyfileobj(src, dst)
                 texts.append(_extract_from_pdf(tmp) if ext == ".pdf" else _extract_from_docx(tmp))
+    except Exception as e:
+        print(f"  ⚠️  ZIP extraction failed: {e}\n{traceback.format_exc()}")
+        raise
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
     return "\n\n".join(texts)
@@ -451,9 +461,13 @@ def extract_text(file_path: str, filename: str) -> str:
             from striprtf.striprtf import rtf_to_text  # pyrefly: ignore [missing-import]
             with open(file_path, "r", encoding="utf-8", errors="replace") as f:
                 return rtf_to_text(f.read())
-        except ImportError:
+        except ImportError as e:
+            print(f"  ⚠️  striprtf not installed: {e}\n{traceback.format_exc()}")
             with open(file_path, "r", encoding="utf-8", errors="replace") as f:
                 return f.read()
+        except Exception as e:
+            print(f"  ⚠️  Error extracting RTF: {e}\n{traceback.format_exc()}")
+            raise
     raise ValueError(f"Unsupported file type: {ext}")
 
 
@@ -484,38 +498,42 @@ MIN_CHAPTER_CHARS = 50
 
 
 def parse_chapters(raw_text: str) -> list[dict]:
-    lines = raw_text.split("\n")
-    splits: list[int] = []
-    for i, line in enumerate(lines):
-        stripped = line.strip()
-        if stripped and _CHAPTER_RE.match(stripped) and len(stripped) < 200:
-            splits.append(i)
+    try:
+        lines = raw_text.split("\n")
+        splits: list[int] = []
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if stripped and _CHAPTER_RE.match(stripped) and len(stripped) < 200:
+                splits.append(i)
 
-    if len(splits) < 2:
-        # No chapter headings detected — split by word count.
-        words = raw_text.split()
-        total_words = len(words)
-        target_sections = min(60, max(1, total_words // 500))
-        chunk_size = max(500, math.ceil(total_words / target_sections))
-        chapters = []
-        for idx in range(0, total_words, chunk_size):
-            chunk = " ".join(words[idx: idx + chunk_size])
-            if len(chunk) >= MIN_CHAPTER_CHARS:
-                chapters.append({"title": f"Section {len(chapters) + 1}", "body": chunk})
-        return chapters
+        if len(splits) < 2:
+            # No chapter headings detected — split by word count.
+            words = raw_text.split()
+            total_words = len(words)
+            target_sections = min(60, max(1, total_words // 500))
+            chunk_size = max(500, math.ceil(total_words / target_sections))
+            chapters = []
+            for idx in range(0, total_words, chunk_size):
+                chunk = " ".join(words[idx: idx + chunk_size])
+                if len(chunk) >= MIN_CHAPTER_CHARS:
+                    chapters.append({"title": f"Section {len(chapters) + 1}", "body": chunk})
+            return chapters
 
-    chapters: list[dict] = []
-    for k, start_line in enumerate(splits[:MAX_CHAPTERS]):
-        end_line = splits[k + 1] if k + 1 < len(splits) else len(lines)
-        heading = lines[start_line].strip()
-        body = "\n".join(lines[start_line + 1: end_line]).strip()
-        if len(body) < MIN_CHAPTER_CHARS:
-            if chapters:
-                chapters[-1]["body"] += "\n\n" + heading + "\n" + body
-                continue
-        chapters.append({"title": heading, "body": body})
+        chapters: list[dict] = []
+        for k, start_line in enumerate(splits[:MAX_CHAPTERS]):
+            end_line = splits[k + 1] if k + 1 < len(splits) else len(lines)
+            heading = lines[start_line].strip()
+            body = "\n".join(lines[start_line + 1: end_line]).strip()
+            if len(body) < MIN_CHAPTER_CHARS:
+                if chapters:
+                    chapters[-1]["body"] += "\n\n" + heading + "\n" + body
+                    continue
+            chapters.append({"title": heading, "body": body})
 
-    return chapters or [{"title": "Full Text", "body": raw_text}]
+        return chapters or [{"title": "Full Text", "body": raw_text}]
+    except Exception as e:
+        print(f"  ⚠️  Error in parse_chapters: {e}\n{traceback.format_exc()}")
+        raise
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -615,25 +633,29 @@ def generate_layout_concept(
         user_msg += f"Design instructions: {design_instructions}\n"
     user_msg += f"\nSample text (first 3,000 chars):\n{sample}"
 
-    response = client.chat.completions.create(
-        model=MODEL,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user",   "content": user_msg},
-        ],
-        temperature=0.7,
-        max_tokens=1500,
-    )
-    raw = response.choices[0].message.content.strip()
-    raw = raw.replace("```json", "").replace("```", "").strip()
-    s = raw.find("{")
-    e = raw.rfind("}") + 1
-    if s == -1 or e == 0:
-        raise ValueError(f"No JSON returned by the layout AI. Raw response: {raw[:300]}")
     try:
-        concept = json.loads(raw[s:e])
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"Layout AI returned invalid JSON: {exc}. Raw snippet: {raw[s:s+200]}") from exc
+        response = client.chat.completions.create(
+            model=MODEL,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user",   "content": user_msg},
+            ],
+            temperature=0.7,
+            max_tokens=1500,
+        )
+        raw = response.choices[0].message.content.strip()
+        raw = raw.replace("```json", "").replace("```", "").strip()
+        s = raw.find("{")
+        e = raw.rfind("}") + 1
+        if s == -1 or e == 0:
+            raise ValueError(f"No JSON returned by the layout AI. Raw response: {raw[:300]}")
+        try:
+            concept = json.loads(raw[s:e])
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Layout AI returned invalid JSON: {exc}. Raw snippet: {raw[s:s+200]}\n{traceback.format_exc()}") from exc
+    except Exception as e:
+        print(f"  ⚠️  Error in generate_layout_concept API Call: {e}\n{traceback.format_exc()}")
+        raise
 
     # ── Normalise & clamp ─────────────────────────────────────────────────────
     concept.setdefault("style_name",            "Custom Layout")
@@ -685,180 +707,188 @@ def render_layout_pdf(
 ) -> str:
     _ensure_unicode_fonts()
 
-    from reportlab.lib.units import mm                                       # pyrefly: ignore [missing-import]
-    from reportlab.lib.colors import Color                                   # pyrefly: ignore [missing-import]
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak  # pyrefly: ignore [missing-import]
-    from reportlab.lib.styles import ParagraphStyle                          # pyrefly: ignore [missing-import]
-    from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_JUSTIFY          # pyrefly: ignore [missing-import]
+    try:
+        from reportlab.lib.units import mm                                       # pyrefly: ignore [missing-import]
+        from reportlab.lib.colors import Color                                   # pyrefly: ignore [missing-import]
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak  # pyrefly: ignore [missing-import]
+        from reportlab.lib.styles import ParagraphStyle                          # pyrefly: ignore [missing-import]
+        from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_JUSTIFY          # pyrefly: ignore [missing-import]
+    except ImportError as e:
+        print(f"  ⚠️  ReportLab import failed: {e}\n{traceback.format_exc()}")
+        raise
 
-    # ── Detect if the document contains non-Latin (e.g. Devanagari) text ─────
-    all_text = book_title + " ".join(
-        c.get("title", "") + " " + c.get("body", "") for c in chapters
-    )
-    has_unicode = _has_non_latin(all_text)
+    try:
+        # ── Detect if the document contains non-Latin (e.g. Devanagari) text ─────
+        all_text = book_title + " ".join(
+            c.get("title", "") + " " + c.get("body", "") for c in chapters
+        )
+        has_unicode = _has_non_latin(all_text)
 
-    # ── Resolve actual font names (Unicode-capable if needed) ─────────────────
-    raw_body_font    = concept["body_font"]
-    raw_chapter_font = concept["chapter_font"]
-    body_font    = _unicode_body_font(raw_body_font, has_unicode)
-    chapter_font = _unicode_body_font(raw_chapter_font, has_unicode)
+        # ── Resolve actual font names (Unicode-capable if needed) ─────────────────
+        raw_body_font    = concept["body_font"]
+        raw_chapter_font = concept["chapter_font"]
+        body_font    = _unicode_body_font(raw_body_font, has_unicode)
+        chapter_font = _unicode_body_font(raw_chapter_font, has_unicode)
 
-    PW = page_width_mm * mm
-    PH = page_height_mm * mm
-    mt = concept["margin_top_mm"]    * mm
-    mb = concept["margin_bottom_mm"] * mm
-    ml = concept["margin_left_mm"]   * mm
-    mr = concept["margin_right_mm"]  * mm
+        PW = page_width_mm * mm
+        PH = page_height_mm * mm
+        mt = concept["margin_top_mm"]    * mm
+        mb = concept["margin_bottom_mm"] * mm
+        ml = concept["margin_left_mm"]   * mm
+        mr = concept["margin_right_mm"]  * mm
 
-    bg_r,  bg_g,  bg_b  = _hex_to_rgb(concept["page_bg"])
-    tx_r,  tx_g,  tx_b  = _hex_to_rgb(concept["text_color"])
-    ch_r,  ch_g,  ch_b  = _hex_to_rgb(concept["chapter_title_color"])
-    ac_r,  ac_g,  ac_b  = _hex_to_rgb(concept["accent_color"])
+        bg_r,  bg_g,  bg_b  = _hex_to_rgb(concept["page_bg"])
+        tx_r,  tx_g,  tx_b  = _hex_to_rgb(concept["text_color"])
+        ch_r,  ch_g,  ch_b  = _hex_to_rgb(concept["chapter_title_color"])
+        ac_r,  ac_g,  ac_b  = _hex_to_rgb(concept["accent_color"])
 
-    body_size      = concept["body_font_size"]
-    leading        = body_size * concept["line_spacing"]
-    indent_pt      = concept["first_para_indent_mm"] * mm
-    chapter_size   = concept["chapter_font_size"]
-    # BUG FIX: only show drop cap for Latin scripts — Devanagari drop caps
-    # require a Unicode-aware font that also supports large-size Devanagari,
-    # and ReportLab's inline <font> tag does not re-shape multi-byte glyphs
-    # correctly. Safe to disable for non-Latin.
-    show_drop      = concept["show_drop_cap"] and not has_unicode
-    # BUG FIX: strip ornaments that may not render in the chosen font family
-    ornament       = concept.get("ornament", "")
-    if has_unicode and ornament:
-        # Keep only safe ASCII ornaments; strip complex Unicode symbols
-        safe_ornament = "".join(c for c in ornament if ord(c) < 0x0300 or c in "—–•·")
-        ornament = safe_ornament or ""
-    header_text    = concept.get("header_text", book_title) or book_title
-    show_pn        = concept["show_page_numbers"]
-    chapter_prefix = concept.get("chapter_prefix", "Chapter")
+        body_size      = concept["body_font_size"]
+        leading        = body_size * concept["line_spacing"]
+        indent_pt      = concept["first_para_indent_mm"] * mm
+        chapter_size   = concept["chapter_font_size"]
+        # BUG FIX: only show drop cap for Latin scripts — Devanagari drop caps
+        # require a Unicode-aware font that also supports large-size Devanagari,
+        # and ReportLab's inline <font> tag does not re-shape multi-byte glyphs
+        # correctly. Safe to disable for non-Latin.
+        show_drop      = concept["show_drop_cap"] and not has_unicode
+        # BUG FIX: strip ornaments that may not render in the chosen font family
+        ornament       = concept.get("ornament", "")
+        if has_unicode and ornament:
+            # Keep only safe ASCII ornaments; strip complex Unicode symbols
+            safe_ornament = "".join(c for c in ornament if ord(c) < 0x0300 or c in "—–•·")
+            ornament = safe_ornament or ""
+        header_text    = concept.get("header_text", book_title) or book_title
+        show_pn        = concept["show_page_numbers"]
+        chapter_prefix = concept.get("chapter_prefix", "Chapter")
 
-    def _on_page(canvas, doc):
-        canvas.saveState()
-        canvas.setFillColorRGB(bg_r, bg_g, bg_b)
-        canvas.rect(0, 0, PW, PH, fill=1, stroke=0)
-        if header_text and doc.page > 1:
-            canvas.setFillColorRGB(ac_r, ac_g, ac_b)
-            canvas.setFont(body_font, 8)
-            canvas.drawCentredString(PW / 2, PH - mt * 0.55, header_text)
-            canvas.setStrokeColorRGB(ac_r, ac_g, ac_b, alpha=0.35)
-            canvas.setLineWidth(0.4)
-            canvas.line(ml, PH - mt * 0.65, PW - mr, PH - mt * 0.65)
-        if show_pn and doc.page > 1:
-            canvas.setFillColorRGB(ac_r, ac_g, ac_b)
-            canvas.setFont(body_font, 8)
-            canvas.drawCentredString(PW / 2, mb * 0.45, str(doc.page))
-        canvas.restoreState()
+        def _on_page(canvas, doc):
+            canvas.saveState()
+            canvas.setFillColorRGB(bg_r, bg_g, bg_b)
+            canvas.rect(0, 0, PW, PH, fill=1, stroke=0)
+            if header_text and doc.page > 1:
+                canvas.setFillColorRGB(ac_r, ac_g, ac_b)
+                canvas.setFont(body_font, 8)
+                canvas.drawCentredString(PW / 2, PH - mt * 0.55, header_text)
+                canvas.setStrokeColorRGB(ac_r, ac_g, ac_b, alpha=0.35)
+                canvas.setLineWidth(0.4)
+                canvas.line(ml, PH - mt * 0.65, PW - mr, PH - mt * 0.65)
+            if show_pn and doc.page > 1:
+                canvas.setFillColorRGB(ac_r, ac_g, ac_b)
+                canvas.setFont(body_font, 8)
+                canvas.drawCentredString(PW / 2, mb * 0.45, str(doc.page))
+            canvas.restoreState()
 
-    doc = SimpleDocTemplate(
-        output_path,
-        pagesize=(PW, PH),
-        leftMargin=ml, rightMargin=mr,
-        topMargin=mt,  bottomMargin=mb,
-    )
+        doc = SimpleDocTemplate(
+            output_path,
+            pagesize=(PW, PH),
+            leftMargin=ml, rightMargin=mr,
+            topMargin=mt,  bottomMargin=mb,
+        )
 
-    # ── Paragraph styles ──────────────────────────────────────────────────────
-    ch_style = ParagraphStyle(
-        "ChapterTitle",
-        fontName=chapter_font, fontSize=chapter_size,
-        leading=chapter_size * 1.25,
-        textColor=Color(ch_r, ch_g, ch_b),
-        spaceAfter=chapter_size * 0.55, spaceBefore=chapter_size * 0.35,
-        alignment=TA_LEFT,
-    )
-    prefix_style = ParagraphStyle(
-        "ChapterPrefix",
-        fontName=body_font, fontSize=body_size * 0.82,
-        leading=body_size * 1.2,
-        textColor=Color(ac_r, ac_g, ac_b),
-        spaceBefore=0, spaceAfter=3, alignment=TA_LEFT, letterSpacing=1.8,
-    )
-    body_style = ParagraphStyle(
-        "Body",
-        fontName=body_font, fontSize=body_size, leading=leading,
-        textColor=Color(tx_r, tx_g, tx_b),
-        firstLineIndent=indent_pt,
-        alignment=TA_JUSTIFY,
-        spaceAfter=0, spaceBefore=0,
-        # wordWrap needed for Indic scripts
-        wordWrap="CJK" if has_unicode else "LTR",
-    )
-    orn_style = ParagraphStyle(
-        "Ornament",
-        fontName=body_font, fontSize=body_size + 2,
-        leading=(body_size + 2) * 1.5,
-        textColor=Color(ac_r, ac_g, ac_b),
-        alignment=TA_CENTER, spaceBefore=10, spaceAfter=10,
-    )
+        # ── Paragraph styles ──────────────────────────────────────────────────────
+        ch_style = ParagraphStyle(
+            "ChapterTitle",
+            fontName=chapter_font, fontSize=chapter_size,
+            leading=chapter_size * 1.25,
+            textColor=Color(ch_r, ch_g, ch_b),
+            spaceAfter=chapter_size * 0.55, spaceBefore=chapter_size * 0.35,
+            alignment=TA_LEFT,
+        )
+        prefix_style = ParagraphStyle(
+            "ChapterPrefix",
+            fontName=body_font, fontSize=body_size * 0.82,
+            leading=body_size * 1.2,
+            textColor=Color(ac_r, ac_g, ac_b),
+            spaceBefore=0, spaceAfter=3, alignment=TA_LEFT, letterSpacing=1.8,
+        )
+        body_style = ParagraphStyle(
+            "Body",
+            fontName=body_font, fontSize=body_size, leading=leading,
+            textColor=Color(tx_r, tx_g, tx_b),
+            firstLineIndent=indent_pt,
+            alignment=TA_JUSTIFY,
+            spaceAfter=0, spaceBefore=0,
+            # wordWrap needed for Indic scripts
+            wordWrap="CJK" if has_unicode else "LTR",
+        )
+        orn_style = ParagraphStyle(
+            "Ornament",
+            fontName=body_font, fontSize=body_size + 2,
+            leading=(body_size + 2) * 1.5,
+            textColor=Color(ac_r, ac_g, ac_b),
+            alignment=TA_CENTER, spaceBefore=10, spaceAfter=10,
+        )
 
-    story = []
+        story = []
 
-    # ── Title page ────────────────────────────────────────────────────────────
-    title_style = ParagraphStyle(
-        "TitlePage",
-        fontName=chapter_font,
-        fontSize=min(36, chapter_size * 1.6),
-        leading=min(36, chapter_size * 1.6) * 1.2,
-        textColor=Color(ch_r, ch_g, ch_b),
-        alignment=TA_CENTER, spaceAfter=20,
-        wordWrap="CJK" if has_unicode else "LTR",
-    )
-    story.append(Spacer(1, PH * 0.28))
-    # BUG FIX: escape HTML entities in the title too
-    safe_title = book_title.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-    story.append(Paragraph(safe_title, title_style))
-    if ornament:
-        story.append(Spacer(1, 14))
-        safe_orn = ornament.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-        story.append(Paragraph(safe_orn, orn_style))
-    story.append(PageBreak())
-
-    # ── Chapters ──────────────────────────────────────────────────────────────
-    for idx, chapter in enumerate(chapters, start=1):
-        if chapter_prefix:
-            safe_prefix = chapter_prefix.replace("&", "&amp;")
-            story.append(Paragraph(f"{safe_prefix.upper()} {idx}".strip(), prefix_style))
-        safe_ch_title = chapter["title"].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-        story.append(Paragraph(safe_ch_title, ch_style))
-        story.append(Spacer(1, 4))
+        # ── Title page ────────────────────────────────────────────────────────────
+        title_style = ParagraphStyle(
+            "TitlePage",
+            fontName=chapter_font,
+            fontSize=min(36, chapter_size * 1.6),
+            leading=min(36, chapter_size * 1.6) * 1.2,
+            textColor=Color(ch_r, ch_g, ch_b),
+            alignment=TA_CENTER, spaceAfter=20,
+            wordWrap="CJK" if has_unicode else "LTR",
+        )
+        story.append(Spacer(1, PH * 0.28))
+        # BUG FIX: escape HTML entities in the title too
+        safe_title = book_title.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        story.append(Paragraph(safe_title, title_style))
         if ornament:
+            story.append(Spacer(1, 14))
             safe_orn = ornament.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
             story.append(Paragraph(safe_orn, orn_style))
-            story.append(Spacer(1, 6))
-
-        raw_body = chapter.get("body", "").strip()
-        paragraphs = [p.strip() for p in re.split(r"\n{2,}", raw_body) if p.strip()]
-        if not paragraphs:
-            paragraphs = [raw_body] if raw_body else ["[No content]"]
-
-        for p_idx, para_text in enumerate(paragraphs):
-            safe = para_text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-            # BUG FIX: drop cap only for Latin first characters, and only when
-            # show_drop is True. Use codepoint-safe slicing on the ORIGINAL
-            # (un-escaped) text so we never split a multi-byte character.
-            if p_idx == 0 and show_drop and len(para_text) > 1:
-                # Work on the original text to get the first real character
-                first_char = para_text[0]   # ← codepoint-safe (Python str)
-                rest_orig  = para_text[1:]
-                # Only do drop cap if first char is a basic Latin letter
-                if first_char.isalpha() and ord(first_char) < 0x0250:
-                    first_esc = first_char.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-                    rest_esc  = rest_orig.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-                    drop_html = (
-                        f'<font name="{chapter_font}" size="{int(body_size * 2.8)}">'
-                        f"{first_esc}</font>{rest_esc}"
-                    )
-                    story.append(Paragraph(drop_html, body_style))
-                else:
-                    story.append(Paragraph(safe, body_style))
-            else:
-                story.append(Paragraph(safe, body_style))
-
         story.append(PageBreak())
 
-    doc.build(story, onFirstPage=_on_page, onLaterPages=_on_page)
-    return output_path
+        # ── Chapters ──────────────────────────────────────────────────────────────
+        for idx, chapter in enumerate(chapters, start=1):
+            if chapter_prefix:
+                safe_prefix = chapter_prefix.replace("&", "&amp;")
+                story.append(Paragraph(f"{safe_prefix.upper()} {idx}".strip(), prefix_style))
+            safe_ch_title = chapter["title"].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            story.append(Paragraph(safe_ch_title, ch_style))
+            story.append(Spacer(1, 4))
+            if ornament:
+                safe_orn = ornament.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                story.append(Paragraph(safe_orn, orn_style))
+                story.append(Spacer(1, 6))
+
+            raw_body = chapter.get("body", "").strip()
+            paragraphs = [p.strip() for p in re.split(r"\n{2,}", raw_body) if p.strip()]
+            if not paragraphs:
+                paragraphs = [raw_body] if raw_body else ["[No content]"]
+
+            for p_idx, para_text in enumerate(paragraphs):
+                safe = para_text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                # BUG FIX: drop cap only for Latin first characters, and only when
+                # show_drop is True. Use codepoint-safe slicing on the ORIGINAL
+                # (un-escaped) text so we never split a multi-byte character.
+                if p_idx == 0 and show_drop and len(para_text) > 1:
+                    # Work on the original text to get the first real character
+                    first_char = para_text[0]   # ← codepoint-safe (Python str)
+                    rest_orig  = para_text[1:]
+                    # Only do drop cap if first char is a basic Latin letter
+                    if first_char.isalpha() and ord(first_char) < 0x0250:
+                        first_esc = first_char.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                        rest_esc  = rest_orig.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                        drop_html = (
+                            f'<font name="{chapter_font}" size="{int(body_size * 2.8)}">'
+                            f"{first_esc}</font>{rest_esc}"
+                        )
+                        story.append(Paragraph(drop_html, body_style))
+                    else:
+                        story.append(Paragraph(safe, body_style))
+                else:
+                    story.append(Paragraph(safe, body_style))
+
+            story.append(PageBreak())
+
+        doc.build(story, onFirstPage=_on_page, onLaterPages=_on_page)
+        return output_path
+    except Exception as e:
+        print(f"  ⚠️  render_layout_pdf failed completely: {e}\n{traceback.format_exc()}")
+        raise
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -874,111 +904,115 @@ def render_layout_docx(
     page_height_mm: float,
     book_title: str,
 ) -> str:
-    from docx import Document                                   # pyrefly: ignore [missing-import]
-    from docx.shared import Pt, Cm, RGBColor                   # pyrefly: ignore [missing-import]
-    from docx.enum.text import WD_ALIGN_PARAGRAPH              # pyrefly: ignore [missing-import]
-    from docx.oxml.ns import qn                                # pyrefly: ignore [missing-import]
-    from docx.oxml import OxmlElement                          # pyrefly: ignore [missing-import]
+    try:
+        from docx import Document                                   # pyrefly: ignore [missing-import]
+        from docx.shared import Pt, Cm, RGBColor                   # pyrefly: ignore [missing-import]
+        from docx.enum.text import WD_ALIGN_PARAGRAPH              # pyrefly: ignore [missing-import]
+        from docx.oxml.ns import qn                                # pyrefly: ignore [missing-import]
+        from docx.oxml import OxmlElement                          # pyrefly: ignore [missing-import]
 
-    # BUG FIX: map ReportLab font names to Word font names,
-    # and track italic flag correctly for oblique/italic variants.
-    _FONT_MAP = {
-        "Times-Roman":       ("Times New Roman", False),
-        "Times-Italic":      ("Times New Roman", True),   # ← was missing italic=True
-        "Helvetica":         ("Arial",            False),
-        "Helvetica-Oblique": ("Arial",            True),  # ← was missing italic=True
-        "Courier":           ("Courier New",      False),
-    }
+        # BUG FIX: map ReportLab font names to Word font names,
+        # and track italic flag correctly for oblique/italic variants.
+        _FONT_MAP = {
+            "Times-Roman":       ("Times New Roman", False),
+            "Times-Italic":      ("Times New Roman", True),   # ← was missing italic=True
+            "Helvetica":         ("Arial",            False),
+            "Helvetica-Oblique": ("Arial",            True),  # ← was missing italic=True
+            "Courier":           ("Courier New",      False),
+        }
 
-    def docx_font(rl_name: str) -> tuple[str, bool]:
-        """Return (word_font_name, is_italic)."""
-        return _FONT_MAP.get(rl_name, ("Times New Roman", False))
+        def docx_font(rl_name: str) -> tuple[str, bool]:
+            """Return (word_font_name, is_italic)."""
+            return _FONT_MAP.get(rl_name, ("Times New Roman", False))
 
-    def rgb(hex_str: str) -> RGBColor:
-        return _hex_to_docx_rgb(hex_str)
+        def rgb(hex_str: str) -> RGBColor:
+            return _hex_to_docx_rgb(hex_str)
 
-    body_fn, body_italic   = docx_font(concept["body_font"])
-    ch_fn,   ch_italic     = docx_font(concept["chapter_font"])
-    body_size  = float(concept["body_font_size"])
-    ch_size    = float(concept["chapter_font_size"])
-    ls         = float(concept["line_spacing"])
-    ornament   = concept.get("ornament", "")
-    prefix     = concept.get("chapter_prefix", "Chapter")
+        body_fn, body_italic   = docx_font(concept["body_font"])
+        ch_fn,   ch_italic     = docx_font(concept["chapter_font"])
+        body_size  = float(concept["body_font_size"])
+        ch_size    = float(concept["chapter_font_size"])
+        ls         = float(concept["line_spacing"])
+        ornament   = concept.get("ornament", "")
+        prefix     = concept.get("chapter_prefix", "Chapter")
 
-    doc     = Document()
-    section = doc.sections[0]
-    section.page_width    = Cm(page_width_mm  / 10)
-    section.page_height   = Cm(page_height_mm / 10)
-    section.left_margin   = Cm(concept["margin_left_mm"]   / 10)
-    section.right_margin  = Cm(concept["margin_right_mm"]  / 10)
-    section.top_margin    = Cm(concept["margin_top_mm"]    / 10)
-    section.bottom_margin = Cm(concept["margin_bottom_mm"] / 10)
+        doc     = Document()
+        section = doc.sections[0]
+        section.page_width    = Cm(page_width_mm  / 10)
+        section.page_height   = Cm(page_height_mm / 10)
+        section.left_margin   = Cm(concept["margin_left_mm"]   / 10)
+        section.right_margin  = Cm(concept["margin_right_mm"]  / 10)
+        section.top_margin    = Cm(concept["margin_top_mm"]    / 10)
+        section.bottom_margin = Cm(concept["margin_bottom_mm"] / 10)
 
-    def add_para(text, font_name, size, bold=False, italic=False,
-                 color="#1a1a1a", align=WD_ALIGN_PARAGRAPH.LEFT,
-                 space_before=0, space_after=0, line_space=1.5):
-        p  = doc.add_paragraph()
-        p.alignment = align
-        pf = p.paragraph_format
-        pf.space_before = Pt(space_before)
-        pf.space_after  = Pt(space_after)
-        pf.line_spacing = Pt(size * line_space)
-        run = p.add_run(text)
-        run.font.name   = font_name
-        run.font.size   = Pt(size)
-        run.font.bold   = bold
-        run.font.italic = italic
-        run.font.color.rgb = rgb(color)
+        def add_para(text, font_name, size, bold=False, italic=False,
+                     color="#1a1a1a", align=WD_ALIGN_PARAGRAPH.LEFT,
+                     space_before=0, space_after=0, line_space=1.5):
+            p  = doc.add_paragraph()
+            p.alignment = align
+            pf = p.paragraph_format
+            pf.space_before = Pt(space_before)
+            pf.space_after  = Pt(space_after)
+            pf.line_spacing = Pt(size * line_space)
+            run = p.add_run(text)
+            run.font.name   = font_name
+            run.font.size   = Pt(size)
+            run.font.bold   = bold
+            run.font.italic = italic
+            run.font.color.rgb = rgb(color)
 
-    def add_rule(color_hex):
-        p   = doc.add_paragraph()
-        pPr = p._p.get_or_add_pPr()
-        pBdr = OxmlElement("w:pBdr")
-        bt   = OxmlElement("w:bottom")
-        bt.set(qn("w:val"),   "single")
-        bt.set(qn("w:sz"),    "6")
-        bt.set(qn("w:space"), "1")
-        bt.set(qn("w:color"), color_hex.lstrip("#"))
-        pBdr.append(bt)
-        pPr.append(pBdr)
+        def add_rule(color_hex):
+            p   = doc.add_paragraph()
+            pPr = p._p.get_or_add_pPr()
+            pBdr = OxmlElement("w:pBdr")
+            bt   = OxmlElement("w:bottom")
+            bt.set(qn("w:val"),   "single")
+            bt.set(qn("w:sz"),    "6")
+            bt.set(qn("w:space"), "1")
+            bt.set(qn("w:color"), color_hex.lstrip("#"))
+            pBdr.append(bt)
+            pPr.append(pBdr)
 
-    # Title page
-    for _ in range(4):
-        doc.add_paragraph()
-    add_para(book_title, ch_fn, min(36, ch_size * 1.5), bold=True,
-             italic=ch_italic,
-             color=concept["chapter_title_color"], align=WD_ALIGN_PARAGRAPH.CENTER, space_after=10)
-    if ornament:
-        add_para(ornament, body_fn, body_size + 2, color=concept["accent_color"],
-                 align=WD_ALIGN_PARAGRAPH.CENTER, space_before=6, space_after=6)
-    doc.add_page_break()
-
-    # Chapters
-    for idx, chapter in enumerate(chapters, start=1):
-        if prefix:
-            add_para(f"{prefix.upper()} {idx}".strip(), body_fn, body_size * 0.82,
-                     color=concept["accent_color"], space_before=6, space_after=2)
-        add_para(chapter["title"], ch_fn, ch_size, bold=True,
+        # Title page
+        for _ in range(4):
+            doc.add_paragraph()
+        add_para(book_title, ch_fn, min(36, ch_size * 1.5), bold=True,
                  italic=ch_italic,
-                 color=concept["chapter_title_color"], space_after=8)
-        add_rule(concept["accent_color"])
+                 color=concept["chapter_title_color"], align=WD_ALIGN_PARAGRAPH.CENTER, space_after=10)
         if ornament:
-            add_para(ornament, body_fn, body_size + 1, color=concept["accent_color"],
-                     align=WD_ALIGN_PARAGRAPH.CENTER, space_before=4, space_after=8)
-
-        raw_body = chapter.get("body", "").strip()
-        paragraphs = [p.strip() for p in re.split(r"\n{2,}", raw_body) if p.strip()]
-        if not paragraphs:
-            paragraphs = [raw_body] if raw_body else ["[No content]"]
-        for para_text in paragraphs:
-            add_para(para_text, body_fn, body_size, italic=body_italic,
-                     color=concept["text_color"],
-                     align=WD_ALIGN_PARAGRAPH.JUSTIFY, space_after=4, line_space=ls)
-
+            add_para(ornament, body_fn, body_size + 2, color=concept["accent_color"],
+                     align=WD_ALIGN_PARAGRAPH.CENTER, space_before=6, space_after=6)
         doc.add_page_break()
 
-    doc.save(output_path)
-    return output_path
+        # Chapters
+        for idx, chapter in enumerate(chapters, start=1):
+            if prefix:
+                add_para(f"{prefix.upper()} {idx}".strip(), body_fn, body_size * 0.82,
+                         color=concept["accent_color"], space_before=6, space_after=2)
+            add_para(chapter["title"], ch_fn, ch_size, bold=True,
+                     italic=ch_italic,
+                     color=concept["chapter_title_color"], space_after=8)
+            add_rule(concept["accent_color"])
+            if ornament:
+                add_para(ornament, body_fn, body_size + 1, color=concept["accent_color"],
+                         align=WD_ALIGN_PARAGRAPH.CENTER, space_before=4, space_after=8)
+
+            raw_body = chapter.get("body", "").strip()
+            paragraphs = [p.strip() for p in re.split(r"\n{2,}", raw_body) if p.strip()]
+            if not paragraphs:
+                paragraphs = [raw_body] if raw_body else ["[No content]"]
+            for para_text in paragraphs:
+                add_para(para_text, body_fn, body_size, italic=body_italic,
+                         color=concept["text_color"],
+                         align=WD_ALIGN_PARAGRAPH.JUSTIFY, space_after=4, line_space=ls)
+
+            doc.add_page_break()
+
+        doc.save(output_path)
+        return output_path
+    except Exception as e:
+        print(f"  ⚠️  render_layout_docx failed: {e}\n{traceback.format_exc()}")
+        raise
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1025,140 +1059,146 @@ def design_layout(
         if progress_callback:
             progress_callback(stage, pct, message)
 
-    os.makedirs(output_dir, exist_ok=True)
+    try:
+        os.makedirs(output_dir, exist_ok=True)
 
-    if not book_title:
-        book_title = Path(filename).stem.replace("_", " ").replace("-", " ").title()
-    book_title = _safe_title(book_title, fallback="My Book")
+        if not book_title:
+            book_title = Path(filename).stem.replace("_", " ").replace("-", " ").title()
+        book_title = _safe_title(book_title, fallback="My Book")
 
-    # ── 1. Extract ────────────────────────────────────────────────────────────
-    progress("extracting", 8, "Extracting text from your manuscript…")
-    raw_text = extract_text(file_path, filename)
-    if not raw_text.strip():
-        raise ValueError("The uploaded file appears to contain no extractable text.")
+        # ── 1. Extract ────────────────────────────────────────────────────────────
+        progress("extracting", 8, "Extracting text from your manuscript…")
+        raw_text = extract_text(file_path, filename)
+        if not raw_text.strip():
+            raise ValueError("The uploaded file appears to contain no extractable text.")
 
-    # ── 2. Parse chapters ─────────────────────────────────────────────────────
-    progress("parsing", 20, "Detecting chapters and structure…")
-    chapters = parse_chapters(raw_text)
-    if not chapters:
-        raise ValueError("Could not detect any chapters or sections in the manuscript.")
+        # ── 2. Parse chapters ─────────────────────────────────────────────────────
+        progress("parsing", 20, "Detecting chapters and structure…")
+        chapters = parse_chapters(raw_text)
+        if not chapters:
+            raise ValueError("Could not detect any chapters or sections in the manuscript.")
 
-    # ── 3. Book-type profile ──────────────────────────────────────────────────
-    profile = get_book_type_profile(book_type)
-    if profile:
-        progress("designing", 30, f"Applying {profile['_label']} design profile…")
-    else:
-        progress("designing", 30, "AI is designing your layout concept…")
+        # ── 3. Book-type profile ──────────────────────────────────────────────────
+        profile = get_book_type_profile(book_type)
+        if profile:
+            progress("designing", 30, f"Applying {profile['_label']} design profile…")
+        else:
+            progress("designing", 30, "AI is designing your layout concept…")
 
-    # ── 4. Build effective design instructions ────────────────────────────────
-    override_hints: list[str] = []
-    if body_font:            override_hints.append(f"body font MUST be {body_font}")
-    if chapter_font:         override_hints.append(f"chapter heading font MUST be {chapter_font}")
-    if body_font_size:       override_hints.append(f"body font size MUST be {body_font_size}pt")
-    if chapter_font_size:    override_hints.append(f"chapter font size MUST be {chapter_font_size}pt")
-    if line_spacing:         override_hints.append(f"line spacing MUST be {line_spacing}×")
-    if margin_top_mm is not None:    override_hints.append(f"margin top MUST be {margin_top_mm}mm")
-    if margin_bottom_mm is not None: override_hints.append(f"margin bottom MUST be {margin_bottom_mm}mm")
-    if margin_left_mm is not None:   override_hints.append(f"margin left MUST be {margin_left_mm}mm")
-    if margin_right_mm is not None:  override_hints.append(f"margin right MUST be {margin_right_mm}mm")
-    if show_drop_cap is not None:
-        override_hints.append("drop caps: " + ("ENABLED" if show_drop_cap else "DISABLED"))
-    if show_page_numbers is not None:
-        override_hints.append("page numbers: " + ("SHOWN" if show_page_numbers else "HIDDEN"))
+        # ── 4. Build effective design instructions ────────────────────────────────
+        override_hints: list[str] = []
+        if body_font:            override_hints.append(f"body font MUST be {body_font}")
+        if chapter_font:         override_hints.append(f"chapter heading font MUST be {chapter_font}")
+        if body_font_size:       override_hints.append(f"body font size MUST be {body_font_size}pt")
+        if chapter_font_size:    override_hints.append(f"chapter font size MUST be {chapter_font_size}pt")
+        if line_spacing:         override_hints.append(f"line spacing MUST be {line_spacing}×")
+        if margin_top_mm is not None:    override_hints.append(f"margin top MUST be {margin_top_mm}mm")
+        if margin_bottom_mm is not None: override_hints.append(f"margin bottom MUST be {margin_bottom_mm}mm")
+        if margin_left_mm is not None:   override_hints.append(f"margin left MUST be {margin_left_mm}mm")
+        if margin_right_mm is not None:  override_hints.append(f"margin right MUST be {margin_right_mm}mm")
+        if show_drop_cap is not None:
+            override_hints.append("drop caps: " + ("ENABLED" if show_drop_cap else "DISABLED"))
+        if show_page_numbers is not None:
+            override_hints.append("page numbers: " + ("SHOWN" if show_page_numbers else "HIDDEN"))
 
-    effective_instructions = design_instructions or ""
+        effective_instructions = design_instructions or ""
 
-    _TEMPLATE_HINTS = {
-        "classic_novel":    "Classic cream pages with serif fonts, generous margins, drop caps and ornamental chapter dividers — think vintage Penguin Classics.",
-        "premium_hardcover":"Luxury dark background (#0f0f0f), cream/gold text, gold accent (#c8a200), wide margins — elegant premium edition.",
-        "modern_minimal":   "Pure white page, clean Helvetica, minimal decoration, thin accent rule under chapter titles, airy spacing.",
-        "sanskrit_style":   "Warm ivory page, saffron/gold accent (#c8830a), ornate ornament dividers, classic serif — traditional sacred text aesthetic.",
-        "school_guide":     "White page, structured sans-serif layout, blue accent (#2563eb), numbered chapters, no drop cap — clear academic style.",
-        "thriller_dark":    "Dark page (#111827) with near-white body text (#f3f4f6), red accent (#ef4444), high contrast, sharp Helvetica headings.",
-        "retro_vintage":    "Warm sepia page (#f5ead0), brown text, antique brown accent, italic serif body, diagonal/decorative ornament.",
-        "poetry_bloom":     "Soft blush page (#fff0f5), purple/magenta accent (#d63384), italic serif body, floral ornaments, wide margins.",
-    }
-    if visual_template:
-        hint = _TEMPLATE_HINTS.get(visual_template, "")
-        if hint:
-            effective_instructions = hint + (("\n" + effective_instructions) if effective_instructions else "")
+        _TEMPLATE_HINTS = {
+            "classic_novel":    "Classic cream pages with serif fonts, generous margins, drop caps and ornamental chapter dividers — think vintage Penguin Classics.",
+            "premium_hardcover":"Luxury dark background (#0f0f0f), cream/gold text, gold accent (#c8a200), wide margins — elegant premium edition.",
+            "modern_minimal":   "Pure white page, clean Helvetica, minimal decoration, thin accent rule under chapter titles, airy spacing.",
+            "sanskrit_style":   "Warm ivory page, saffron/gold accent (#c8830a), ornate ornament dividers, classic serif — traditional sacred text aesthetic.",
+            "school_guide":     "White page, structured sans-serif layout, blue accent (#2563eb), numbered chapters, no drop cap — clear academic style.",
+            "thriller_dark":    "Dark page (#111827) with near-white body text (#f3f4f6), red accent (#ef4444), high contrast, sharp Helvetica headings.",
+            "retro_vintage":    "Warm sepia page (#f5ead0), brown text, antique brown accent, italic serif body, diagonal/decorative ornament.",
+            "poetry_bloom":     "Soft blush page (#fff0f5), purple/magenta accent (#d63384), italic serif body, floral ornaments, wide margins.",
+        }
+        if visual_template:
+            hint = _TEMPLATE_HINTS.get(visual_template, "")
+            if hint:
+                effective_instructions = hint + (("\n" + effective_instructions) if effective_instructions else "")
 
-    if override_hints:
-        hint_str = "; ".join(override_hints)
-        effective_instructions = (
-            (effective_instructions + "\n" if effective_instructions else "")
-            + f"[HARD USER OVERRIDES — honour exactly: {hint_str}]"
+        if override_hints:
+            hint_str = "; ".join(override_hints)
+            effective_instructions = (
+                (effective_instructions + "\n" if effective_instructions else "")
+                + f"[HARD USER OVERRIDES — honour exactly: {hint_str}]"
+            )
+
+        # ── 5. AI concept (seeded with profile defaults) ──────────────────────────
+        progress("designing", 40, "AI is crafting your personalised layout…")
+        concept = generate_layout_concept(
+            book_title=book_title,
+            sample_text=raw_text,
+            design_instructions=effective_instructions,
+            page_width_mm=page_width_mm,
+            page_height_mm=page_height_mm,
+            book_type=book_type,
+            profile_defaults=profile,
         )
 
-    # ── 5. AI concept (seeded with profile defaults) ──────────────────────────
-    progress("designing", 40, "AI is crafting your personalised layout…")
-    concept = generate_layout_concept(
-        book_title=book_title,
-        sample_text=raw_text,
-        design_instructions=effective_instructions,
-        page_width_mm=page_width_mm,
-        page_height_mm=page_height_mm,
-        book_type=book_type,
-        profile_defaults=profile,
-    )
+        # ── 6. Apply hard user overrides (user always wins over AI + profile) ─────
+        if body_font:
+            concept["body_font"]          = body_font
+        if chapter_font:
+            concept["chapter_font"]       = chapter_font
+        if body_font_size is not None:
+            concept["body_font_size"]     = float(body_font_size)
+        if chapter_font_size is not None:
+            concept["chapter_font_size"]  = float(chapter_font_size)
+        if line_spacing is not None:
+            concept["line_spacing"]       = float(line_spacing)
+        if margin_top_mm is not None:
+            concept["margin_top_mm"]      = float(margin_top_mm)
+        if margin_bottom_mm is not None:
+            concept["margin_bottom_mm"]   = float(margin_bottom_mm)
+        if margin_left_mm is not None:
+            concept["margin_left_mm"]     = float(margin_left_mm)
+        if margin_right_mm is not None:
+            concept["margin_right_mm"]    = float(margin_right_mm)
+        if show_drop_cap is not None:
+            concept["show_drop_cap"]      = show_drop_cap
+        if show_page_numbers is not None:
+            concept["show_page_numbers"]  = show_page_numbers
 
-    # ── 6. Apply hard user overrides (user always wins over AI + profile) ─────
-    if body_font:
-        concept["body_font"]          = body_font
-    if chapter_font:
-        concept["chapter_font"]       = chapter_font
-    if body_font_size is not None:
-        concept["body_font_size"]     = float(body_font_size)
-    if chapter_font_size is not None:
-        concept["chapter_font_size"]  = float(chapter_font_size)
-    if line_spacing is not None:
-        concept["line_spacing"]       = float(line_spacing)
-    if margin_top_mm is not None:
-        concept["margin_top_mm"]      = float(margin_top_mm)
-    if margin_bottom_mm is not None:
-        concept["margin_bottom_mm"]   = float(margin_bottom_mm)
-    if margin_left_mm is not None:
-        concept["margin_left_mm"]     = float(margin_left_mm)
-    if margin_right_mm is not None:
-        concept["margin_right_mm"]    = float(margin_right_mm)
-    if show_drop_cap is not None:
-        concept["show_drop_cap"]      = show_drop_cap
-    if show_page_numbers is not None:
-        concept["show_page_numbers"]  = show_page_numbers
+        concept["_book_type"]       = book_type or "auto"
+        concept["_book_type_label"] = profile["_label"] if profile else "Auto (AI chosen)"
 
-    concept["_book_type"]       = book_type or "auto"
-    concept["_book_type_label"] = profile["_label"] if profile else "Auto (AI chosen)"
+        job_id    = uuid.uuid4().hex
+        safe_name = _safe_title(book_title, "book").replace(" ", "_")
 
-    job_id    = uuid.uuid4().hex
-    safe_name = _safe_title(book_title, "book").replace(" ", "_")
+        # ── 7. Render PDF ─────────────────────────────────────────────────────────
+        progress("rendering", 58, "Typesetting PDF with your layout…")
+        pdf_path = os.path.join(output_dir, f"layout_{safe_name}_{job_id}.pdf")
+        render_layout_pdf(
+            chapters=chapters, concept=concept, output_path=pdf_path,
+            page_width_mm=page_width_mm, page_height_mm=page_height_mm, book_title=book_title,
+        )
 
-    # ── 7. Render PDF ─────────────────────────────────────────────────────────
-    progress("rendering", 58, "Typesetting PDF with your layout…")
-    pdf_path = os.path.join(output_dir, f"layout_{safe_name}_{job_id}.pdf")
-    render_layout_pdf(
-        chapters=chapters, concept=concept, output_path=pdf_path,
-        page_width_mm=page_width_mm, page_height_mm=page_height_mm, book_title=book_title,
-    )
+        # ── 8. Render DOCX ────────────────────────────────────────────────────────
+        progress("rendering_docx", 80, "Generating DOCX version…")
+        docx_path = os.path.join(output_dir, f"layout_{safe_name}_{job_id}.docx")
+        render_layout_docx(
+            chapters=chapters, concept=concept, output_path=docx_path,
+            page_width_mm=page_width_mm, page_height_mm=page_height_mm, book_title=book_title,
+        )
 
-    # ── 8. Render DOCX ────────────────────────────────────────────────────────
-    progress("rendering_docx", 80, "Generating DOCX version…")
-    docx_path = os.path.join(output_dir, f"layout_{safe_name}_{job_id}.docx")
-    render_layout_docx(
-        chapters=chapters, concept=concept, output_path=docx_path,
-        page_width_mm=page_width_mm, page_height_mm=page_height_mm, book_title=book_title,
-    )
+        progress("done", 100, "Layout design complete!")
 
-    progress("done", 100, "Layout design complete!")
-
-    return {
-        "title":            book_title,
-        "style_name":       concept["style_name"],
-        "concept":          concept,
-        "chapter_count":    len(chapters),
-        "chapter_titles":   [c["title"] for c in chapters],
-        "pdf_path":         pdf_path,
-        "docx_path":        docx_path,
-        "job_id":           job_id,
-        "book_type":        book_type or "auto",
-        "book_type_label":  profile["_label"] if profile else "Auto (AI chosen)",
-    }
+        return {
+            "title":            book_title,
+            "style_name":       concept["style_name"],
+            "concept":          concept,
+            "chapter_count":    len(chapters),
+            "chapter_titles":   [c["title"] for c in chapters],
+            "pdf_path":         pdf_path,
+            "docx_path":        docx_path,
+            "job_id":           job_id,
+            "book_type":        book_type or "auto",
+            "book_type_label":  profile["_label"] if profile else "Auto (AI chosen)",
+        }
+    except Exception as e:
+        print(f"  🚨 CRITICAL ERROR in design_layout: {e}\n{traceback.format_exc()}")
+        if progress_callback:
+            progress_callback("error", -1, f"Failed: {e}")
+        raise
