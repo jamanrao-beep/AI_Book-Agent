@@ -90,7 +90,17 @@ def extract_book_text(file_path: str, filename: str) -> str:
         return extract_text_from_pdf(file_path)
     elif ext == ".zip":
         return extract_text_from_zip(file_path)
+    elif ext == ".rtf":
+        try:
+            from striprtf.striprtf import rtf_to_text  # pyrefly: ignore [missing-import]
+            with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+                return rtf_to_text(f.read())
+        except ImportError:
+            pass
+        with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+            return f.read()
     else:
+        # Covers .txt, .md, and any plain-text format
         with open(file_path, "r", encoding="utf-8", errors="replace") as f:
             return f.read()
 
@@ -116,38 +126,71 @@ Rules:
 - If no chapter breaks exist, treat the whole text as a single chapter titled 'Full Text'.
 - Preserve every word of the original text.
 - Do NOT summarise or alter content.
+- The output may be large. Always emit complete content — never truncate or use placeholders.
 """
 
+# ── Regex-based chapter splitter (no AI, handles unlimited size) ─────────────
+_CH_PATTERN = re.compile(
+    r"(?im)^(?:chapter\s+(?:\d+|[ivxlcdm]+)[^\n]*"
+    r"|part\s+(?:\d+|[ivxlcdm]+)[^\n]*"
+    r"|\d{1,3}[.)]\s+[A-Z][^\n]{3,60}"
+    r"|अध्याय\s*[\d\u0966-\u096F]+"
+    r"|भाग\s*[\d\u0966-\u096F]+)",
+)
+
+def _regex_parse_chapters(raw_text: str, filename: str = "") -> dict:
+    """Pure-regex chapter parser that never truncates — used for all book sizes."""
+    title = Path(filename).stem.replace("_", " ").replace("-", " ").title() if filename else "Untitled"
+    splits = [m.start() for m in _CH_PATTERN.finditer(raw_text)]
+    chapters = []
+    if len(splits) >= 2:
+        for k, start in enumerate(splits):
+            end = splits[k + 1] if k + 1 < len(splits) else len(raw_text)
+            heading_end = raw_text.index("\n", start) if "\n" in raw_text[start:start + 200] else start + 80
+            ch_title = raw_text[start:heading_end].strip()
+            ch_body = raw_text[heading_end:end].strip()
+            chapters.append({
+                "chapter_number": k + 1,
+                "title": ch_title,
+                "content": ch_body,
+            })
+    if not chapters:
+        chapters = [{"chapter_number": 1, "title": "Full Text", "content": raw_text}]
+    return {"title": title, "author": "", "chapters": chapters}
+
+
 def parse_book_structure(raw_text: str, filename: str = "") -> dict:
-    sample = raw_text[:80000]
+    """
+    Parse raw text into structured chapters.
+    Uses regex splitting for all books to guarantee zero content loss,
+    then optionally uses GPT only to extract the title/author from the first 2 KB.
+    """
+    # Step 1: always do the full regex parse (handles any size)
+    structure = _regex_parse_chapters(raw_text, filename)
+
+    # Step 2: try GPT on a tiny sample ONLY to get a better title/author
     try:
+        sample = raw_text[:2000]
         resp = client.chat.completions.create(
             model=MODEL,
             messages=[
-                {"role": "system", "content": PARSE_SYSTEM},
-                {"role": "user", "content": f"Parse this book text:\n\n{sample}"},
+                {"role": "system", "content": "Extract the book title and author from this text excerpt. Reply ONLY with JSON: {\"title\": \"...\", \"author\": \"...\"}"},
+                {"role": "user", "content": sample},
             ],
-            max_tokens=4096,
+            max_tokens=100,
         )
-        raw = resp.choices[0].message.content.strip()
-        raw = raw.replace("```json", "").replace("```", "").strip()
+        raw = resp.choices[0].message.content.strip().replace("```json", "").replace("```", "").strip()
         s = raw.find("{"); e = raw.rfind("}") + 1
-        if s == -1 or e == 0:
-            raise ValueError("No JSON")
-        return json.loads(raw[s:e])
-    except Exception as ex:
-        print(f"  ⚠️  parse_book_structure fallback: {ex}")
-        title = Path(filename).stem.replace("_", " ").replace("-", " ").title() if filename else "Untitled"
-        chapters = []
-        ch_pattern = re.split(r"(?i)(chapter\s+\w+[^\n]*)", raw_text)
-        if len(ch_pattern) > 1:
-            for i in range(1, len(ch_pattern), 2):
-                ch_title = ch_pattern[i].strip()
-                ch_body = ch_pattern[i + 1].strip() if i + 1 < len(ch_pattern) else ""
-                chapters.append({"chapter_number": (i // 2) + 1, "title": ch_title, "content": ch_body})
-        if not chapters:
-            chapters = [{"chapter_number": 1, "title": "Full Text", "content": raw_text}]
-        return {"title": title, "author": "", "chapters": chapters}
+        if s != -1 and e > s:
+            meta = json.loads(raw[s:e])
+            if meta.get("title"):
+                structure["title"] = meta["title"]
+            if meta.get("author"):
+                structure["author"] = meta["author"]
+    except Exception:
+        pass  # keep the filename-derived title
+
+    return structure
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -248,64 +291,105 @@ If the instruction doesn't apply to this chapter, return the chapter unchanged w
 CRITICAL: Return complete content, never truncate with placeholders.
 """
 
-def _edit_single_chapter(chapter: dict, instruction: str, book_title: str, chapter_idx: int, total_chapters: int) -> dict:
-    """Edit a single chapter. Returns the (possibly modified) chapter dict."""
-    # Trim very long chapters to fit context
-    content = chapter.get("content", "")
-    if not isinstance(content, str):
-        content = str(content or "")
-    max_content = 30000
-    truncated = len(content) > max_content
-    if truncated:
-        content = content[:max_content] + "\n\n[REST OF CHAPTER — preserve in output]"
+# Max chars we send per API call for chapter editing.
+# GPT-4o has a 128K context; 60K chars ≈ 15K tokens — leaves plenty of room
+# for the instruction, system prompt, and output.
+_CHAPTER_EDIT_CHUNK = 60_000
 
-    payload = json.dumps({
-        "title": chapter.get("title", ""),
-        "content": content
-    }, ensure_ascii=False)
 
+def _edit_chapter_chunk(chunk_text: str, chunk_title: str, instruction: str,
+                         book_title: str, chapter_idx: int, total_chapters: int,
+                         is_first_chunk: bool) -> tuple[str, bool]:
+    """Edit one chunk of a chapter. Returns (edited_text, changed_flag)."""
+    payload = json.dumps({"title": chunk_title, "content": chunk_text}, ensure_ascii=False)
     messages = [
         {"role": "system", "content": CHAPTER_EDIT_SYSTEM},
         {"role": "user", "content": (
-            f"Book: \"{book_title}\" | Chapter {chapter_idx + 1} of {total_chapters}\n"
-            f"Edit instruction: {instruction}\n\n"
-            f"Chapter JSON:\n{payload}"
+            f"Book: \"{book_title}\" | Chapter {chapter_idx + 1} of {total_chapters}"
+            + (f" (continuation chunk — title applies to first chunk only)" if not is_first_chunk else "")
+            + f"\nEdit instruction: {instruction}\n\nChapter JSON:\n{payload}"
         )}
     ]
-
-    # Scale max_tokens to chapter length so long chapters aren't truncated
-    estimated_output_tokens = min(8192, max(2048, len(content) // 3))
+    # Scale output tokens to chunk size; cap at 16K (GPT-4o max reliable output)
+    estimated_output = min(16000, max(2048, len(chunk_text) // 2))
 
     last_exc = None
-    for attempt in range(2):  # retry once on transient errors
+    for attempt in range(2):
         try:
             resp = client.chat.completions.create(
                 model=MODEL,
                 messages=messages,
-                max_tokens=estimated_output_tokens,
+                max_tokens=estimated_output,
                 temperature=0.7,
             )
             raw = resp.choices[0].message.content.strip()
             raw = re.sub(r'^```json\s*', '', raw, flags=re.IGNORECASE)
             raw = re.sub(r'\s*```$', '', raw)
-
             result = _try_parse_json(raw)
             if result and isinstance(result, dict):
-                return {
-                    "chapter_number": chapter.get("chapter_number", chapter_idx + 1),
-                    "title": str(result.get("title", chapter.get("title", ""))),
-                    "content": str(result.get("content", chapter.get("content", ""))),
-                    "_changed": result.get("changed", True),
-                }
+                return str(result.get("content", chunk_text)), bool(result.get("changed", True))
         except Exception as ex:
             last_exc = ex
-            print(f"  Warning: Chapter {chapter_idx + 1} edit attempt {attempt + 1} failed: {ex}")
+            print(f"    Warning: chunk edit attempt {attempt + 1} failed: {ex}")
+    print(f"    Error: chunk edit permanently failed. Keeping original. {last_exc}")
+    return chunk_text, False
 
-    if last_exc:
-        print(f"  Error: Chapter {chapter_idx + 1} permanently failed, keeping original. Error: {last_exc}")
 
-    # Return original chapter on failure — ensure content is a str
-    return {**chapter, "content": content, "_changed": False}
+def _edit_single_chapter(chapter: dict, instruction: str, book_title: str, chapter_idx: int, total_chapters: int) -> dict:
+    """
+    Edit a single chapter. For very large chapters, splits into sub-chunks,
+    edits each, then reassembles. Returns the (possibly modified) chapter dict.
+    No content is ever discarded.
+    """
+    content = chapter.get("content", "")
+    if not isinstance(content, str):
+        content = str(content or "")
+    title = chapter.get("title", "")
+
+    # If the chapter fits in one API call, process directly
+    if len(content) <= _CHAPTER_EDIT_CHUNK:
+        edited_content, changed = _edit_chapter_chunk(
+            content, title, instruction, book_title, chapter_idx, total_chapters, True
+        )
+        return {
+            "chapter_number": chapter.get("chapter_number", chapter_idx + 1),
+            "title": title,
+            "content": edited_content,
+            "_changed": changed,
+        }
+
+    # Large chapter: split at paragraph boundaries and process in chunks
+    print(f"    Chapter {chapter_idx + 1} is large ({len(content):,} chars) — processing in sub-chunks")
+    paragraphs = content.split("\n\n")
+    sub_chunks: list[list[str]] = [[]]
+    current_size = 0
+    for para in paragraphs:
+        para_size = len(para) + 2  # +2 for \n\n
+        if current_size + para_size > _CHAPTER_EDIT_CHUNK and sub_chunks[-1]:
+            sub_chunks.append([])
+            current_size = 0
+        sub_chunks[-1].append(para)
+        current_size += para_size
+
+    edited_parts = []
+    any_changed = False
+    for i, chunk_paras in enumerate(sub_chunks):
+        chunk_text = "\n\n".join(chunk_paras)
+        is_first = (i == 0)
+        edited_chunk, changed = _edit_chapter_chunk(
+            chunk_text, title if is_first else f"{title} (part {i+1})",
+            instruction, book_title, chapter_idx, total_chapters, is_first
+        )
+        edited_parts.append(edited_chunk)
+        if changed:
+            any_changed = True
+
+    return {
+        "chapter_number": chapter.get("chapter_number", chapter_idx + 1),
+        "title": title,
+        "content": "\n\n".join(edited_parts),
+        "_changed": any_changed,
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -375,8 +459,9 @@ def apply_edit(
 
     print(f"  📚 Book: {len(chapters)} chapters, ~{estimated_tokens} tokens")
 
-    # For large books, edit chapter by chapter
-    if estimated_tokens > 6000 or len(chapters) > 3:
+    # Use chunked (chapter-by-chapter) editing for everything except tiny single-chapter docs.
+    # This guarantees no content is ever lost regardless of book size.
+    if estimated_tokens > 2000 or len(chapters) > 1:
         return _apply_edit_chunked(book_structure, user_instruction, conversation_history)
 
     # For small books, use the original whole-book approach

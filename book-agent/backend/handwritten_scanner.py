@@ -277,7 +277,7 @@ def transcribe_images(image_paths: list[str], book_title: str = "") -> list[dict
                         {"role": "system", "content": TRANSCRIPTION_SYSTEM},
                         {"role": "user", "content": api_content},
                     ],
-                    max_tokens=4096,
+                    max_tokens=8192,
                 )
                 raw = response.choices[0].message.content.strip()
                 gpt_pages = raw.split("---PAGE_BREAK---")
@@ -340,15 +340,12 @@ Return ONLY valid JSON:
 """
 
 def structure_transcription(pages: list[dict], book_title: str = "") -> dict:
-    """Use GPT-4o to clean and structure the raw transcription into chapters."""
-    
-    # Combine all transcribed pages
-    full_text = "\n\n".join(
-        f"[Page {p['page_num']}]\n{p['text']}"
-        for p in pages if p["has_content"]
-    )
-    
-    if not full_text.strip():
+    """
+    Use GPT-4o to clean and structure the raw transcription into chapters.
+    Processes the full text in chunks so nothing is ever discarded.
+    """
+    content_pages = [p for p in pages if p["has_content"]]
+    if not content_pages:
         return {
             "title": book_title or "Untitled Manuscript",
             "language": "Unknown",
@@ -356,37 +353,109 @@ def structure_transcription(pages: list[dict], book_title: str = "") -> dict:
             "total_words": 0,
         }
 
-    prompt = f"""Book title (if known): {book_title or 'Unknown — infer from content if possible'}
-
-Raw transcribed pages:
-{full_text[:60000]}"""  # Limit to avoid token overflow
-
+    # Detect language from a small sample
+    sample_text = "\n\n".join(p["text"] for p in content_pages[:5])
+    detected_language = "Unknown"
     try:
-        response = client.chat.completions.create(
+        lang_resp = client.chat.completions.create(
             model=MODEL,
-            messages=[
-                {"role": "system", "content": STRUCTURE_SYSTEM},
-                {"role": "user", "content": prompt},
-            ],
-            max_tokens=4096,
+            messages=[{"role": "user", "content": f"What language is this text written in? Reply with just the language name.\n\n{sample_text[:500]}"}],
+            max_tokens=20,
         )
-        raw = response.choices[0].message.content.strip()
-        raw = raw.replace("```json", "").replace("```", "").strip()
-        s = raw.find("{")
-        e = raw.rfind("}") + 1
-        if s == -1 or e == 0:
-            raise ValueError("No JSON in structure response")
-        return json.loads(raw[s:e])
-    except Exception as exc:
-        print(f"  ⚠️  Structuring failed: {exc}. Using flat structure.")
-        # Fallback: flat single chapter
-        combined = "\n\n".join(p["text"] for p in pages if p["has_content"])
-        return {
-            "title": book_title or "Transcribed Manuscript",
-            "language": "Unknown",
-            "chapters": [{"chapter_number": 1, "title": "Full Content", "content": combined}],
-            "total_words": len(combined.split()),
-        }
+        detected_language = lang_resp.choices[0].message.content.strip()
+    except Exception:
+        pass
+
+    # Build full text — no truncation
+    full_text = "\n\n".join(
+        f"[Page {p['page_num']}]\n{p['text']}"
+        for p in content_pages
+    )
+
+    # Process in 50K-char chunks to avoid token limits
+    CHUNK_SIZE = 50_000
+    text_chunks = []
+    if len(full_text) <= CHUNK_SIZE:
+        text_chunks = [full_text]
+    else:
+        # Split at page boundaries
+        current_chunk = []
+        current_size = 0
+        for p in content_pages:
+            page_block = f"[Page {p['page_num']}]\n{p['text']}"
+            if current_size + len(page_block) > CHUNK_SIZE and current_chunk:
+                text_chunks.append("\n\n".join(current_chunk))
+                current_chunk = []
+                current_size = 0
+            current_chunk.append(page_block)
+            current_size += len(page_block) + 2
+        if current_chunk:
+            text_chunks.append("\n\n".join(current_chunk))
+
+    print(f"  📖 Structuring transcription: {len(content_pages)} pages → {len(text_chunks)} chunk(s)")
+
+    all_chapters = []
+    chapter_counter = 0
+
+    for chunk_idx, chunk_text in enumerate(text_chunks):
+        prompt = (
+            f"Book title (if known): {book_title or 'Unknown — infer from content if possible'}\n"
+            f"Language: {detected_language}\n"
+            + (f"(This is part {chunk_idx + 1} of {len(text_chunks)} — continue chapter numbering from {chapter_counter + 1})\n" if len(text_chunks) > 1 else "")
+            + f"\nRaw transcribed pages:\n{chunk_text}"
+        )
+        try:
+            response = client.chat.completions.create(
+                model=MODEL,
+                messages=[
+                    {"role": "system", "content": STRUCTURE_SYSTEM},
+                    {"role": "user", "content": prompt},
+                ],
+                max_tokens=8000,
+            )
+            raw = response.choices[0].message.content.strip()
+            raw = raw.replace("```json", "").replace("```", "").strip()
+            s = raw.find("{"); e = raw.rfind("}") + 1
+            if s == -1 or e == 0:
+                raise ValueError("No JSON in structure response")
+            chunk_result = json.loads(raw[s:e])
+
+            # Collect chapters and fix numbering
+            for ch in chunk_result.get("chapters", []):
+                chapter_counter += 1
+                all_chapters.append({
+                    "chapter_number": chapter_counter,
+                    "title": ch.get("title", f"Chapter {chapter_counter}"),
+                    "content": ch.get("content", ""),
+                })
+
+            # Use title/language from first chunk
+            if chunk_idx == 0:
+                if chunk_result.get("title") and not book_title:
+                    book_title = chunk_result["title"]
+                if chunk_result.get("language") and detected_language == "Unknown":
+                    detected_language = chunk_result["language"]
+
+        except Exception as exc:
+            print(f"  ⚠️  Structuring chunk {chunk_idx + 1} failed: {exc}. Using flat fallback.")
+            chapter_counter += 1
+            all_chapters.append({
+                "chapter_number": chapter_counter,
+                "title": f"Part {chapter_counter}",
+                "content": chunk_text,
+            })
+
+    if not all_chapters:
+        all_chapters = [{"chapter_number": 1, "title": "Full Content", "content": full_text}]
+
+    total_words = sum(len(ch["content"].split()) for ch in all_chapters)
+
+    return {
+        "title": book_title or "Transcribed Manuscript",
+        "language": detected_language,
+        "chapters": all_chapters,
+        "total_words": total_words,
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -579,9 +648,7 @@ def scan_handwritten_book(
         total_pages = len(images)
         if total_pages == 0:
             raise ValueError("No readable images found in the uploaded file.")
-        if total_pages > 400:
-            images = images[:400]  # Hard cap
-            total_pages = 400
+        # No arbitrary page cap — process all pages
 
         if progress_callback: progress_callback("transcribing", 5, f"Found {total_pages} pages — starting transcription…")
 

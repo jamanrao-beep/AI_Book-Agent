@@ -368,12 +368,37 @@ def _hex_to_docx_rgb(h: str):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _extract_from_pdf(path: str) -> str:
+    """Extract text from PDF. Tries pypdf first, pdfplumber as fallback for better coverage."""
+    text = ""
+    # Primary: pypdf
     try:
         from pypdf import PdfReader  # pyrefly: ignore [missing-import]
         reader = PdfReader(path)
-        return "\n\n".join(page.extract_text() or "" for page in reader.pages)
-    except Exception as exc:
-        raise RuntimeError(f"PDF extraction failed: {exc}") from exc
+        pages = []
+        for page in reader.pages:
+            t = page.extract_text()
+            if t:
+                pages.append(t)
+        text = "\n\n".join(pages)
+    except Exception:
+        pass
+
+    # Fallback/supplement: pdfplumber (better at complex layouts)
+    if not text.strip():
+        try:
+            import pdfplumber  # pyrefly: ignore [missing-import]
+            pages = []
+            with pdfplumber.open(path) as pdf:
+                for page in pdf.pages:
+                    t = page.extract_text()
+                    if t:
+                        pages.append(t)
+            text = "\n\n".join(pages)
+        except Exception as exc:
+            if not text:
+                raise RuntimeError(f"PDF extraction failed: {exc}") from exc
+
+    return text
 
 
 def _extract_from_docx(path: str) -> str:
@@ -418,6 +443,17 @@ def extract_text(file_path: str, filename: str) -> str:
         return _extract_from_docx(file_path)
     if ext == ".zip":
         return _extract_from_zip(file_path)
+    if ext in (".txt", ".md", ".text"):
+        with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+            return f.read()
+    if ext == ".rtf":
+        try:
+            from striprtf.striprtf import rtf_to_text  # pyrefly: ignore [missing-import]
+            with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+                return rtf_to_text(f.read())
+        except ImportError:
+            with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+                return f.read()
     raise ValueError(f"Unsupported file type: {ext}")
 
 

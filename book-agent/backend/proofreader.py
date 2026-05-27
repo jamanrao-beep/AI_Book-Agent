@@ -98,6 +98,9 @@ def extract_text(path: str, filename: str) -> str:
         return extract_text_from_rtf(path)
     elif name.endswith(".zip"):
         return extract_text_from_zip(path)
+    elif name.endswith(".md"):
+        return extract_text_from_md(path)
+    # Fallback: try as plain text (covers .txt, .text, any unknown text format)
     return extract_text_from_txt(path)
 
 
@@ -514,16 +517,55 @@ def save_corrected_pdf(
 ) -> str:
     """
     Generate a styled PDF from corrected_text using reportlab.
+    Supports Unicode (Devanagari, Arabic, CJK, etc.) via Noto/FreeFont TTFs.
     """
     # pyrefly: ignore [missing-import]
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.units import mm
     from reportlab.lib import colors
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.lib.enums import TA_LEFT, TA_CENTER
+    from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_JUSTIFY
     from reportlab.platypus import (
         SimpleDocTemplate, Paragraph, Spacer, HRFlowable,
     )
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+
+    # ── Register Unicode fonts (idempotent) ───────────────────────────────────
+    _UNICODE_FONTS = {
+        "NotoSans":            "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+        "NotoSans-Bold":       "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
+        "NotoSansDevanagari":  "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf",
+        "FreeSerif":           "/usr/share/fonts/truetype/freefont/FreeSerif.ttf",
+        "FreeSans":            "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
+        "DejaVuSans":          "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "DejaVuSans-Bold":     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    }
+    registered_unicode_font = None
+    for fname, fpath in _UNICODE_FONTS.items():
+        if os.path.exists(fpath):
+            try:
+                pdfmetrics.registerFont(TTFont(fname, fpath))
+                if registered_unicode_font is None:
+                    registered_unicode_font = fname
+            except Exception:
+                pass
+
+    # Detect if text contains non-Latin characters
+    has_non_latin = any(ord(c) > 0x024F for c in corrected_text if not c.isspace())
+
+    # Choose fonts: use Unicode-capable font if non-Latin detected
+    if has_non_latin and registered_unicode_font:
+        body_font      = registered_unicode_font
+        bold_font      = registered_unicode_font + "-Bold" if (registered_unicode_font + "-Bold") in _UNICODE_FONTS else registered_unicode_font
+        # Verify bold variant was registered
+        try:
+            pdfmetrics.getFont(bold_font)
+        except Exception:
+            bold_font = body_font
+    else:
+        body_font = "Helvetica"
+        bold_font = "Helvetica-Bold"
 
     PAGE_W, PAGE_H = A4
     MARGIN = 22 * mm
@@ -537,57 +579,52 @@ def save_corrected_pdf(
         bottomMargin=MARGIN,
     )
 
-    styles = getSampleStyleSheet()
-
     title_style = ParagraphStyle(
         "DocTitle",
-        parent=styles["Title"],
         fontSize=22,
         leading=28,
         textColor=colors.HexColor("#0f172a"),
         spaceAfter=4,
-        fontName="Helvetica-Bold",
+        fontName=bold_font,
+        wordWrap="CJK" if has_non_latin else "LTR",
     )
     subtitle_style = ParagraphStyle(
         "DocSubtitle",
-        parent=styles["Normal"],
         fontSize=10,
         leading=14,
         textColor=colors.HexColor("#64748b"),
         spaceAfter=2,
-        fontName="Helvetica",
+        fontName=body_font,
     )
     badge_style = ParagraphStyle(
         "Badge",
-        parent=styles["Normal"],
         fontSize=9,
         leading=12,
         textColor=colors.HexColor("#10b981"),
-        fontName="Helvetica-Bold",
+        fontName=bold_font,
         spaceAfter=0,
     )
     body_style = ParagraphStyle(
         "DocBody",
-        parent=styles["Normal"],
         fontSize=11,
         leading=18,
         textColor=colors.HexColor("#1e293b"),
-        fontName="Helvetica",
+        fontName=body_font,
         spaceAfter=8,
         spaceBefore=0,
+        alignment=TA_JUSTIFY,
+        wordWrap="CJK" if has_non_latin else "LTR",
     )
 
     applied = []
-    if apply_grammar:
-        applied.append("Grammar")
-    if apply_punctuation:
-        applied.append("Punctuation")
-    if apply_style:
-        applied.append("Style")
+    if apply_grammar:      applied.append("Grammar")
+    if apply_punctuation:  applied.append("Punctuation")
+    if apply_style:        applied.append("Style")
     applied_str = " · ".join(applied) if applied else "No corrections"
 
     story = []
-    story.append(Paragraph(original_title, title_style))
+    safe_title = original_title.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    story.append(Paragraph(safe_title, title_style))
     story.append(Paragraph("Proofread and corrected by Editorial AI", subtitle_style))
     story.append(Spacer(1, 4))
     story.append(Paragraph(f"Corrections applied: {applied_str}", badge_style))
