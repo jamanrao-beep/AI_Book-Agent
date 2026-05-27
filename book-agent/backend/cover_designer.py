@@ -1,38 +1,43 @@
 """
-cover_designer.py  ·  v3.0
-AI-powered book cover designer — rich, fully layered covers.
+cover_designer.py  ·  v4.0
+AI-powered book cover designer — fully personalised, image-aware covers.
 
 Pipeline:
   1. Extract title from filename if not provided
-  2. GPT-4o generates a complete cover concept (JSON)
-  3. render_cover_pdf  — full-bleed A4 cover with:
-       • gradient background
-       • large decorative illustration shape (style-specific)
-       • bold motif layer
-       • accent panels / bars
+  2. Extract a representative page image from the book (PDF page → PNG, or
+     first image found in DOCX) to use as a visual source
+  3. GPT-4o Vision analyses the book image AND the title to produce a
+     deeply personalised cover concept with unique visual DNA per book
+  4. render_cover_pdf  — full-bleed A4 cover with:
+       • gradient background derived from book's own content
+       • the extracted book page rendered as a blurred/tinted hero image
+       • style-specific illustration overlay
+       • motif texture layer
+       • accent panels
        • genre badge
-       • title, subtitle, tagline, author line — all properly positioned
-  4. Prepend cover to original PDF or DOCX
-  5. Return output path + concept metadata
+       • title, subtitle, tagline, author — properly positioned
+  5. Prepend cover to original PDF or DOCX
+  6. Return output path + concept metadata
 
-Bug fixes vs v2:
-  - run.font.letter_spacing removed (invalid python-docx attribute → crash)
-  - Alpha blending on rects now uses saveState/setFillAlpha properly
-  - Motif covers full page, not just right half
-  - y_title computed dynamically so long titles never overflow bottom band
-  - Genre badge rendered without broken alpha rects
-  - Complete visual overhaul: style-specific illustration shapes, panels,
-    texture layers, decorative rules — covers now look like real books
+What changed vs v3:
+  - GPT-4o Vision now sees an actual page from the book before designing
+  - Prompt forces unique palette, motif, layout per title/genre/content
+  - Book page image rendered behind text as a blurred, tinted atmosphere layer
+  - 6 distinct layout templates (not just one panel) chosen by AI
+  - Noto fonts used throughout (multilingual safe — see pdf_generator.py)
 """
 
 from __future__ import annotations
 
+import base64
+import io
 import math
 import os
 import json
 import uuid
 import shutil
 import random
+import tempfile
 from pathlib import Path
 
 from openai import OpenAI           # pyrefly: ignore [missing-import]
@@ -44,61 +49,179 @@ MODEL  = "gpt-4o"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# AI: Generate cover concept
+# Book image extraction
 # ─────────────────────────────────────────────────────────────────────────────
 
-COVER_SYSTEM_PROMPT = """You are a world-class book cover designer and creative director.
-Given a book title (and optional subtitle/description/design style), you produce a complete cover design brief.
+def _extract_book_image(file_path: str, ext: str) -> bytes | None:
+    """
+    Extract one representative page/image from the book as JPEG bytes.
+    - PDF  → rasterise a content-rich page (not page 0 which may be blank)
+    - DOCX → extract first embedded image
+    Returns None if extraction fails (cover still works without it).
+    """
+    try:
+        if ext == ".pdf":
+            return _extract_pdf_page_image(file_path)
+        elif ext == ".docx":
+            return _extract_docx_image(file_path)
+    except Exception as ex:
+        print(f"  ⚠️  Book image extraction failed: {ex}")
+    return None
 
-The caller may pass a `design_style` hint. Honour it strictly:
-- "normal"      → clean, readable, balanced layout; neutral tones; accessible to any audience
-- "premium"     → rich dark backgrounds, gold/silver accents, elegant serif feel, luxury typography weight
-- "scifi"       → deep space blacks/navy, neon cyan/purple accents, futuristic geometric motifs, high-contrast
-- "minimalist"  → maximum whitespace, monochrome or single accent colour, ultra-thin rule lines, sparse motif
-- "fantasy"     → deep jewel tones (emerald, burgundy, midnight blue), ornate flourish motif, mystical feel
-- "thriller"    → high contrast, dark moody palette, sharp diagonal or shattered motifs, urgent title treatment
-- "romance"     → warm blush/rose/gold palette, soft curves or floral motif, elegant script feel
-- "academic"    → muted professional tones, grid or line motifs, structured layout, no decorative excess
-- "vibrant"     → bold saturated colours, energetic scattered-dot or wave motifs, modern and loud
-- "retro"       → warm sepia/mustard/rust palette, diagonal stripe or dot-grid motif, vintage character
-If no style is given, default to "premium".
 
-Respond ONLY with valid JSON (no markdown, no code fences):
+def _extract_pdf_page_image(pdf_path: str) -> bytes | None:
+    """Rasterise a mid-book page to JPEG bytes using pymupdf (fitz)."""
+    try:
+        import fitz  # PyMuPDF   # pyrefly: ignore [missing-import]
+    except ImportError:
+        print("  ℹ️  pymupdf not installed; skipping book image extraction")
+        return None
+
+    doc = fitz.open(pdf_path)
+    n   = doc.page_count
+    # Pick a content-rich page: ~20% into the book, skip blank cover pages
+    target = max(1, min(int(n * 0.20), n - 1))
+    for attempt in range(min(5, n)):
+        page_idx = (target + attempt) % n
+        page = doc[page_idx]
+        mat  = fitz.Matrix(1.2, 1.2)   # 1.2× zoom → reasonable resolution
+        pix  = page.get_pixmap(matrix=mat, colorspace=fitz.csRGB)
+        img_bytes = pix.tobytes("jpeg")
+        if len(img_bytes) > 8_000:      # skip near-blank pages
+            doc.close()
+            return img_bytes
+    doc.close()
+    return None
+
+
+def _extract_docx_image(docx_path: str) -> bytes | None:
+    """Extract the first embedded image from a DOCX as JPEG bytes."""
+    import zipfile
+    from PIL import Image   # pyrefly: ignore [missing-import]
+
+    with zipfile.ZipFile(docx_path, "r") as z:
+        media = [n for n in z.namelist()
+                 if n.startswith("word/media/") and
+                 any(n.lower().endswith(ext) for ext in (".png", ".jpg", ".jpeg", ".bmp", ".gif"))]
+        if not media:
+            return None
+        raw = z.read(media[0])
+        img = Image.open(io.BytesIO(raw)).convert("RGB")
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=80)
+        return buf.getvalue()
+
+
+def _image_to_b64(img_bytes: bytes) -> str:
+    return base64.b64encode(img_bytes).decode()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# AI: Generate cover concept  (vision-aware)
+# ─────────────────────────────────────────────────────────────────────────────
+
+COVER_SYSTEM_PROMPT = """You are a world-class book cover designer and creative director with deep expertise in typography, colour theory, and visual storytelling.
+
+Your task: produce a HIGHLY PERSONALISED cover design brief for the specific book provided.
+Every cover must feel UNIQUE to its title and content — never generic.
+
+━━ DESIGN STYLE RULES ━━
+If a `design_style` hint is given, honour it strictly:
+• "normal"      → clean, readable, balanced; neutral accessible tones; sans-serif feel
+• "premium"     → rich dark backgrounds, gold/silver/copper accents, luxury serif weight
+• "scifi"       → deep space blacks/navy, neon cyan/electric purple, sharp geometric motifs
+• "minimalist"  → maximum whitespace, monochrome + ONE accent, ultra-sparse, no ornament
+• "fantasy"     → jewel tones (emerald, burgundy, midnight blue), ornate flourishes, mystical
+• "thriller"    → extreme contrast, blood reds or cold greys, shattered/diagonal motifs, urgency
+• "romance"     → blush/rose/gold, soft watercolour feel, floral or ribbon motif, warmth
+• "academic"    → muted navy/slate, grid or rule motifs, structured, no decorative excess
+• "vibrant"     → bold saturated primary/secondary colours, energetic wave or dot motifs, loud
+• "retro"       → sepia/mustard/burnt orange, halftone dots or diagonal stripe, vintage press
+If no style is given, infer the best style from the title and book content.
+
+━━ VISUAL PERSONALISATION RULES ━━
+1. Derive palette DIRECTLY from the book's subject and emotional tone.
+   Examples: a book about the ocean → deep teals + seafoam; a book about fire → deep crimson + amber
+2. Choose motif and illustration_shape to MATCH the subject. A maths book → hexagons + cross_lines.
+   A nature book → wave_curves + arch. A tech book → grid_lines + sunburst. NEVER default to circles.
+3. The layout_template must vary: split books by feel into one of 6 templates (see below).
+4. image_treatment tells the renderer how to blend the extracted book page into the background.
+5. accent_elements is a list of up to 4 specific decorative elements to draw (e.g. "constellation dots", "circuit trace lines", "watercolour wash", "ink splatter").
+
+━━ LAYOUT TEMPLATES ━━
+• "split_horizon"   → horizontal colour split at 40% height; image in lower half, text top-left
+• "full_bleed"      → image fills entire background (heavy tint overlay), text floats centred
+• "left_panel"      → solid colour left 45%, image right 55%, text on left panel
+• "top_image"       → image occupies top 50%, solid colour bottom 50%, text bottom
+• "diagonal_cut"    → diagonal colour divide from bottom-left to top-right; text upper-left
+• "magazine"        → clean white/light background, bold oversized title, image small top-right
+
+━━ OUTPUT FORMAT ━━
+Respond ONLY with valid JSON. No markdown, no code fences, no explanation.
 {
-  "title": "<display title — may add line breaks with \\n for layout>",
-  "subtitle": "<compelling subtitle or empty string>",
-  "tagline": "<one punchy sentence that captures the book's essence>",
-  "author_line": "<e.g. 'A comprehensive guide' or author name, or leave empty>",
+  "title": "<display title — use \\n for line breaks to improve layout>",
+  "subtitle": "<compelling subtitle that adds context, or empty string>",
+  "tagline": "<one punchy sentence capturing the book's essence — specific to THIS book>",
+  "author_line": "<descriptive line or author name, e.g. 'A definitive guide to quantum mechanics'>",
   "palette": {
-    "bg_top":        "<hex — gradient top, e.g. #0f172a>",
-    "bg_bottom":     "<hex — gradient bottom, e.g. #1e3a5f>",
-    "panel_color":   "<hex — mid-page accent panel background, e.g. #1e293b>",
-    "accent":        "<hex — accent elements, rules, ornaments>",
-    "title_color":   "<hex — title text, must strongly contrast bg>",
+    "bg_primary":    "<hex — dominant background colour>",
+    "bg_secondary":  "<hex — secondary/gradient colour>",
+    "panel_color":   "<hex — text panel background>",
+    "accent":        "<hex — accent: rules, ornaments, badge — must pop against bg>",
+    "accent2":       "<hex — secondary accent for depth, e.g. a lighter tint of accent>",
+    "title_color":   "<hex — title text — must have WCAG AA contrast on bg_primary>",
     "subtitle_color":"<hex — subtitle text>",
-    "tagline_color": "<hex — tagline text>"
+    "tagline_color": "<hex — tagline text, may be softer>"
   },
   "style": "<one of: normal|premium|scifi|minimalist|fantasy|thriller|romance|academic|vibrant|retro>",
-  "motif": "<one of: concentric_circles | diagonal_stripes | scattered_dots | grid_lines | wave_curves | hexagons | triangles | stars | arcs | none>",
-  "illustration_shape": "<one of: large_circle | diamond | arch | triangle | cross_lines | sunburst | none>",
-  "genre_label": "<e.g. BUSINESS | SELF-HELP | SCIENCE | FICTION | HISTORY — uppercase, max 20 chars>"
+  "layout_template": "<one of: split_horizon|full_bleed|left_panel|top_image|diagonal_cut|magazine>",
+  "motif": "<one of: concentric_circles|diagonal_stripes|scattered_dots|grid_lines|wave_curves|hexagons|triangles|stars|arcs|circuit_traces|halftone|ink_drops|none>",
+  "illustration_shape": "<one of: large_circle|diamond|arch|triangle|cross_lines|sunburst|polygon|none>",
+  "image_treatment": "<one of: tinted_overlay|grayscale_fade|duotone|vignette|blur_bg|color_burn>",
+  "accent_elements": ["<element 1>", "<element 2>"],
+  "genre_label": "<UPPERCASE genre, max 20 chars, e.g. BUSINESS|SCIENCE|FICTION|HISTORY|SELF-HELP>",
+  "design_rationale": "<1-2 sentences explaining why these specific choices suit THIS book>"
 }"""
 
 
-def generate_cover_concept(book_title: str, description: str = "", design_style: str = "") -> dict:
-    prompt = f"Book title: {book_title}"
+def generate_cover_concept(
+    book_title   : str,
+    description  : str  = "",
+    design_style : str  = "",
+    book_image   : bytes | None = None,
+) -> dict:
+    """
+    Call GPT-4o (with optional vision input) to generate a personalised cover concept.
+    If book_image is provided, GPT-4o sees an actual page from the book.
+    """
+    user_text = f"Book title: {book_title}"
     if description:
-        prompt += f"\nDescription: {description}"
-    prompt += f"\nDesign style: {design_style or 'premium'}"
+        user_text += f"\nDescription / book summary: {description}"
+    user_text += f"\nDesign style: {design_style or 'auto — infer from title and content'}"
+    if book_image:
+        user_text += ("\n\nI have attached an image of a page from this book. "
+                      "Analyse its content, visual density, subject matter, and mood "
+                      "to inform every design decision. The cover must feel like it belongs "
+                      "to this specific book, not a generic template.")
+
+    # Build message content
+    if book_image:
+        b64 = _image_to_b64(book_image)
+        content = [
+            {"type": "text",       "text": user_text},
+            {"type": "image_url",  "image_url": {"url": f"data:image/jpeg;base64,{b64}", "detail": "low"}},
+        ]
+    else:
+        content = user_text
 
     response = client.chat.completions.create(
-        model=MODEL,
-        messages=[
+        model    = MODEL,
+        messages = [
             {"role": "system", "content": COVER_SYSTEM_PROMPT},
-            {"role": "user",   "content": prompt},
+            {"role": "user",   "content": content},
         ],
-        temperature=0.85,
-        max_tokens=900,
+        temperature = 0.90,
+        max_tokens  = 1200,
     )
     raw = response.choices[0].message.content.strip()
     raw = raw.replace("```json", "").replace("```", "").strip()
@@ -107,10 +230,22 @@ def generate_cover_concept(book_title: str, description: str = "", design_style:
         raise ValueError("No JSON in cover concept response")
     concept = json.loads(raw[s:e])
 
-    # Ensure new fields have defaults if AI omits them
+    # Defaults for any missing fields
     concept.setdefault("illustration_shape", "large_circle")
+    concept.setdefault("layout_template",    "split_horizon")
+    concept.setdefault("image_treatment",    "tinted_overlay")
+    concept.setdefault("accent_elements",    [])
+    concept.setdefault("motif",              "none")
     p = concept.setdefault("palette", {})
-    p.setdefault("panel_color", p.get("bg_bottom", "#1e293b"))
+    p.setdefault("bg_primary",    p.get("bg_top",    "#0f172a"))
+    p.setdefault("bg_secondary",  p.get("bg_bottom", "#1e3a5f"))
+    p.setdefault("panel_color",   p.get("bg_secondary", "#1e293b"))
+    p.setdefault("accent2",       p.get("accent", "#f59e0b"))
+
+    rationale = concept.get("design_rationale", "")
+    if rationale:
+        print(f"  🎨 Design rationale: {rationale}")
+
     return concept
 
 
@@ -119,7 +254,6 @@ def generate_cover_concept(book_title: str, description: str = "", design_style:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _hex(h: str) -> tuple[float, float, float]:
-    """#RRGGBB → (r, g, b) floats 0–1."""
     h = h.lstrip("#")
     if len(h) == 3:
         h = "".join(c * 2 for c in h)
@@ -134,397 +268,389 @@ def _blend(c1: tuple, c2: tuple, t: float) -> tuple:
     return (_lerp(c1[0], c2[0], t), _lerp(c1[1], c2[1], t), _lerp(c1[2], c2[2], t))
 
 
+def _luminance(rgb: tuple) -> float:
+    return 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]
+
+
 # ─────────────────────────────────────────────────────────────────────────────
-# PDF cover page renderer  — full visual design
+# Font helpers (Noto — multilingual safe, same cache as pdf_generator.py)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def render_cover_pdf(concept: dict, output_path: str) -> str:
+def _get_cover_font(text: str, bold: bool = False) -> str:
+    """
+    Return a registered ReportLab font for the given text.
+    Falls back to Helvetica for Latin so we don't need to download for English-only titles.
+    """
+    try:
+        from pdf_generator import get_font_for_text, detect_script  # pyrefly: ignore [missing-import]
+        script = detect_script(text)
+        if script == "Latin":
+            return "Helvetica-Bold" if bold else "Helvetica"
+        return get_font_for_text(text)
+    except Exception:
+        return "Helvetica-Bold" if bold else "Helvetica"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Image compositing helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _prepare_book_image(img_bytes: bytes, treatment: str,
+                        bg_primary: tuple, accent: tuple,
+                        width_px: int = 600, height_px: int = 800) -> bytes | None:
+    """
+    Apply image treatment (tint, grayscale, duotone, vignette, etc.) using Pillow.
+    Returns processed JPEG bytes, or None if Pillow is unavailable.
+    """
+    try:
+        from PIL import Image, ImageFilter, ImageEnhance, ImageOps, ImageDraw  # pyrefly: ignore [missing-import]
+        import numpy as np  # pyrefly: ignore [missing-import]
+    except ImportError:
+        return img_bytes   # raw image, renderer will just draw it
+
+    img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+    # Resize to fill target canvas (cover crop)
+    ratio = max(width_px / img.width, height_px / img.height)
+    new_w = int(img.width  * ratio)
+    new_h = int(img.height * ratio)
+    img   = img.resize((new_w, new_h), Image.LANCZOS)
+    # Centre crop
+    left  = (new_w - width_px) // 2
+    top   = (new_h - height_px) // 2
+    img   = img.crop((left, top, left + width_px, top + height_px))
+
+    if treatment == "grayscale_fade":
+        img = ImageOps.grayscale(img).convert("RGB")
+        img = ImageEnhance.Brightness(img).enhance(0.55)
+
+    elif treatment == "duotone":
+        # Map greyscale to gradient between bg_primary and accent
+        gray  = ImageOps.grayscale(img)
+        dark  = tuple(int(x * 255) for x in bg_primary)
+        light = tuple(int(x * 255) for x in accent)
+        arr   = np.array(gray, dtype=np.float32) / 255.0
+        r = (dark[0] + (light[0] - dark[0]) * arr).clip(0, 255).astype(np.uint8)
+        g = (dark[1] + (light[1] - dark[1]) * arr).clip(0, 255).astype(np.uint8)
+        b = (dark[2] + (light[2] - dark[2]) * arr).clip(0, 255).astype(np.uint8)
+        img = Image.fromarray(np.stack([r, g, b], axis=2))
+
+    elif treatment == "blur_bg":
+        img = img.filter(ImageFilter.GaussianBlur(radius=12))
+        img = ImageEnhance.Brightness(img).enhance(0.60)
+
+    elif treatment == "vignette":
+        img = ImageEnhance.Brightness(img).enhance(0.65)
+        # Darken edges
+        vignette = Image.new("RGB", (width_px, height_px), (0, 0, 0))
+        mask     = Image.new("L",   (width_px, height_px), 0)
+        draw     = ImageDraw.Draw(mask)
+        for i in range(60):
+            alpha = int(200 * (i / 60))
+            draw.rectangle([i, i, width_px - i, height_px - i], outline=alpha)
+        img = Image.composite(img, vignette, ImageOps.invert(mask))
+
+    elif treatment == "color_burn":
+        # Strong tint with multiply-like blend
+        tint_col = tuple(int(x * 220) for x in bg_primary)
+        tint     = Image.new("RGB", (width_px, height_px), tint_col)
+        img      = Image.blend(img, tint, alpha=0.72)
+
+    else:  # tinted_overlay — default
+        img = ImageEnhance.Brightness(img).enhance(0.50)
+        img = ImageEnhance.Saturation(img).enhance(0.45)
+
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=85)
+    return buf.getvalue()
+
+
+def _draw_image_on_canvas(c, img_bytes: bytes, x: float, y: float,
+                           w: float, h: float) -> None:
+    """Draw JPEG bytes onto a ReportLab canvas at given position/size."""
+    try:
+        from reportlab.lib.utils import ImageReader   # pyrefly: ignore [missing-import]
+        reader = ImageReader(io.BytesIO(img_bytes))
+        c.drawImage(reader, x, y, width=w, height=h, preserveAspectRatio=False, mask="auto")
+    except Exception as ex:
+        print(f"  ⚠️  Could not draw book image on cover: {ex}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PDF cover renderer
+# ─────────────────────────────────────────────────────────────────────────────
+
+def render_cover_pdf(concept: dict, output_path: str,
+                     book_image_bytes: bytes | None = None) -> str:
     from reportlab.pdfgen import canvas as rl_canvas   # pyrefly: ignore [missing-import]
     from reportlab.lib.pagesizes import A4              # pyrefly: ignore [missing-import]
     from reportlab.lib.units import mm                  # pyrefly: ignore [missing-import]
-    from reportlab.lib.colors import Color              # pyrefly: ignore [missing-import]
 
-    W, H = A4  # 595 × 842 pts
-
+    W, H = A4   # 595 × 842 pts
     c = rl_canvas.Canvas(output_path, pagesize=A4)
 
-    palette  = concept.get("palette", {})
-    motif    = concept.get("motif", "none").lower()
-    illus    = concept.get("illustration_shape", "large_circle").lower()
-    style    = concept.get("style", "premium").lower()
+    palette   = concept.get("palette", {})
+    motif     = concept.get("motif", "none").lower()
+    illus     = concept.get("illustration_shape", "large_circle").lower()
+    style     = concept.get("style", "premium").lower()
+    layout    = concept.get("layout_template", "split_horizon").lower()
+    treatment = concept.get("image_treatment", "tinted_overlay").lower()
+    acc_els   = concept.get("accent_elements", [])
 
-    # Resolve colours
-    bg_top      = _hex(palette.get("bg_top",         "#0f172a"))
-    bg_bot      = _hex(palette.get("bg_bottom",      "#1e3a5f"))
-    panel_col   = _hex(palette.get("panel_color",    "#1e293b"))
-    acc         = _hex(palette.get("accent",         "#f59e0b"))
-    title_col   = _hex(palette.get("title_color",    "#ffffff"))
-    sub_col     = _hex(palette.get("subtitle_color", "#e2e8f0"))
-    tag_col     = _hex(palette.get("tagline_color",  "#94a3b8"))
+    # Colours
+    bg1   = _hex(palette.get("bg_primary",    "#0f172a"))
+    bg2   = _hex(palette.get("bg_secondary",  "#1e3a5f"))
+    panel = _hex(palette.get("panel_color",   "#1e293b"))
+    acc   = _hex(palette.get("accent",        "#f59e0b"))
+    acc2  = _hex(palette.get("accent2",       "#fbbf24"))
+    tcol  = _hex(palette.get("title_color",   "#ffffff"))
+    scol  = _hex(palette.get("subtitle_color","#e2e8f0"))
+    tgcol = _hex(palette.get("tagline_color", "#94a3b8"))
 
-    # ── Helper: set fill with alpha via saveState ────────────────────────────
-    def fill_alpha(rgb: tuple, alpha: float = 1.0):
-        c.saveState()
-        c.setFillColorRGB(*rgb, alpha=alpha)
+    TEXT_LEFT = 20 * mm + 8
 
-    def restore():
-        c.restoreState()
+    # ── Preprocess book image if available ───────────────────────────────────
+    processed_img = None
+    if book_image_bytes:
+        processed_img = _prepare_book_image(
+            book_image_bytes, treatment, bg1, acc,
+            width_px=int(W * 2), height_px=int(H * 2)
+        )
 
     # ════════════════════════════════════════════════════════════════════════
-    # LAYER 1: Full-bleed gradient background (fine bands)
+    # LAYER 1: Gradient background (always full bleed)
     # ════════════════════════════════════════════════════════════════════════
-    BANDS = 120
+    BANDS = 140
     for i in range(BANDS):
         t  = i / BANDS
-        rc = _blend(bg_top, bg_bot, t)
+        rc = _blend(bg1, bg2, t)
         c.setFillColorRGB(*rc)
         bh = H / BANDS + 1
         c.rect(0, H - (i + 1) * bh, W, bh + 1, fill=1, stroke=0)
 
     # ════════════════════════════════════════════════════════════════════════
-    # LAYER 2: Large illustration / hero shape (style-aware)
+    # LAYER 2: Book page image — positioned by layout template
     # ════════════════════════════════════════════════════════════════════════
-    cx, cy = W * 0.72, H * 0.62   # anchor for shape
+    # Track where text panel should go (updated per layout)
+    text_panel_x = 0
+    text_panel_y = H * 0.22
+    text_panel_w = W
+    text_panel_h = H * 0.50
 
-    if illus == "large_circle":
-        # Three concentric filled circles, largest first (darkest), glow effect
-        for radius, alpha in [(195, 0.18), (145, 0.22), (95, 0.30), (52, 0.40)]:
+    if processed_img:
+        if layout == "full_bleed":
+            _draw_image_on_canvas(c, processed_img, 0, 0, W, H)
+            text_panel_x = W * 0.08
+            text_panel_w = W * 0.84
+            text_panel_y = H * 0.20
+            text_panel_h = H * 0.55
+
+        elif layout == "left_panel":
+            # Image on right 55%, left 45% is solid panel
+            _draw_image_on_canvas(c, processed_img, W * 0.45, 0, W * 0.55, H)
+            # Solid left panel
+            c.setFillColorRGB(*panel)
+            c.rect(0, 0, W * 0.47, H, fill=1, stroke=0)
+            text_panel_x = 16 * mm
+            text_panel_y = H * 0.15
+            text_panel_w = W * 0.42
+            text_panel_h = H * 0.70
+
+        elif layout == "top_image":
+            _draw_image_on_canvas(c, processed_img, 0, H * 0.48, W, H * 0.52)
+            # Solid bottom half
+            c.setFillColorRGB(*_blend(bg1, (0,0,0), 0.2))
+            c.rect(0, 0, W, H * 0.50, fill=1, stroke=0)
+            text_panel_x = TEXT_LEFT
+            text_panel_y = H * 0.05
+            text_panel_w = W - text_panel_x - 16 * mm
+            text_panel_h = H * 0.44
+
+        elif layout == "diagonal_cut":
+            # Image bottom-right triangle (clip via path)
             c.saveState()
-            c.setFillColorRGB(*acc, alpha=alpha)
-            c.circle(cx, cy, radius, fill=1, stroke=0)
-            c.restoreState()
-        # Bright core
-        c.saveState()
-        c.setFillColorRGB(*acc, alpha=0.55)
-        c.circle(cx, cy, 28, fill=1, stroke=0)
-        c.restoreState()
-
-    elif illus == "diamond":
-        # Bold rotated square (diamond)
-        def diamond(ox, oy, size, alpha):
-            c.saveState()
-            c.setFillColorRGB(*acc, alpha=alpha)
-            c.translate(ox, oy)
-            c.rotate(45)
-            c.rect(-size / 2, -size / 2, size, size, fill=1, stroke=0)
-            c.restoreState()
-        diamond(cx, cy, 260, 0.14)
-        diamond(cx, cy, 180, 0.20)
-        diamond(cx, cy, 110, 0.28)
-        diamond(cx, cy, 55,  0.45)
-
-    elif illus == "arch":
-        # Tall arch — two vertical rects + semicircle top
-        aw, ah = 160, 220
-        c.saveState()
-        c.setFillColorRGB(*acc, alpha=0.22)
-        c.roundRect(cx - aw / 2, cy - ah / 2, aw, ah, aw / 2, fill=1, stroke=0)
-        c.restoreState()
-        c.saveState()
-        c.setFillColorRGB(*acc, alpha=0.12)
-        c.roundRect(cx - aw / 2 - 30, cy - ah / 2 - 20, aw + 60, ah + 40, (aw + 60) / 2, fill=1, stroke=0)
-        c.restoreState()
-
-    elif illus == "triangle":
-        def triangle_shape(ox, oy, size, alpha):
-            c.saveState()
-            c.setFillColorRGB(*acc, alpha=alpha)
             path = c.beginPath()
-            path.moveTo(ox, oy + size * 0.6)
-            path.lineTo(ox - size * 0.52, oy - size * 0.4)
-            path.lineTo(ox + size * 0.52, oy - size * 0.4)
+            path.moveTo(0, 0)
+            path.lineTo(W, 0)
+            path.lineTo(W, H)
+            path.lineTo(W * 0.30, H)
             path.close()
-            c.drawPath(path, fill=1, stroke=0)
+            c.clipPath(path, stroke=0)
+            _draw_image_on_canvas(c, processed_img, 0, 0, W, H)
             c.restoreState()
-        triangle_shape(cx, cy, 310, 0.12)
-        triangle_shape(cx, cy, 210, 0.18)
-        triangle_shape(cx, cy, 130, 0.26)
-        triangle_shape(cx, cy, 70,  0.40)
-
-    elif illus == "sunburst":
-        # Radial lines from centre
-        for angle in range(0, 360, 15):
-            rad = math.radians(angle)
-            x1  = cx + math.cos(rad) * 35
-            y1  = cy + math.sin(rad) * 35
-            x2  = cx + math.cos(rad) * 210
-            y2  = cy + math.sin(rad) * 210
+            # Solid upper-left triangle overlay
             c.saveState()
-            c.setStrokeColorRGB(*acc, alpha=0.18)
-            c.setLineWidth(3.5)
-            c.line(x1, y1, x2, y2)
+            c.setFillColorRGB(*bg1)
+            path2 = c.beginPath()
+            path2.moveTo(0, 0)
+            path2.lineTo(W * 0.60, 0)
+            path2.lineTo(0, H)
+            path2.close()
+            c.drawPath(path2, fill=1, stroke=0)
             c.restoreState()
-        # Central glow
-        c.saveState()
-        c.setFillColorRGB(*acc, alpha=0.40)
-        c.circle(cx, cy, 38, fill=1, stroke=0)
-        c.restoreState()
+            text_panel_x = TEXT_LEFT
+            text_panel_y = H * 0.22
+            text_panel_w = W * 0.52
+            text_panel_h = H * 0.55
 
-    elif illus == "cross_lines":
-        # Two thick crossing bars
-        c.saveState()
-        c.setFillColorRGB(*acc, alpha=0.18)
-        c.rect(cx - 10, cy - 200, 20, 400, fill=1, stroke=0)
-        c.rect(cx - 200, cy - 10, 400, 20, fill=1, stroke=0)
-        c.restoreState()
-        c.saveState()
-        c.setFillColorRGB(*acc, alpha=0.30)
-        c.circle(cx, cy, 30, fill=1, stroke=0)
-        c.restoreState()
+        elif layout == "magazine":
+            # Small image top-right
+            img_w = W * 0.38
+            img_h = H * 0.28
+            _draw_image_on_canvas(c, processed_img, W - img_w - 14*mm, H - img_h - 14*mm, img_w, img_h)
+            # Light background
+            c.setFillColorRGB(*_blend(bg1, (1,1,1), 0.06))
+            c.rect(0, 0, W * 0.58, H, fill=1, stroke=0)
+            text_panel_x = TEXT_LEFT
+            text_panel_y = H * 0.18
+            text_panel_w = W * 0.56
+            text_panel_h = H * 0.60
+
+        else:  # split_horizon (default)
+            # Image in lower 55%, text in upper portion
+            _draw_image_on_canvas(c, processed_img, 0, 0, W, H * 0.55)
+            text_panel_x = 0
+            text_panel_y = H * 0.50
+            text_panel_w = W
+            text_panel_h = H * 0.46
 
     # ════════════════════════════════════════════════════════════════════════
-    # LAYER 3: Motif texture (full page, both halves)
+    # LAYER 3: Motif texture (subtle, full page)
     # ════════════════════════════════════════════════════════════════════════
-    rng = random.Random(42)
-
-    if motif == "concentric_circles":
-        for radius in range(20, int(W * 0.9), 32):
-            c.saveState()
-            c.setStrokeColorRGB(*acc, alpha=max(0.02, 0.10 - radius * 0.0002))
-            c.setLineWidth(0.8)
-            c.circle(W * 0.5, H * 0.5, radius, fill=0, stroke=1)
-            c.restoreState()
-
-    elif motif == "diagonal_stripes":
-        for x in range(-int(H), int(W) + int(H), 24):
-            c.saveState()
-            c.setStrokeColorRGB(*acc, alpha=0.07)
-            c.setLineWidth(1.2)
-            c.line(x, 0, x + H, H)
-            c.restoreState()
-
-    elif motif == "scattered_dots":
-        for _ in range(160):
-            px    = rng.uniform(0, W)
-            py    = rng.uniform(0, H)
-            pr    = rng.uniform(1.5, 5.5)
-            alpha = rng.uniform(0.04, 0.18)
-            c.saveState()
-            c.setFillColorRGB(*acc, alpha=alpha)
-            c.circle(px, py, pr, fill=1, stroke=0)
-            c.restoreState()
-
-    elif motif == "grid_lines":
-        for x in range(0, int(W), 28):
-            c.saveState()
-            c.setStrokeColorRGB(*acc, alpha=0.06)
-            c.setLineWidth(0.6)
-            c.line(x, 0, x, H)
-            c.restoreState()
-        for y in range(0, int(H), 28):
-            c.saveState()
-            c.setStrokeColorRGB(*acc, alpha=0.06)
-            c.setLineWidth(0.6)
-            c.line(0, y, W, y)
-            c.restoreState()
-
-    elif motif == "wave_curves":
-        for offset in range(-80, 300, 30):
-            c.saveState()
-            c.setStrokeColorRGB(*acc, alpha=0.10)
-            c.setLineWidth(1.6)
-            path = c.beginPath()
-            path.moveTo(0, H * 0.45 + offset)
-            for px in range(0, int(W) + 10, 6):
-                py = H * 0.45 + offset + math.sin(px * 0.020) * 50
-                path.lineTo(px, py)
-            c.drawPath(path, stroke=1, fill=0)
-            c.restoreState()
-
-    elif motif == "hexagons":
-        hex_r = 22
-        cols  = int(W / (hex_r * 1.8)) + 2
-        rows  = int(H / (hex_r * 1.55)) + 2
-        for row in range(rows):
-            for col in range(cols):
-                hx = col * hex_r * 1.75 + (hex_r * 0.9 if row % 2 else 0)
-                hy = row * hex_r * 1.52
-                pts = [
-                    (hx + hex_r * math.cos(math.radians(60 * i + 30)),
-                     hy + hex_r * math.sin(math.radians(60 * i + 30)))
-                    for i in range(6)
-                ]
-                c.saveState()
-                c.setStrokeColorRGB(*acc, alpha=0.06)
-                c.setLineWidth(0.7)
-                path = c.beginPath()
-                path.moveTo(*pts[0])
-                for pt in pts[1:]:
-                    path.lineTo(*pt)
-                path.close()
-                c.drawPath(path, stroke=1, fill=0)
-                c.restoreState()
-
-    elif motif == "triangles":
-        tri_s = 48
-        for row in range(0, int(H) + tri_s, tri_s):
-            for col in range(0, int(W) + tri_s, tri_s):
-                c.saveState()
-                c.setStrokeColorRGB(*acc, alpha=0.06)
-                c.setLineWidth(0.7)
-                path = c.beginPath()
-                if (row // tri_s + col // tri_s) % 2 == 0:
-                    path.moveTo(col, row)
-                    path.lineTo(col + tri_s, row)
-                    path.lineTo(col + tri_s / 2, row + tri_s)
-                else:
-                    path.moveTo(col + tri_s / 2, row)
-                    path.lineTo(col, row + tri_s)
-                    path.lineTo(col + tri_s, row + tri_s)
-                path.close()
-                c.drawPath(path, stroke=1, fill=0)
-                c.restoreState()
-
-    elif motif == "stars":
-        for _ in range(80):
-            sx    = rng.uniform(0, W)
-            sy    = rng.uniform(0, H)
-            sr    = rng.uniform(1, 3)
-            alpha = rng.uniform(0.06, 0.30)
-            c.saveState()
-            c.setFillColorRGB(*acc, alpha=alpha)
-            c.circle(sx, sy, sr, fill=1, stroke=0)
-            c.restoreState()
-        # a few larger star shapes
-        for _ in range(12):
-            sx = rng.uniform(0, W)
-            sy = rng.uniform(0, H)
-            c.saveState()
-            c.setStrokeColorRGB(*acc, alpha=0.14)
-            c.setLineWidth(0.6)
-            for a in range(0, 360, 45):
-                rad = math.radians(a)
-                c.line(sx + math.cos(rad) * 3, sy + math.sin(rad) * 3,
-                       sx + math.cos(rad) * 10, sy + math.sin(rad) * 10)
-            c.restoreState()
-
-    elif motif == "arcs":
-        for i, (ox, oy, start_r) in enumerate([(0, 0, 40), (W, 0, 40), (0, H, 40), (W, H, 40)]):
-            for r in range(start_r, 320, 38):
-                c.saveState()
-                c.setStrokeColorRGB(*acc, alpha=max(0.03, 0.14 - r * 0.0003))
-                c.setLineWidth(1.0)
-                c.arc(ox - r, oy - r, ox + r, oy + r, startAng=0, extent=90)
-                c.restoreState()
+    rng = random.Random(hash(concept.get("title", "")) & 0xFFFFFF)
+    _draw_motif(c, motif, acc, W, H, rng)
 
     # ════════════════════════════════════════════════════════════════════════
-    # LAYER 4: Thick left accent bar
+    # LAYER 4: Accent elements (custom per-book decorations)
+    # ════════════════════════════════════════════════════════════════════════
+    _draw_accent_elements(c, acc_els, acc, acc2, bg1, W, H, rng)
+
+    # ════════════════════════════════════════════════════════════════════════
+    # LAYER 5: Illustration shape (hero graphic)
+    # ════════════════════════════════════════════════════════════════════════
+    if layout not in ("left_panel", "magazine"):
+        shape_x = W * 0.75 if layout in ("split_horizon", "full_bleed") else W * 0.80
+        shape_y = H * 0.60 if layout == "split_horizon" else H * 0.50
+        _draw_illustration(c, illus, acc, shape_x, shape_y)
+
+    # ════════════════════════════════════════════════════════════════════════
+    # LAYER 6: Thick left accent bar
     # ════════════════════════════════════════════════════════════════════════
     c.setFillColorRGB(*acc)
-    c.rect(0, 0, 7, H, fill=1, stroke=0)
+    c.rect(0, 0, 6.5, H, fill=1, stroke=0)
+    # Secondary thin bar
+    c.setFillColorRGB(*acc2)
+    c.rect(6.5, 0, 2.5, H, fill=1, stroke=0)
 
     # ════════════════════════════════════════════════════════════════════════
-    # LAYER 5: Mid-page panel (gives text a clean reading surface)
+    # LAYER 7: Text panel (semi-transparent background for readability)
     # ════════════════════════════════════════════════════════════════════════
-    panel_h = H * 0.48
-    panel_y = H * 0.24
-    c.saveState()
-    c.setFillColorRGB(*panel_col, alpha=0.72)
-    c.rect(0, panel_y, W, panel_h, fill=1, stroke=0)
-    c.restoreState()
-
-    # Panel top/bottom accent lines
-    c.saveState()
-    c.setStrokeColorRGB(*acc)
-    c.setLineWidth(2.5)
-    c.line(0, panel_y + panel_h, W, panel_y + panel_h)
-    c.line(0, panel_y,           W, panel_y)
-    c.restoreState()
+    if layout not in ("left_panel",):
+        c.saveState()
+        c.setFillColorRGB(*panel, alpha=0.78)
+        c.rect(text_panel_x, text_panel_y, text_panel_w, text_panel_h, fill=1, stroke=0)
+        c.restoreState()
+        # Panel border lines
+        c.saveState()
+        c.setStrokeColorRGB(*acc)
+        c.setLineWidth(2.0)
+        c.line(text_panel_x, text_panel_y + text_panel_h,
+               text_panel_x + text_panel_w, text_panel_y + text_panel_h)
+        c.line(text_panel_x, text_panel_y,
+               text_panel_x + text_panel_w, text_panel_y)
+        c.restoreState()
 
     # ════════════════════════════════════════════════════════════════════════
-    # LAYER 6: Genre badge (top-left, above panel)
+    # LAYER 8: Genre badge
     # ════════════════════════════════════════════════════════════════════════
     genre = concept.get("genre_label", "").upper()[:20].strip()
     if genre:
-        badge_x = 20 * mm
-        badge_y = H - 26 * mm
-        badge_w = len(genre) * 7.2 + 28
-        badge_h = 22
-
-        # Badge background (two rects for solid + accent feel without alpha issues)
-        c.setFillColorRGB(*_blend(bg_bot, (0,0,0), 0.3))
-        c.roundRect(badge_x, badge_y, badge_w, badge_h, 4, fill=1, stroke=0)
-        # Accent left stripe on badge
+        bx = 20 * mm
+        by = H - 24 * mm
+        bw = len(genre) * 7.0 + 28
+        bh = 21
+        c.setFillColorRGB(*_blend(bg1, (0,0,0), 0.40))
+        c.roundRect(bx, by, bw, bh, 3, fill=1, stroke=0)
         c.setFillColorRGB(*acc)
-        c.roundRect(badge_x, badge_y, 5, badge_h, 2, fill=1, stroke=0)
-        # Badge text
+        c.roundRect(bx, by, 5, bh, 2, fill=1, stroke=0)
         c.setFillColorRGB(*acc)
         c.setFont("Helvetica-Bold", 9)
-        c.drawString(badge_x + 11, badge_y + 6.5, genre)
+        c.drawString(bx + 10, by + 6, genre)
 
     # ════════════════════════════════════════════════════════════════════════
-    # LAYER 7: Title block — positioned inside panel
+    # LAYER 9: Title block
     # ════════════════════════════════════════════════════════════════════════
     title_lines = [ln.strip() for ln in concept.get("title", "Book Title").split("\n") if ln.strip()]
     max_line    = max(len(ln) for ln in title_lines)
-    font_size   = 52 if max_line <= 14 else 44 if max_line <= 20 else 36 if max_line <= 28 else 28
+    font_size   = 50 if max_line <= 12 else 42 if max_line <= 18 else 34 if max_line <= 26 else 26
+    title_font  = _get_cover_font(title_lines[0], bold=True)
 
-    TEXT_LEFT = 20 * mm + 10  # indent past accent bar
+    # Position: top of text panel, with padding
+    ty = text_panel_y + text_panel_h - 16
+    tx = text_panel_x + (16 * mm if text_panel_x < 20 else 8 * mm)
 
-    # Start title near panel top, working downward
-    y_cursor = panel_y + panel_h - 18  # just inside top of panel
-    c.setFillColorRGB(*title_col)
-    c.setFont("Helvetica-Bold", font_size)
+    c.setFillColorRGB(*tcol)
+    c.setFont(title_font, font_size)
     for line in title_lines:
-        y_cursor -= (font_size + 6)
-        c.drawString(TEXT_LEFT, y_cursor, line)
-    y_cursor -= 10
+        ty -= (font_size + 5)
+        c.drawString(tx, ty, line)
+    ty -= 8
 
-    # Decorative accent rule below title (full panel width)
+    # Accent rule under title
+    rule_w = min(text_panel_w - 30, W - tx - 16 * mm)
     c.setFillColorRGB(*acc)
-    c.rect(TEXT_LEFT, y_cursor, W - TEXT_LEFT - 20 * mm, 3.5, fill=1, stroke=0)
-    y_cursor -= 14
+    c.rect(tx, ty, rule_w, 3, fill=1, stroke=0)
+    # Secondary thin rule
+    c.setFillColorRGB(*acc2)
+    c.rect(tx, ty - 4, rule_w * 0.55, 1.5, fill=1, stroke=0)
+    ty -= 16
 
-    # ── Subtitle ─────────────────────────────────────────────────────────────
+    # Subtitle
     subtitle = concept.get("subtitle", "").strip()
     if subtitle:
-        c.setFillColorRGB(*sub_col)
-        c.setFont("Helvetica", 16)
-        for word_line in _wrap(subtitle, max_chars=46):
-            y_cursor -= 22
-            c.drawString(TEXT_LEFT, y_cursor, word_line)
-        y_cursor -= 8
+        sub_font = _get_cover_font(subtitle)
+        c.setFillColorRGB(*scol)
+        c.setFont(sub_font, 15)
+        for ln in _wrap(subtitle, max_chars=int(rule_w / 8.5)):
+            ty -= 21
+            c.drawString(tx, ty, ln)
+        ty -= 8
 
-    # ── Tagline (italic) ──────────────────────────────────────────────────────
+    # Tagline
     tagline = concept.get("tagline", "").strip()
     if tagline:
-        c.setFillColorRGB(*tag_col)
-        c.setFont("Helvetica-Oblique", 11)
-        for word_line in _wrap(tagline, max_chars=62):
-            y_cursor -= 16
-            c.drawString(TEXT_LEFT, y_cursor, word_line)
+        tag_font = _get_cover_font(tagline)
+        c.setFillColorRGB(*tgcol)
+        c.setFont(tag_font, 10.5)
+        for ln in _wrap(tagline, max_chars=int(rule_w / 6.2)):
+            ty -= 15
+            c.drawString(tx, ty, ln)
 
     # ════════════════════════════════════════════════════════════════════════
-    # LAYER 8: Bottom band — dark solid, no alpha needed
+    # LAYER 10: Bottom band
     # ════════════════════════════════════════════════════════════════════════
-    BAND_H = 22 * mm
-    # Compute bottom colour as darker version of bg_bot
-    bot_band = _blend(bg_bot, (0, 0, 0), 0.55)
+    BAND_H = 20 * mm
+    bot_band = _blend(bg1, (0,0,0), 0.60)
     c.setFillColorRGB(*bot_band)
     c.rect(0, 0, W, BAND_H, fill=1, stroke=0)
-
-    # Thin accent top-line on band
     c.setFillColorRGB(*acc)
-    c.rect(0, BAND_H, W, 2.5, fill=1, stroke=0)
+    c.rect(0, BAND_H, W, 2, fill=1, stroke=0)
 
-    # Author line (left)
     author_line = concept.get("author_line", "").strip()
     if author_line:
-        c.setFillColorRGB(*sub_col)
-        c.setFont("Helvetica", 10)
-        c.drawString(20 * mm, BAND_H * 0.40, author_line)
-
-    # Brand / watermark (right)
+        af = _get_cover_font(author_line)
+        c.setFillColorRGB(*scol)
+        c.setFont(af, 9.5)
+        c.drawString(20 * mm, BAND_H * 0.38, author_line)
     c.setFillColorRGB(*acc)
-    c.setFont("Helvetica-Bold", 9)
-    c.drawRightString(W - 20 * mm, BAND_H * 0.40, "EDITORIAL AI")
+    c.setFont("Helvetica-Bold", 8.5)
+    c.drawRightString(W - 20 * mm, BAND_H * 0.38, "EDITORIAL AI")
 
     # ════════════════════════════════════════════════════════════════════════
-    # LAYER 9: Top decorative highlight bar
+    # LAYER 11: Top highlight bar
     # ════════════════════════════════════════════════════════════════════════
     c.saveState()
-    c.setFillColorRGB(*acc, alpha=0.30)
-    c.rect(0, H - 6, W, 6, fill=1, stroke=0)
+    c.setFillColorRGB(*acc, alpha=0.28)
+    c.rect(0, H - 5, W, 5, fill=1, stroke=0)
     c.restoreState()
 
     c.showPage()
@@ -532,24 +658,272 @@ def render_cover_pdf(concept: dict, output_path: str) -> str:
     return output_path
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Motif renderer
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _draw_motif(c, motif: str, acc: tuple, W: float, H: float, rng: random.Random):
+    if motif == "concentric_circles":
+        for radius in range(20, int(W * 0.9), 30):
+            c.saveState()
+            c.setStrokeColorRGB(*acc, alpha=max(0.02, 0.09 - radius * 0.00015))
+            c.setLineWidth(0.7)
+            c.circle(W * 0.5, H * 0.5, radius, fill=0, stroke=1)
+            c.restoreState()
+
+    elif motif == "diagonal_stripes":
+        for x in range(-int(H), int(W) + int(H), 22):
+            c.saveState()
+            c.setStrokeColorRGB(*acc, alpha=0.07)
+            c.setLineWidth(1.1)
+            c.line(x, 0, x + H, H)
+            c.restoreState()
+
+    elif motif == "scattered_dots":
+        for _ in range(180):
+            c.saveState()
+            c.setFillColorRGB(*acc, alpha=rng.uniform(0.03, 0.15))
+            c.circle(rng.uniform(0, W), rng.uniform(0, H), rng.uniform(1.5, 5), fill=1, stroke=0)
+            c.restoreState()
+
+    elif motif == "grid_lines":
+        for x in range(0, int(W), 26):
+            c.saveState(); c.setStrokeColorRGB(*acc, alpha=0.055); c.setLineWidth(0.5)
+            c.line(x, 0, x, H); c.restoreState()
+        for y in range(0, int(H), 26):
+            c.saveState(); c.setStrokeColorRGB(*acc, alpha=0.055); c.setLineWidth(0.5)
+            c.line(0, y, W, y); c.restoreState()
+
+    elif motif == "wave_curves":
+        for offset in range(-100, 340, 28):
+            c.saveState()
+            c.setStrokeColorRGB(*acc, alpha=0.09)
+            c.setLineWidth(1.4)
+            path = c.beginPath()
+            path.moveTo(0, H * 0.45 + offset)
+            for px in range(0, int(W) + 10, 5):
+                py = H * 0.45 + offset + math.sin(px * 0.018) * 52
+                path.lineTo(px, py)
+            c.drawPath(path, stroke=1, fill=0)
+            c.restoreState()
+
+    elif motif == "hexagons":
+        hr = 20
+        for row in range(int(H / (hr * 1.52)) + 2):
+            for col in range(int(W / (hr * 1.75)) + 2):
+                hx = col * hr * 1.75 + (hr * 0.9 if row % 2 else 0)
+                hy = row * hr * 1.52
+                pts = [(hx + hr * math.cos(math.radians(60*i+30)),
+                        hy + hr * math.sin(math.radians(60*i+30))) for i in range(6)]
+                c.saveState(); c.setStrokeColorRGB(*acc, alpha=0.055); c.setLineWidth(0.6)
+                path = c.beginPath(); path.moveTo(*pts[0])
+                for pt in pts[1:]: path.lineTo(*pt)
+                path.close(); c.drawPath(path, stroke=1, fill=0); c.restoreState()
+
+    elif motif == "triangles":
+        ts = 46
+        for row in range(0, int(H)+ts, ts):
+            for col in range(0, int(W)+ts, ts):
+                c.saveState(); c.setStrokeColorRGB(*acc, alpha=0.055); c.setLineWidth(0.6)
+                path = c.beginPath()
+                if (row//ts + col//ts) % 2 == 0:
+                    path.moveTo(col, row); path.lineTo(col+ts, row); path.lineTo(col+ts/2, row+ts)
+                else:
+                    path.moveTo(col+ts/2, row); path.lineTo(col, row+ts); path.lineTo(col+ts, row+ts)
+                path.close(); c.drawPath(path, stroke=1, fill=0); c.restoreState()
+
+    elif motif == "stars":
+        for _ in range(90):
+            c.saveState()
+            c.setFillColorRGB(*acc, alpha=rng.uniform(0.05, 0.25))
+            c.circle(rng.uniform(0, W), rng.uniform(0, H), rng.uniform(0.8, 2.8), fill=1, stroke=0)
+            c.restoreState()
+        for _ in range(14):
+            sx, sy = rng.uniform(0, W), rng.uniform(0, H)
+            c.saveState(); c.setStrokeColorRGB(*acc, alpha=0.13); c.setLineWidth(0.5)
+            for a in range(0, 360, 45):
+                r = math.radians(a)
+                c.line(sx+math.cos(r)*3, sy+math.sin(r)*3, sx+math.cos(r)*10, sy+math.sin(r)*10)
+            c.restoreState()
+
+    elif motif == "arcs":
+        for ox, oy in [(0,0),(W,0),(0,H),(W,H)]:
+            for r in range(40, 320, 36):
+                c.saveState(); c.setStrokeColorRGB(*acc, alpha=max(0.03, 0.13-r*0.0003))
+                c.setLineWidth(0.9)
+                c.arc(ox-r, oy-r, ox+r, oy+r, startAng=0, extent=90)
+                c.restoreState()
+
+    elif motif == "circuit_traces":
+        # Horizontal and vertical traces with right-angle corners (PCB look)
+        for _ in range(25):
+            x0 = rng.uniform(0, W); y0 = rng.uniform(0, H)
+            c.saveState(); c.setStrokeColorRGB(*acc, alpha=0.10); c.setLineWidth(0.8)
+            path = c.beginPath(); path.moveTo(x0, y0)
+            for seg in range(rng.randint(2, 5)):
+                if rng.random() > 0.5:
+                    x0 += rng.choice([-1, 1]) * rng.uniform(20, 90)
+                else:
+                    y0 += rng.choice([-1, 1]) * rng.uniform(20, 90)
+                path.lineTo(x0, y0)
+            c.drawPath(path, stroke=1, fill=0); c.restoreState()
+            # Via dot
+            c.saveState(); c.setFillColorRGB(*acc, alpha=0.20)
+            c.circle(x0, y0, 2.5, fill=1, stroke=0); c.restoreState()
+
+    elif motif == "halftone":
+        spacing = 14
+        for row in range(0, int(H)+spacing, spacing):
+            for col in range(0, int(W)+spacing, spacing):
+                dist = math.sqrt((col - W/2)**2 + (row - H/2)**2)
+                r = max(0.5, 4.5 - dist * 0.006)
+                c.saveState(); c.setFillColorRGB(*acc, alpha=0.07)
+                c.circle(col, row, r, fill=1, stroke=0); c.restoreState()
+
+    elif motif == "ink_drops":
+        for _ in range(60):
+            c.saveState()
+            c.setFillColorRGB(*acc, alpha=rng.uniform(0.04, 0.14))
+            rx = rng.uniform(3, 14); ry = rng.uniform(3, 14)
+            c.ellipse(rng.uniform(0, W)-rx, rng.uniform(0, H)-ry,
+                      rng.uniform(0, W)+rx, rng.uniform(0, H)+ry, fill=1, stroke=0)
+            c.restoreState()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Illustration shape renderer
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _draw_illustration(c, illus: str, acc: tuple, cx: float, cy: float):
+    if illus == "large_circle":
+        for radius, alpha in [(190, 0.14), (140, 0.18), (90, 0.26), (48, 0.38)]:
+            c.saveState(); c.setFillColorRGB(*acc, alpha=alpha)
+            c.circle(cx, cy, radius, fill=1, stroke=0); c.restoreState()
+        c.saveState(); c.setFillColorRGB(*acc, alpha=0.52)
+        c.circle(cx, cy, 26, fill=1, stroke=0); c.restoreState()
+
+    elif illus == "diamond":
+        for size, alpha in [(255, 0.11), (175, 0.17), (105, 0.25), (52, 0.42)]:
+            c.saveState(); c.setFillColorRGB(*acc, alpha=alpha)
+            c.translate(cx, cy); c.rotate(45)
+            c.rect(-size/2, -size/2, size, size, fill=1, stroke=0); c.restoreState()
+
+    elif illus == "arch":
+        for ow, oh, alpha in [(170, 230, 0.18), (220, 290, 0.10)]:
+            c.saveState(); c.setFillColorRGB(*acc, alpha=alpha)
+            c.roundRect(cx-ow/2, cy-oh/2, ow, oh, ow/2, fill=1, stroke=0); c.restoreState()
+
+    elif illus == "triangle":
+        for size, alpha in [(300, 0.09), (210, 0.15), (130, 0.23), (68, 0.38)]:
+            c.saveState(); c.setFillColorRGB(*acc, alpha=alpha)
+            path = c.beginPath()
+            path.moveTo(cx, cy+size*0.6); path.lineTo(cx-size*0.52, cy-size*0.4)
+            path.lineTo(cx+size*0.52, cy-size*0.4); path.close()
+            c.drawPath(path, fill=1, stroke=0); c.restoreState()
+
+    elif illus == "sunburst":
+        for angle in range(0, 360, 14):
+            r = math.radians(angle)
+            c.saveState(); c.setStrokeColorRGB(*acc, alpha=0.16); c.setLineWidth(3.0)
+            c.line(cx+math.cos(r)*34, cy+math.sin(r)*34,
+                   cx+math.cos(r)*205, cy+math.sin(r)*205); c.restoreState()
+        c.saveState(); c.setFillColorRGB(*acc, alpha=0.38)
+        c.circle(cx, cy, 36, fill=1, stroke=0); c.restoreState()
+
+    elif illus == "cross_lines":
+        c.saveState(); c.setFillColorRGB(*acc, alpha=0.16)
+        c.rect(cx-9, cy-195, 18, 390, fill=1, stroke=0)
+        c.rect(cx-195, cy-9, 390, 18, fill=1, stroke=0); c.restoreState()
+        c.saveState(); c.setFillColorRGB(*acc, alpha=0.32)
+        c.circle(cx, cy, 28, fill=1, stroke=0); c.restoreState()
+
+    elif illus == "polygon":
+        # Hexagonal polygon
+        for scale, alpha in [(160, 0.12), (110, 0.18), (65, 0.30)]:
+            pts = [(cx + scale * math.cos(math.radians(60*i-30)),
+                    cy + scale * math.sin(math.radians(60*i-30))) for i in range(6)]
+            c.saveState(); c.setFillColorRGB(*acc, alpha=alpha)
+            path = c.beginPath(); path.moveTo(*pts[0])
+            for pt in pts[1:]: path.lineTo(*pt)
+            path.close(); c.drawPath(path, fill=1, stroke=0); c.restoreState()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Accent elements renderer
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _draw_accent_elements(c, elements: list, acc: tuple, acc2: tuple,
+                           bg: tuple, W: float, H: float, rng: random.Random):
+    """Render up to 4 named accent elements for per-book personalisation."""
+    for el in elements[:4]:
+        el = el.lower()
+        if "constellation" in el or "star" in el:
+            # Random star field with connecting lines
+            stars = [(rng.uniform(W*0.4, W*0.95), rng.uniform(H*0.4, H*0.95)) for _ in range(12)]
+            for sx, sy in stars:
+                c.saveState(); c.setFillColorRGB(*acc2, alpha=0.30)
+                c.circle(sx, sy, rng.uniform(1.5, 3.5), fill=1, stroke=0); c.restoreState()
+            for i in range(len(stars)-1):
+                c.saveState(); c.setStrokeColorRGB(*acc, alpha=0.12); c.setLineWidth(0.6)
+                c.line(stars[i][0], stars[i][1], stars[i+1][0], stars[i+1][1]); c.restoreState()
+
+        elif "circuit" in el or "trace" in el:
+            for _ in range(8):
+                x0, y0 = rng.uniform(0, W), rng.uniform(0, H)
+                c.saveState(); c.setStrokeColorRGB(*acc, alpha=0.14); c.setLineWidth(1.0)
+                path = c.beginPath(); path.moveTo(x0, y0)
+                x0 += rng.choice([-1,1]) * rng.uniform(30, 80)
+                path.lineTo(x0, y0)
+                y0 += rng.choice([-1,1]) * rng.uniform(30, 80)
+                path.lineTo(x0, y0)
+                c.drawPath(path, stroke=1, fill=0); c.restoreState()
+
+        elif "watercolour" in el or "watercolor" in el or "wash" in el:
+            for _ in range(6):
+                c.saveState()
+                c.setFillColorRGB(*acc, alpha=rng.uniform(0.04, 0.10))
+                rx = rng.uniform(60, 160); ry = rng.uniform(40, 120)
+                bx = rng.uniform(0, W); by = rng.uniform(0, H)
+                c.ellipse(bx-rx, by-ry, bx+rx, by+ry, fill=1, stroke=0); c.restoreState()
+
+        elif "ink" in el or "splatter" in el:
+            for _ in range(30):
+                c.saveState(); c.setFillColorRGB(*acc, alpha=rng.uniform(0.06, 0.18))
+                r = rng.uniform(1.5, 8)
+                c.circle(rng.uniform(0,W), rng.uniform(0,H), r, fill=1, stroke=0); c.restoreState()
+
+        elif "rule" in el or "line" in el:
+            for i in range(3):
+                ly = H * (0.30 + i * 0.15)
+                c.saveState(); c.setStrokeColorRGB(*acc2, alpha=0.22); c.setLineWidth(0.8)
+                c.line(20*6, ly, W - 20*6, ly); c.restoreState()
+
+        elif "dot" in el or "grid" in el:
+            for gx in range(0, int(W), 18):
+                for gy in range(0, int(H), 18):
+                    c.saveState(); c.setFillColorRGB(*acc, alpha=0.055)
+                    c.circle(gx, gy, 0.9, fill=1, stroke=0); c.restoreState()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Word-wrap helper
+# ─────────────────────────────────────────────────────────────────────────────
+
 def _wrap(text: str, max_chars: int = 50) -> list[str]:
-    """Simple word-wrap into lines of at most max_chars characters."""
     words = text.split()
     lines, cur = [], []
     for w in words:
         if len(" ".join(cur + [w])) > max_chars:
-            if cur:
-                lines.append(" ".join(cur))
+            if cur: lines.append(" ".join(cur))
             cur = [w]
         else:
             cur.append(w)
-    if cur:
-        lines.append(" ".join(cur))
+    if cur: lines.append(" ".join(cur))
     return lines or [""]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Prepend cover to existing PDF
+# PDF prepend
 # ─────────────────────────────────────────────────────────────────────────────
 
 def prepend_cover_to_pdf(cover_pdf: str, original_pdf: str, output_pdf: str) -> str:
@@ -565,7 +939,7 @@ def prepend_cover_to_pdf(cover_pdf: str, original_pdf: str, output_pdf: str) -> 
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# DOCX cover page renderer + prepend
+# DOCX cover renderer + prepend
 # ─────────────────────────────────────────────────────────────────────────────
 
 def prepend_cover_to_docx(concept: dict, original_docx: str, output_docx: str) -> str:
@@ -576,117 +950,83 @@ def prepend_cover_to_docx(concept: dict, original_docx: str, output_docx: str) -
     from docx.oxml import OxmlElement                  # pyrefly: ignore [missing-import]
     import copy
 
-    palette  = concept.get("palette", {})
+    palette = concept.get("palette", {})
 
     def rgb(key: str, fallback: str = "#1a1a1a") -> RGBColor:
         h = palette.get(key, fallback).lstrip("#")
-        if len(h) == 3:
-            h = "".join(c * 2 for c in h)
-        return RGBColor(int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
+        if len(h) == 3: h = "".join(c*2 for c in h)
+        return RGBColor(int(h[0:2],16), int(h[2:4],16), int(h[4:6],16))
 
     cover_doc = Document()
-    section   = cover_doc.sections[0]
-    section.page_height   = Cm(29.7)
-    section.page_width    = Cm(21.0)
-    section.left_margin   = Cm(2.5)
-    section.right_margin  = Cm(2.5)
-    section.top_margin    = Cm(3.0)
-    section.bottom_margin = Cm(2.0)
+    sec = cover_doc.sections[0]
+    sec.page_height=Cm(29.7); sec.page_width=Cm(21.0)
+    sec.left_margin=Cm(2.5); sec.right_margin=Cm(2.5)
+    sec.top_margin=Cm(3.0); sec.bottom_margin=Cm(2.0)
 
-    def add_para(text: str, size: float, bold: bool = False, italic: bool = False,
-                 color_key: str = "title_color", fallback: str = "#ffffff",
-                 align=WD_ALIGN_PARAGRAPH.LEFT,
-                 space_before: float = 0, space_after: float = 0) -> None:
-        p   = cover_doc.add_paragraph()
-        p.alignment = align
-        pf  = p.paragraph_format
-        pf.space_before = Pt(space_before)
-        pf.space_after  = Pt(space_after)
+    def add_para(text, size, bold=False, italic=False,
+                 color_key="title_color", fallback="#ffffff",
+                 align=WD_ALIGN_PARAGRAPH.LEFT, sb=0, sa=0):
+        p = cover_doc.add_paragraph(); p.alignment = align
+        p.paragraph_format.space_before = Pt(sb)
+        p.paragraph_format.space_after  = Pt(sa)
         run = p.add_run(text)
-        run.font.size   = Pt(size)
-        run.font.bold   = bold
-        run.font.italic = italic
+        run.font.size=Pt(size); run.font.bold=bold; run.font.italic=italic
         run.font.color.rgb = rgb(color_key, fallback)
 
-    def add_rule(color_key: str = "accent", fallback: str = "#f59e0b") -> None:
-        h   = palette.get(color_key, fallback).lstrip("#")
-        if len(h) == 3:
-            h = "".join(x * 2 for x in h)
-        p   = cover_doc.add_paragraph()
+    def add_rule(color_key="accent", fallback="#f59e0b"):
+        h = palette.get(color_key, fallback).lstrip("#")
+        if len(h)==3: h="".join(x*2 for x in h)
+        p = cover_doc.add_paragraph()
         pPr = p._p.get_or_add_pPr()
-        pBdr = OxmlElement("w:pBdr")
-        bt   = OxmlElement("w:bottom")
-        bt.set(qn("w:val"),   "single")
-        bt.set(qn("w:sz"),    "16")
-        bt.set(qn("w:space"), "1")
-        bt.set(qn("w:color"), h)
-        pBdr.append(bt)
-        pPr.append(pBdr)
-        p.paragraph_format.space_before = Pt(4)
-        p.paragraph_format.space_after  = Pt(4)
+        pBdr = OxmlElement("w:pBdr"); bt = OxmlElement("w:bottom")
+        bt.set(qn("w:val"),"single"); bt.set(qn("w:sz"),"16")
+        bt.set(qn("w:space"),"1"); bt.set(qn("w:color"),h)
+        pBdr.append(bt); pPr.append(pBdr)
+        p.paragraph_format.space_before=Pt(4); p.paragraph_format.space_after=Pt(4)
 
-    # Genre label
-    genre = concept.get("genre_label", "").upper().strip()
+    genre = concept.get("genre_label","").upper().strip()
     if genre:
-        add_para(f"— {genre} —", size=9, bold=True,
-                 color_key="accent", fallback="#f59e0b",
-                 space_after=2)
+        add_para(f"— {genre} —", 9, bold=True, color_key="accent", fallback="#f59e0b", sa=2)
+        # Second accent line using accent2
+        add_para(concept.get("style","").upper(), 8, color_key="accent2",
+                 fallback=palette.get("accent","#f59e0b"), sa=2)
 
-    # Spacer
-    for _ in range(3):
-        cover_doc.add_paragraph()
+    for _ in range(3): cover_doc.add_paragraph()
 
-    # Title lines
-    title_lines = [ln.strip() for ln in concept.get("title", "").split("\n") if ln.strip()]
-    for line in title_lines:
-        add_para(line, size=38, bold=True,
-                 color_key="title_color", fallback="#ffffff", space_after=4)
-
+    for line in [ln.strip() for ln in concept.get("title","").split("\n") if ln.strip()]:
+        add_para(line, 38, bold=True, color_key="title_color", fallback="#ffffff", sa=4)
     add_rule()
 
-    # Subtitle
-    subtitle = concept.get("subtitle", "").strip()
+    subtitle = concept.get("subtitle","").strip()
     if subtitle:
-        add_para(subtitle, size=16,
-                 color_key="subtitle_color", fallback="#e2e8f0",
-                 space_before=4, space_after=8)
+        add_para(subtitle, 15, color_key="subtitle_color", fallback="#e2e8f0", sb=4, sa=8)
 
-    # Tagline
-    tagline = concept.get("tagline", "").strip()
+    tagline = concept.get("tagline","").strip()
     if tagline:
-        add_para(tagline, size=11, italic=True,
-                 color_key="tagline_color", fallback="#94a3b8",
-                 space_after=6)
+        add_para(tagline, 10.5, italic=True, color_key="tagline_color", fallback="#94a3b8", sa=6)
 
-    # Push author to bottom
-    for _ in range(5):
-        cover_doc.add_paragraph()
+    # Design rationale as a small note
+    rationale = concept.get("design_rationale","").strip()
+    if rationale:
+        add_para(rationale, 8, italic=True, color_key="tagline_color", fallback="#94a3b8", sa=4)
 
+    for _ in range(5): cover_doc.add_paragraph()
     add_rule()
-
-    author_line = concept.get("author_line", "").strip()
+    author_line = concept.get("author_line","").strip()
     if author_line:
-        add_para(author_line, size=11,
-                 color_key="subtitle_color", fallback="#e2e8f0",
-                 space_before=6)
+        add_para(author_line, 11, color_key="subtitle_color", fallback="#e2e8f0", sb=6)
 
     cover_doc.add_page_break()
+    tmp = output_docx + ".covertmp.docx"
+    cover_doc.save(tmp)
 
-    tmp_cover = output_docx + ".cover_tmp.docx"
-    cover_doc.save(tmp_cover)
-
-    # Merge cover + original
-    orig_doc = Document(original_docx)
-    out_doc  = Document(tmp_cover)
-    for element in orig_doc.element.body:
-        if element.tag == qn("w:sectPr"):
-            continue
-        out_doc.element.body.append(copy.deepcopy(element))
-    out_doc.save(output_docx)
-
-    if os.path.exists(tmp_cover):
-        os.remove(tmp_cover)
-
+    orig = Document(original_docx)
+    out  = Document(tmp)
+    for el in orig.element.body:
+        if el.tag == qn("w:sectPr"): continue
+        out.element.body.append(copy.deepcopy(el))
+    out.save(output_docx)
+    if os.path.exists(tmp): os.remove(tmp)
     return output_docx
 
 
@@ -695,36 +1035,47 @@ def prepend_cover_to_docx(concept: dict, original_docx: str, output_docx: str) -
 # ─────────────────────────────────────────────────────────────────────────────
 
 def design_cover(
-    file_path: str,
-    filename: str,
-    output_dir: str,
-    book_title: str   = "",
-    description: str  = "",
+    file_path   : str,
+    filename    : str,
+    output_dir  : str,
+    book_title  : str = "",
+    description : str = "",
     design_style: str = "",
 ) -> dict:
     """
     Full pipeline:
-      1. Extract title from filename if not provided
-      2. Generate AI cover concept (GPT-4o)
-      3. Render cover page and prepend to original file
-    Returns dict with output_path, concept, ext, job_id.
+      1. Infer title from filename if not provided
+      2. Extract a page image from the book (vision input for GPT-4o)
+      3. Generate deeply personalised AI cover concept
+      4. Render cover PDF (with book image as background layer)
+      5. Prepend cover to original file
+    Returns dict: output_path, concept, ext, job_id.
     """
     os.makedirs(output_dir, exist_ok=True)
     ext = os.path.splitext(filename)[1].lower()
 
     if not book_title:
-        book_title = Path(filename).stem.replace("_", " ").replace("-", " ").title()
+        book_title = Path(filename).stem.replace("_"," ").replace("-"," ").title()
 
-    concept  = generate_cover_concept(book_title, description, design_style)
+    # Step 1: Extract a representative page image from the book
+    print("  📄 Extracting book page image for cover personalisation…")
+    book_image = _extract_book_image(file_path, ext)
+    if book_image:
+        print(f"  ✅ Book image extracted ({len(book_image)//1024} KB)")
+    else:
+        print("  ℹ️  No book image extracted; generating concept from title only")
+
+    # Step 2: Generate personalised concept (with vision if available)
+    concept = generate_cover_concept(book_title, description, design_style, book_image)
+
     job_id   = uuid.uuid4().hex
     out_path = os.path.join(output_dir, f"cover_{job_id}{ext}")
 
     if ext == ".pdf":
         cover_pdf = os.path.join(output_dir, f"coverpage_{job_id}.pdf")
-        render_cover_pdf(concept, cover_pdf)
+        render_cover_pdf(concept, cover_pdf, book_image_bytes=book_image)
         prepend_cover_to_pdf(cover_pdf, file_path, out_path)
-        if os.path.exists(cover_pdf):
-            os.remove(cover_pdf)
+        if os.path.exists(cover_pdf): os.remove(cover_pdf)
 
     elif ext == ".docx":
         prepend_cover_to_docx(concept, file_path, out_path)
