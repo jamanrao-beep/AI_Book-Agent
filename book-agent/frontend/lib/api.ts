@@ -64,6 +64,7 @@ export interface ProofreadResult {
 export interface CoverPalette {
   bg_top: string;
   bg_bottom: string;
+  panel_color: string;   // mid-page text panel background (new)
   accent: string;
   title_color: string;
   subtitle_color: string;
@@ -78,6 +79,7 @@ export interface CoverConcept {
   palette: CoverPalette;
   style: string;
   motif: string;
+  illustration_shape: string;  // hero shape drawn behind text panel (new)
   genre_label: string;
 }
 
