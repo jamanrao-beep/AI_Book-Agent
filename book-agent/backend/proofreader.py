@@ -8,7 +8,7 @@ import os
 import re
 import uuid
 import json
-import tempfile
+import logging
 import zipfile
 from pathlib import Path
 # pyrefly: ignore [missing-import]
@@ -22,6 +22,8 @@ from dotenv import load_dotenv
 load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 MODEL = "gpt-4o"
+
+logger = logging.getLogger("editorial_ai")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -51,6 +53,7 @@ def extract_text_from_pdf(path: str) -> str:
                 text.append(t)
     return "\n".join(text)
 
+
 def extract_text_from_rtf(path: str) -> str:
     # pyrefly: ignore [missing-import]
     from striprtf.striprtf import rtf_to_text
@@ -79,9 +82,11 @@ def extract_text_from_zip(path: str) -> str:
         raise ValueError("No readable text files found inside the zip.")
     return "\n\n".join(texts)
 
+
 def extract_text_from_md(path: str) -> str:
     with open(path, "r", encoding="utf-8", errors="ignore") as f:
         return f.read()
+
 
 def extract_text(path: str, filename: str) -> str:
     name = filename.lower()
@@ -95,8 +100,72 @@ def extract_text(path: str, filename: str) -> str:
         return extract_text_from_zip(path)
     return extract_text_from_txt(path)
 
+
 # ─────────────────────────────────────────────────────────────────────────────
-# AI proofreading — updated system prompt returns detailed error lists
+# JSON parsing helper — robust against markdown fences, leading text, truncation
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _parse_json_response(raw: str, context: str = "") -> dict:
+    """
+    Robustly extract a JSON object from an OpenAI response string.
+    Handles:
+    - Markdown code fences (```json ... ```)
+    - Leading/trailing prose
+    - Truncated JSON (attempts partial recovery)
+    Raises ValueError with a clear message if nothing works.
+    """
+    # Strip markdown fences
+    cleaned = raw.strip()
+    cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s*```$", "", cleaned)
+    cleaned = cleaned.strip()
+
+    # Find the outermost { ... }
+    start = cleaned.find("{")
+    if start == -1:
+        logger.error("No JSON object found in AI response%s. Raw (first 500): %s",
+                     f" ({context})" if context else "", raw[:500])
+        raise ValueError(f"No JSON in AI response{f' for {context}' if context else ''}. "
+                         f"Raw response starts with: {raw[:200]!r}")
+
+    end = cleaned.rfind("}")
+    if end == -1 or end <= start:
+        logger.error("JSON object not closed in AI response%s. Raw (first 500): %s",
+                     f" ({context})" if context else "", raw[:500])
+        raise ValueError(f"JSON object not properly closed in AI response"
+                         f"{f' for {context}' if context else ''}.")
+
+    json_str = cleaned[start:end + 1]
+
+    try:
+        return json.loads(json_str)
+    except json.JSONDecodeError as e:
+        # Last-ditch: try to fix common truncation issues by closing open strings/brackets
+        logger.warning("JSON parse error%s (%s) — attempting recovery",
+                       f" ({context})" if context else "", e)
+        try:
+            # Close any unclosed string, then add missing closing brackets
+            fixed = json_str
+            # Count unclosed braces and brackets
+            open_braces   = fixed.count("{") - fixed.count("}")
+            open_brackets = fixed.count("[") - fixed.count("]")
+            # If the last char is a comma or colon, trim it
+            fixed = re.sub(r'[,:\s]+$', '', fixed)
+            # Close open arrays then objects
+            fixed += "]" * max(open_brackets, 0)
+            fixed += "}" * max(open_braces, 0)
+            return json.loads(fixed)
+        except Exception:
+            logger.error("JSON recovery failed%s. Raw (first 500): %s",
+                         f" ({context})" if context else "", raw[:500])
+            raise ValueError(
+                f"Could not parse JSON from AI response{f' for {context}' if context else ''}. "
+                f"Parse error: {e}. Raw starts with: {raw[:200]!r}"
+            )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# AI proofreading — system prompt
 # ─────────────────────────────────────────────────────────────────────────────
 
 SYSTEM_PROMPT = """You are an expert editor and proofreader. When given a document, you:
@@ -105,7 +174,7 @@ SYSTEM_PROMPT = """You are an expert editor and proofreader. When given a docume
 3. Improve style and readability: simplify overly complex sentences, improve flow, remove redundancy
 4. Preserve the author's voice and meaning
 
-Respond with ONLY valid JSON (no markdown, no code fences). Structure:
+Respond with ONLY valid JSON (no markdown, no code fences, no preamble). Structure:
 {
   "corrected_text": "<the fully corrected document text>",
   "grammar_fixes": <integer count>,
@@ -116,26 +185,27 @@ Respond with ONLY valid JSON (no markdown, no code fences). Structure:
     {
       "original": "<the original incorrect text snippet (max ~15 words)>",
       "corrected": "<the corrected version>",
-      "explanation": "<brief explanation of why this is wrong, e.g. subject-verb agreement, wrong tense>"
+      "explanation": "<brief explanation>"
     }
   ],
   "punctuation_details": [
     {
       "original": "<the original text snippet with punctuation error>",
       "corrected": "<the corrected version>",
-      "explanation": "<brief explanation, e.g. missing Oxford comma, incorrect apostrophe>"
+      "explanation": "<brief explanation>"
     }
   ],
   "style_details": [
     {
       "original": "<the original wordy or unclear text>",
       "corrected": "<the improved version>",
-      "explanation": "<brief explanation, e.g. passive voice, redundant phrase, overly complex sentence>"
+      "explanation": "<brief explanation>"
     }
   ]
 }
 
-For each category, list up to 20 of the most significant issues. Keep snippets short (max 15 words each). Be specific in explanations."""
+For each category, list up to 20 of the most significant issues. Keep snippets short (max 15 words each).
+IMPORTANT: Output ONLY the raw JSON object. Do not wrap it in markdown. Do not add any text before or after."""
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -143,7 +213,6 @@ For each category, list up to 20 of the most significant issues. Keep snippets s
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _build_selective_system_prompt(apply_grammar: bool, apply_punctuation: bool, apply_style: bool) -> str:
-    """Build a system prompt that instructs the AI to apply only the selected fix types."""
     tasks = []
     if apply_grammar:
         tasks.append("Fix all grammar and spelling errors")
@@ -170,14 +239,15 @@ def _build_selective_system_prompt(apply_grammar: bool, apply_punctuation: bool,
 {task_list}
 4. Preserve the author's voice and meaning{skip_note}
 
-Respond with ONLY valid JSON (no markdown, no code fences). Structure:
+Respond with ONLY valid JSON (no markdown, no code fences, no preamble). Structure:
 {{
   "corrected_text": "<the corrected document text with ONLY the selected fix types applied>"
-}}"""
+}}
+IMPORTANT: Output ONLY the raw JSON object. Do not wrap it in markdown. Do not add any text before or after."""
 
 
 def _chunk_text(text: str, max_chars: int = 50000) -> list[str]:
-    """Split long documents into overlapping chunks so we stay within token limits."""
+    """Split long documents into chunks so we stay within token limits."""
     if len(text) <= max_chars:
         return [text]
     chunks = []
@@ -193,44 +263,75 @@ def _chunk_text(text: str, max_chars: int = 50000) -> list[str]:
     return chunks
 
 
+def _call_openai_with_retry(messages: list[dict], context: str, max_retries: int = 2) -> dict:
+    """
+    Call the OpenAI API and parse the JSON response.
+    Retries up to max_retries times if the response is not valid JSON.
+    Falls back to a minimal safe dict on final failure.
+    """
+    last_error = None
+    for attempt in range(1, max_retries + 2):  # +2 so range gives max_retries+1 attempts
+        try:
+            response = client.chat.completions.create(
+                model=MODEL,
+                messages=messages,
+                temperature=0.3,
+                max_tokens=4096,
+            )
+            raw = response.choices[0].message.content or ""
+            logger.info("OpenAI response received for %s (attempt %d), length=%d", context, attempt, len(raw))
+            return _parse_json_response(raw, context)
+        except ValueError as e:
+            last_error = e
+            logger.warning("Attempt %d/%d failed for %s: %s", attempt, max_retries + 1, context, e)
+            if attempt <= max_retries:
+                # Add a reminder to the messages to encourage plain JSON output
+                messages = messages + [{
+                    "role": "user",
+                    "content": "Your previous response was not valid JSON. Please respond with ONLY a raw JSON object, no markdown, no code fences, no extra text."
+                }]
+        except Exception as e:
+            last_error = e
+            logger.error("OpenAI API call failed for %s (attempt %d): %s", context, attempt, e)
+            if attempt <= max_retries:
+                continue
+
+    # All retries exhausted — raise so the endpoint returns a proper 500
+    raise RuntimeError(f"OpenAI did not return valid JSON after {max_retries + 1} attempts for {context}: {last_error}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Main proofreading entry point
+# ─────────────────────────────────────────────────────────────────────────────
+
 def proofread_text(text: str) -> dict:
     """Run AI proofreading on text. Handles long documents by chunking."""
     chunks = _chunk_text(text)
+    logger.info("Proofreading %d chunk(s), total chars=%d", len(chunks), len(text))
 
     all_corrected = []
     total_grammar = 0
     total_punct = 0
     total_style = 0
     summaries = []
-    all_grammar_details = []
-    all_punctuation_details = []
-    all_style_details = []
+    all_grammar_details: list = []
+    all_punctuation_details: list = []
+    all_style_details: list = []
 
     for i, chunk in enumerate(chunks):
-        prompt = f"Proofread the following document{f' (part {i+1}/{len(chunks)})' if len(chunks) > 1 else ''}:\n\n{chunk}"
-        
-        response = client.chat.completions.create(
-            model=MODEL,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": prompt},
-            ],
-            temperature=0.3,
-            max_tokens=4096,
-        )
+        context = f"chunk {i+1}/{len(chunks)}"
+        prompt = f"Proofread the following document{f' ({context})' if len(chunks) > 1 else ''}:\n\n{chunk}"
+        messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": prompt},
+        ]
 
-        raw = response.choices[0].message.content.strip()
-        raw = raw.replace("```json", "").replace("```", "").strip()
-        s = raw.find("{")
-        e = raw.rfind("}") + 1
-        if s == -1 or e == 0:
-            raise ValueError(f"No JSON in AI response for chunk {i+1}")
-        
-        data = json.loads(raw[s:e])
+        data = _call_openai_with_retry(messages, context)
+
         all_corrected.append(data.get("corrected_text", chunk))
         total_grammar += int(data.get("grammar_fixes", 0))
-        total_punct += int(data.get("punctuation_fixes", 0))
-        total_style += int(data.get("style_suggestions", 0))
+        total_punct   += int(data.get("punctuation_fixes", 0))
+        total_style   += int(data.get("style_suggestions", 0))
         summaries.append(data.get("corrections_summary", ""))
         all_grammar_details.extend(data.get("grammar_details", []))
         all_punctuation_details.extend(data.get("punctuation_details", []))
@@ -253,7 +354,7 @@ def proofread_text(text: str) -> dict:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# NEW: Selective correction — re-runs AI with only chosen fix types
+# Selective correction
 # ─────────────────────────────────────────────────────────────────────────────
 
 def apply_selective_corrections(
@@ -263,11 +364,10 @@ def apply_selective_corrections(
     apply_style: bool = True,
 ) -> str:
     """
-    Re-run AI proofreading on `original_text` applying only the selected
+    Re-run AI proofreading on original_text applying only the selected
     correction categories. Returns the selectively corrected text.
     """
     if not any([apply_grammar, apply_punctuation, apply_style]):
-        # Nothing selected — return original unchanged
         return original_text
 
     system_prompt = _build_selective_system_prompt(apply_grammar, apply_punctuation, apply_style)
@@ -275,29 +375,18 @@ def apply_selective_corrections(
     all_corrected = []
 
     for i, chunk in enumerate(chunks):
-        prompt = f"Apply the requested corrections to the following document{f' (part {i+1}/{len(chunks)})' if len(chunks) > 1 else ''}:\n\n{chunk}"
-
-        response = client.chat.completions.create(
-            model=MODEL,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": prompt},
-            ],
-            temperature=0.3,
-            max_tokens=4096,
-        )
-
-        raw = response.choices[0].message.content.strip()
-        raw = raw.replace("```json", "").replace("```", "").strip()
-        s = raw.find("{")
-        e = raw.rfind("}") + 1
-        if s == -1 or e == 0:
-            # Fall back to the chunk as-is
+        context = f"selective chunk {i+1}/{len(chunks)}"
+        prompt = f"Apply the requested corrections to the following document{f' ({context})' if len(chunks) > 1 else ''}:\n\n{chunk}"
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": prompt},
+        ]
+        try:
+            data = _call_openai_with_retry(messages, context)
+            all_corrected.append(data.get("corrected_text", chunk))
+        except Exception as e:
+            logger.error("Selective correction failed for %s: %s — using original chunk", context, e)
             all_corrected.append(chunk)
-            continue
-
-        data = json.loads(raw[s:e])
-        all_corrected.append(data.get("corrected_text", chunk))
 
     return "\n\n".join(all_corrected)
 
@@ -315,7 +404,6 @@ def save_corrected_docx(corrected_text: str, output_path: str, original_title: s
     from docx.enum.text import WD_ALIGN_PARAGRAPH
 
     doc = Document()
-    section = doc.sections[0]
 
     style = doc.styles["Normal"]
     style.font.name = "Calibri"
@@ -352,8 +440,7 @@ def save_corrected_pdf(
     apply_style: bool = True,
 ) -> str:
     """
-    Generate a styled PDF from `corrected_text` using reportlab.
-    The correction types that were applied are noted in the document header.
+    Generate a styled PDF from corrected_text using reportlab.
     """
     # pyrefly: ignore [missing-import]
     from reportlab.lib.pagesizes import A4
@@ -362,7 +449,7 @@ def save_corrected_pdf(
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.enums import TA_LEFT, TA_CENTER
     from reportlab.platypus import (
-        SimpleDocTemplate, Paragraph, Spacer, HRFlowable, Table, TableStyle
+        SimpleDocTemplate, Paragraph, Spacer, HRFlowable,
     )
 
     PAGE_W, PAGE_H = A4
@@ -379,7 +466,6 @@ def save_corrected_pdf(
 
     styles = getSampleStyleSheet()
 
-    # ── Custom styles ──────────────────────────────────────────────────────
     title_style = ParagraphStyle(
         "DocTitle",
         parent=styles["Title"],
@@ -418,7 +504,6 @@ def save_corrected_pdf(
         spaceBefore=0,
     )
 
-    # ── Applied corrections badge text ─────────────────────────────────────
     applied = []
     if apply_grammar:
         applied.append("Grammar")
@@ -429,8 +514,6 @@ def save_corrected_pdf(
     applied_str = " · ".join(applied) if applied else "No corrections"
 
     story = []
-
-    # Title block
     story.append(Paragraph(original_title, title_style))
     story.append(Paragraph("Proofread and corrected by Editorial AI", subtitle_style))
     story.append(Spacer(1, 4))
@@ -438,11 +521,9 @@ def save_corrected_pdf(
     story.append(Spacer(1, 6))
     story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor("#e2e8f0"), spaceAfter=14))
 
-    # Body paragraphs
     for para_text in corrected_text.split("\n"):
         para_text = para_text.strip()
         if para_text:
-            # Escape XML special chars for reportlab
             safe = (
                 para_text
                 .replace("&", "&amp;")
