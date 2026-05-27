@@ -117,34 +117,116 @@ def _image_to_b64(img_bytes: bytes) -> str:
     return base64.b64encode(img_bytes).decode()
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Book TEXT extraction  (new — feeds DALL-E with real narrative content)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def extract_book_text(file_path: str, ext: str, max_chars: int = 8000) -> str:
+    """
+    Extract plain text from the book (PDF or DOCX) to inform AI cover design.
+    Returns up to max_chars characters sampled from across the document so
+    the AI sees an early chapter, a mid-book section, and a later section.
+    """
+    text_parts: list[str] = []
+
+    try:
+        if ext == ".pdf":
+            try:
+                # pyrefly: ignore [missing-import]
+                import fitz  # PyMuPDF
+            except ImportError:
+                # Fallback: pypdf
+                # pyrefly: ignore [missing-import]
+                from pypdf import PdfReader
+                reader = PdfReader(file_path)
+                pages = reader.pages
+                n = len(pages)
+                sample_indices = sorted(set([
+                    0, 1, max(0, n // 5), max(0, n // 2), max(0, n * 3 // 4)
+                ]))
+                for i in sample_indices:
+                    if i < n:
+                        chunk = pages[i].extract_text() or ""
+                        text_parts.append(chunk)
+                return "\n\n".join(text_parts)[:max_chars]
+
+            doc = fitz.open(file_path)
+            n = doc.page_count
+            # Skip cover/blank pages; sample intro, early, mid, late
+            sample_indices = sorted(set([
+                min(1, n-1),
+                min(2, n-1),
+                max(0, n // 5),
+                max(0, n // 2),
+                max(0, n * 3 // 4),
+            ]))
+            for i in sample_indices:
+                page = doc[i]
+                chunk = page.get_text("text").strip()
+                if len(chunk) > 200:
+                    text_parts.append(chunk)
+            doc.close()
+
+        elif ext == ".docx":
+            # pyrefly: ignore [missing-import]
+            from docx import Document
+            doc = Document(file_path)
+            all_text = "\n".join(p.text for p in doc.paragraphs if p.text.strip())
+            # Sample beginning, middle, and later thirds
+            n = len(all_text)
+            parts = [
+                all_text[:n // 3],
+                all_text[n // 3: 2 * n // 3],
+                all_text[2 * n // 3:],
+            ]
+            for part in parts:
+                text_parts.append(part[:2500])
+
+    except Exception as ex:
+        print(f"  ⚠️  Book text extraction failed: {ex}")
+
+    full = "\n\n---\n\n".join(text_parts)
+    return full[:max_chars]
+
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # DALL-E 3: Generate illustrated cover image
 # ─────────────────────────────────────────────────────────────────────────────
 
-DALLE_PROMPT_SYSTEM = """You are an expert book cover art director.
-Given a book title, genre, style, and design brief, write a single vivid
+DALLE_PROMPT_SYSTEM = """You are a world-class book cover art director and illustrator.
+Your job: read the actual book content provided and craft one precise, vivid
 DALL-E 3 image-generation prompt that will produce a stunning, professional
-illustrated book cover background image.
+illustrated book cover background image that is UNIQUE to this specific book.
 
 Rules:
-- No text, letters, words, or titles in the image — ONLY illustration/art.
-- The image will be portrait orientation (2:3 ratio, like a book cover).
-- Describe the main visual scene, characters, atmosphere, color palette,
-  lighting, art style (e.g. "detailed digital painting", "ink wash",
-  "vibrant illustration", "realistic oil painting", "watercolor").
-- For historical/biography books: dramatic scene or iconic portrait.
-- For fantasy: epic landscape or character art.
-- For science/tech: futuristic visualization.
-- For romance: warm, emotional scene.
-- Be very specific and vivid. 3-5 sentences max.
-- Do NOT mention any text or typography.
-- End with: "No text, no words, no letters in the image."
+- Read the book excerpt carefully. Identify: main characters, key settings,
+  central conflict, emotional tone, historical/cultural context, iconic symbols.
+- Build the prompt around SPECIFIC elements from the book — not generic themes.
+  E.g. for a book about Rani Laxmibai: "A fierce Indian warrior queen in ornate
+  crimson armor astride a white stallion, sword raised, dawn light breaking over
+  a Mughal-era fort, dramatic battle smoke in the background, detailed oil
+  painting style, warm amber and deep crimson palette."
+- Describe: the main visual scene or character, setting, lighting, mood,
+  color palette, and art style in vivid concrete terms.
+- Art style should match genre:
+    biography/history → "detailed oil painting", "dramatic realist illustration"
+    fantasy → "epic digital painting", "dark fantasy art"
+    sci-fi → "cinematic sci-fi concept art", "futuristic render"
+    romance → "painterly watercolor", "soft impressionist"
+    thriller → "noir illustration", "high-contrast graphic novel art"
+- NEVER include generic placeholders. Every detail must be specific to THIS book.
+- 4–6 sentences. No text or words anywhere in the image.
+- End EVERY prompt with: "No text, letters, titles, or words anywhere in the image. Portrait orientation, photorealistic painting."
 """
 
 
-def generate_dalle_prompt(concept: dict, book_title: str) -> str:
-    """Ask GPT-4o to craft the best DALL-E 3 prompt for this cover."""
+def generate_dalle_prompt(concept: dict, book_title: str,
+                          book_text: str = "") -> str:
+    """
+    Ask GPT-4o to craft a scene-specific DALL-E 3 prompt derived from
+    actual book content (book_text) rather than just the title and genre.
+    """
     genre   = concept.get("genre_label", "")
     style   = concept.get("style", "premium")
     tagline = concept.get("tagline", "")
@@ -152,14 +234,21 @@ def generate_dalle_prompt(concept: dict, book_title: str) -> str:
     bg1     = palette.get("bg_primary", "#1a1a2e")
     acc     = palette.get("accent", "#f59e0b")
 
+    book_excerpt = book_text[:4000] if book_text else "(no excerpt available)"
+
     user_msg = (
         f"Book title: {book_title}\n"
         f"Genre: {genre}\n"
         f"Style: {style}\n"
         f"Tagline: {tagline}\n"
         f"Primary palette color: {bg1}, accent: {acc}\n"
-        f"Design rationale: {concept.get('design_rationale', '')}\n"
-        "Write a DALL-E 3 prompt for the cover background illustration."
+        f"Design rationale: {concept.get('design_rationale', '')}\n\n"
+        f"=== BOOK CONTENT EXCERPT ===\n{book_excerpt}\n"
+        f"=== END EXCERPT ===\n\n"
+        "Based on the book excerpt above, identify the most visually dramatic "
+        "scene, character, or symbol from this specific book and write a "
+        "DALL-E 3 prompt for the cover illustration. Be very specific — "
+        "name actual characters, settings, and visual details from the text."
     )
     resp = client.chat.completions.create(
         model=MODEL,
@@ -168,19 +257,22 @@ def generate_dalle_prompt(concept: dict, book_title: str) -> str:
             {"role": "user",   "content": user_msg},
         ],
         temperature=0.85,
-        max_tokens=300,
+        max_tokens=450,
     )
     return resp.choices[0].message.content.strip()
 
 
-def generate_cover_image(concept: dict, book_title: str) -> bytes | None:
+def generate_cover_image(concept: dict, book_title: str,
+                          book_text: str = "") -> bytes | None:
     """
     Generate a professional illustrated cover image with DALL-E 3.
+    book_text is passed to generate_dalle_prompt so the scene is
+    specific to the actual book content, not just the title.
     Returns raw PNG bytes, or None on failure.
     """
     try:
-        dalle_prompt = generate_dalle_prompt(concept, book_title)
-        print(f"  🎨 DALL-E 3 prompt: {dalle_prompt[:120]}…")
+        dalle_prompt = generate_dalle_prompt(concept, book_title, book_text)
+        print(f"  🎨 DALL-E 3 prompt: {dalle_prompt[:160]}…")
 
         resp = client.images.generate(
             model="dall-e-3",
@@ -272,20 +364,31 @@ def generate_cover_concept(
     description  : str  = "",
     design_style : str  = "",
     book_image   : bytes | None = None,
+    book_text    : str  = "",
 ) -> dict:
     """
     Call GPT-4o (with optional vision input) to generate a personalised cover concept.
     If book_image is provided, GPT-4o sees an actual page from the book.
+    If book_text is provided, GPT-4o reads the actual prose for deeper personalisation.
     """
     user_text = f"Book title: {book_title}"
     if description:
         user_text += f"\nDescription / book summary: {description}"
     user_text += f"\nDesign style: {design_style or 'auto — infer from title and content'}"
+
+    if book_text:
+        user_text += (
+            f"\n\n=== BOOK CONTENT EXCERPT ===\n{book_text[:5000]}\n=== END ===\n"
+            "\nUse the book content above to personalise EVERY design decision: "
+            "the palette should reflect the emotional tone, the tagline should "
+            "echo a theme from the text, the genre_label should be precise, "
+            "and the design_rationale should reference specific content from the book."
+        )
+
     if book_image:
-        user_text += ("\n\nI have attached an image of a page from this book. "
-                      "Analyse its content, visual density, subject matter, and mood "
-                      "to inform every design decision. The cover must feel like it belongs "
-                      "to this specific book, not a generic template.")
+        user_text += ("\n\nI have also attached an image of a page from this book. "
+                      "Analyse its visual density, subject matter, and mood to "
+                      "inform the image_treatment and layout_template choices.")
 
     # Build message content
     if book_image:
@@ -1272,6 +1375,30 @@ def prepend_cover_to_pdf(cover_pdf: str, original_pdf: str, output_pdf: str) -> 
     return output_pdf
 
 
+def replace_first_page_of_pdf(cover_pdf: str, original_pdf: str,
+                               output_pdf: str) -> str:
+    """
+    Replace the first page of original_pdf with the cover page from cover_pdf.
+    All remaining pages (2, 3, …) of the original are preserved unchanged.
+    If the original has only one page the output is just the cover.
+    """
+    from pypdf import PdfWriter, PdfReader   # pyrefly: ignore [missing-import]
+    writer  = PdfWriter()
+    cover   = PdfReader(cover_pdf)
+    content = PdfReader(original_pdf)
+
+    # Add the new cover (single page expected in cover_pdf)
+    writer.add_page(cover.pages[0])
+
+    # Skip page 0 of original; add pages 1..N
+    for page in content.pages[1:]:
+        writer.add_page(page)
+
+    with open(output_pdf, "wb") as f:
+        writer.write(f)
+    return output_pdf
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # DOCX cover renderer + prepend
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1375,14 +1502,17 @@ def design_cover(
     book_title  : str = "",
     description : str = "",
     design_style: str = "",
+    replace_page1: bool = True,
 ) -> dict:
     """
     Full pipeline:
       1. Infer title from filename if not provided
-      2. Extract a page image from the book (vision input for GPT-4o)
-      3. Generate deeply personalised AI cover concept
-      4. Render cover PDF (with book image as background layer)
-      5. Prepend cover to original file
+      2. Extract TEXT from the book (fed into DALL-E for scene-specific art)
+      3. Extract a page image from the book (visual input for GPT-4o)
+      4. Generate deeply personalised AI cover concept (text + image aware)
+      5. Generate DALL-E 3 cover illustration based on actual book scenes
+      6. Render cover PDF with the AI illustration as full-bleed background
+      7. Replace page 1 of original (or prepend if replace_page1=False)
     Returns dict: output_path, concept, ext, job_id.
     """
     os.makedirs(output_dir, exist_ok=True)
@@ -1391,29 +1521,53 @@ def design_cover(
     if not book_title:
         book_title = Path(filename).stem.replace("_"," ").replace("-"," ").title()
 
-    # Step 1: Extract a representative page image from the book
-    print("  📄 Extracting book page image for cover personalisation…")
+    # Step 1: Extract actual book text for content-aware design
+    print("  📖 Extracting book text for content-aware cover design…")
+    book_text = extract_book_text(file_path, ext)
+    if book_text:
+        print(f"  ✅ Book text extracted ({len(book_text)} chars)")
+    else:
+        print("  ℹ️  No book text extracted; using title only")
+
+    # Step 2: Extract a representative page image from the book
+    print("  📄 Extracting book page image for visual personalisation…")
     book_image = _extract_book_image(file_path, ext)
     if book_image:
         print(f"  ✅ Book image extracted ({len(book_image)//1024} KB)")
     else:
-        print("  ℹ️  No book image extracted; generating concept from title only")
+        print("  ℹ️  No book image extracted")
 
-    # Step 2: Generate personalised concept (with vision if available)
-    concept = generate_cover_concept(book_title, description, design_style, book_image)
+    # Step 3: Generate personalised concept (text + vision aware)
+    concept = generate_cover_concept(
+        book_title, description, design_style,
+        book_image=book_image,
+        book_text=book_text,
+    )
 
     job_id   = uuid.uuid4().hex
     out_path = os.path.join(output_dir, f"cover_{job_id}{ext}")
 
     if ext == ".pdf":
         cover_pdf = os.path.join(output_dir, f"coverpage_{job_id}.pdf")
-        print("  🖼️  Generating illustrated cover with DALL-E 3…")
-        dalle_image = generate_cover_image(concept, book_title)
+
+        # Step 4: Generate DALL-E illustration based on real book content
+        print("  🖼️  Generating content-aware cover illustration with DALL-E 3…")
+        dalle_image = generate_cover_image(concept, book_title, book_text)
+
+        # Step 5: Render the cover PDF
         render_cover_pdf(concept, cover_pdf,
                          book_image_bytes=book_image,
                          dalle_image_bytes=dalle_image)
-        prepend_cover_to_pdf(cover_pdf, file_path, out_path)
-        if os.path.exists(cover_pdf): os.remove(cover_pdf)
+
+        # Step 6: Replace page 1 (or prepend)
+        if replace_page1:
+            print("  🔄 Replacing first page of original PDF with new cover…")
+            replace_first_page_of_pdf(cover_pdf, file_path, out_path)
+        else:
+            prepend_cover_to_pdf(cover_pdf, file_path, out_path)
+
+        if os.path.exists(cover_pdf):
+            os.remove(cover_pdf)
 
     elif ext == ".docx":
         prepend_cover_to_docx(concept, file_path, out_path)
