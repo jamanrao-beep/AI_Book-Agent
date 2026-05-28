@@ -1,0 +1,5 @@
+[phases.setup]
+aptPkgs = ["fonts-noto-core", "fonts-noto", "poppler-utils"]
+
+[start]
+cmd = "python start.py"
