@@ -117,8 +117,8 @@ def _extract_docx_image(docx_path: str) -> bytes | None:
             img.save(buf, format="JPEG", quality=80)
             return buf.getvalue()
     except Exception as e:
-         print(f"  ⚠️  Error in _extract_docx_image: {e}\n{traceback.format_exc()}")
-         return None
+        print(f"  ⚠️  Error in _extract_docx_image: {e}\n{traceback.format_exc()}")
+        return None
 
 
 def _image_to_b64(img_bytes: bytes) -> str:
@@ -1301,8 +1301,11 @@ def _draw_motif(c, motif: str, acc: tuple, W: float, H: float, rng: random.Rando
             c.saveState()
             c.setFillColorRGB(*acc, alpha=rng.uniform(0.04, 0.14))
             rx = rng.uniform(3, 14); ry = rng.uniform(3, 14)
-            c.ellipse(rng.uniform(0, W)-rx, rng.uniform(0, H)-ry,
-                      rng.uniform(0, W)+rx, rng.uniform(0, H)+ry, fill=1, stroke=0)
+            # BUG FIX: use a fixed centre (bx, by) so bounds are symmetric.
+            # Original called rng.uniform() 4 separate times, giving x1/y1/x2/y2
+            # from completely independent samples — x1 could exceed x2.
+            bx = rng.uniform(0, W); by = rng.uniform(0, H)
+            c.ellipse(bx - rx, by - ry, bx + rx, by + ry, fill=1, stroke=0)
             c.restoreState()
 
 
