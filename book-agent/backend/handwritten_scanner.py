@@ -20,6 +20,7 @@ IMPROVEMENTS for large PDFs (320+ pages):
 import os
 import io
 import json
+import re
 import uuid
 import time
 import zipfile
@@ -27,6 +28,9 @@ import shutil
 import base64
 import tempfile
 import traceback
+import threading
+import unicodedata
+import urllib.request
 from pathlib import Path
 from typing import Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -73,6 +77,270 @@ STRUCTURE_MAX_TOKENS = 10_000
 
 # PDF render zoom. 2.0 ≈ 150 DPI (original). 3.0 ≈ 225 DPI (better for dense writing).
 PDF_RENDER_ZOOM = 3.0
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Unicode / Devanagari font system
+# Ported from layout_designer.py — same strategy:
+#   1. Local ./fonts/ directory bundled with the app
+#   2. Common system paths (Ubuntu/Debian/Alpine)
+#   3. Auto-download from Google Fonts CDN at first run → cached in ./fonts/
+#
+# This guarantees Hindi/Devanagari PDFs always render correctly instead of
+# producing square boxes.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_FONTS_DIR   = os.path.join(_SCRIPT_DIR, "fonts")
+
+_FONT_URLS: dict[str, str] = {
+    "NotoSerifDevanagari-Regular.ttf": (
+        "https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/"
+        "NotoSerifDevanagari/NotoSerifDevanagari-Regular.ttf"
+    ),
+    "NotoSerifDevanagari-Bold.ttf": (
+        "https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/"
+        "NotoSerifDevanagari/NotoSerifDevanagari-Bold.ttf"
+    ),
+    "NotoSansDevanagari-Regular.ttf": (
+        "https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/"
+        "NotoSansDevanagari/NotoSansDevanagari-Regular.ttf"
+    ),
+    "NotoSansDevanagari-Bold.ttf": (
+        "https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/"
+        "NotoSansDevanagari/NotoSansDevanagari-Bold.ttf"
+    ),
+}
+
+_NOTO_FONT_FILES: dict[str, str] = {
+    "NotoSerifDevanagari":      "NotoSerifDevanagari-Regular.ttf",
+    "NotoSerifDevanagari-Bold": "NotoSerifDevanagari-Bold.ttf",
+    "NotoSansDevanagari":       "NotoSansDevanagari-Regular.ttf",
+    "NotoSansDevanagari-Bold":  "NotoSansDevanagari-Bold.ttf",
+}
+
+_SYSTEM_FONT_DIRS = [
+    "/usr/share/fonts/truetype/noto",
+    "/usr/share/fonts/noto",
+    "/usr/share/fonts/opentype/noto",
+    "/usr/share/fonts/truetype/freefont",
+    "/usr/share/fonts/freefont",
+    "/usr/share/fonts",
+    "/usr/share/fonts/noto-cjk",
+    "/Library/Fonts",
+    "/System/Library/Fonts",
+    "C:/Windows/Fonts",
+]
+
+_REGISTERED_FONTS: set[str] = set()
+_FONTS_REGISTERED  = False
+_FONT_LOCK         = threading.Lock()
+
+
+def _find_font_on_system(filename: str) -> Optional[str]:
+    """Search known system font directories for a TTF file.
+    Falls back to a recursive os.walk search under /usr/share/fonts."""
+    local = os.path.join(_FONTS_DIR, filename)
+    if os.path.isfile(local):
+        return local
+    for d in _SYSTEM_FONT_DIRS:
+        p = os.path.join(d, filename)
+        if os.path.isfile(p):
+            return p
+    base_search = "/usr/share/fonts"
+    if os.path.isdir(base_search):
+        for root, _dirs, files in os.walk(base_search):
+            if filename in files:
+                found = os.path.join(root, filename)
+                print(f"  🔍  Found font via recursive search: {found}")
+                return found
+    return None
+
+
+def _download_font(filename: str) -> Optional[str]:
+    """Download a font from GitHub/Google Fonts into _FONTS_DIR.
+    Returns the local path on success, None on failure."""
+    url = _FONT_URLS.get(filename)
+    if not url:
+        return None
+    dest = os.path.join(_FONTS_DIR, filename)
+    if os.path.isfile(dest):
+        return dest
+    try:
+        os.makedirs(_FONTS_DIR, exist_ok=True)
+        print(f"  ⬇️   Downloading font {filename} …")
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=30) as resp, \
+             open(dest, "wb") as f:
+            f.write(resp.read())
+        print(f"  ✅  Downloaded {filename} → {dest}")
+        return dest
+    except Exception as e:
+        print(f"  ⚠️   Could not download {filename}: {e}")
+        if os.path.isfile(dest):
+            try:
+                os.remove(dest)
+            except Exception:
+                pass
+        return None
+
+
+def _ensure_unicode_fonts() -> None:
+    """Register Noto Devanagari TTFs with ReportLab (idempotent, thread-safe).
+    Resolution order: local cache → system paths → auto-download from GitHub."""
+    global _FONTS_REGISTERED, _REGISTERED_FONTS
+    if _FONTS_REGISTERED:
+        return
+    with _FONT_LOCK:
+        if _FONTS_REGISTERED:
+            return
+        try:
+            from reportlab.pdfbase import pdfmetrics      # pyrefly: ignore [missing-import]
+            from reportlab.pdfbase.ttfonts import TTFont  # pyrefly: ignore [missing-import]
+
+            for rl_name, filename in _NOTO_FONT_FILES.items():
+                path = _find_font_on_system(filename)
+                if not path:
+                    path = _download_font(filename)
+                if not path:
+                    print(f"  ⚠️   Font unavailable: {rl_name} ({filename}) — skipping")
+                    continue
+                try:
+                    pdfmetrics.registerFont(TTFont(rl_name, path))
+                    _REGISTERED_FONTS.add(rl_name)
+                    print(f"  ✅  Registered: {rl_name} from {path}")
+                except Exception as e:
+                    print(f"  ⚠️   registerFont failed for {rl_name}: {e}")
+
+            if _REGISTERED_FONTS:
+                print(f"  ✅  Unicode fonts ready: {sorted(_REGISTERED_FONTS)}")
+            else:
+                print(
+                    "  ⚠️  WARN: No Unicode/Devanagari fonts could be registered. "
+                    "Hindi text may render as square boxes. "
+                    "Fix: run `apt-get install -y fonts-noto-core` or place "
+                    "NotoSansDevanagari-Regular.ttf in a ./fonts/ folder."
+                )
+        except Exception as e:
+            print(f"  ⚠️   _ensure_unicode_fonts failed: {e}\n{traceback.format_exc()}")
+        finally:
+            _FONTS_REGISTERED = True
+
+
+def _has_non_latin(text: str) -> bool:
+    """True if text contains Devanagari or other Indic scripts (U+0900+)."""
+    return any(ord(c) >= 0x0900 for c in text
+               if not unicodedata.category(c).startswith("Z"))
+
+
+def _unicode_body_font(rl_name: str, has_unicode: bool) -> str:
+    """Return the best available Unicode-capable font for the requested style.
+    Falls back through the registered set; never returns a Latin-only font name
+    when Unicode content is present (unless nothing at all was registered)."""
+    if not has_unicode:
+        return rl_name
+
+    _PREF: dict[str, list[str]] = {
+        "Helvetica":         ["NotoSansDevanagari",  "NotoSerifDevanagari"],
+        "Helvetica-Bold":    ["NotoSansDevanagari-Bold", "NotoSansDevanagari"],
+        "Helvetica-Oblique": ["NotoSansDevanagari",  "NotoSerifDevanagari"],
+        "Times-Roman":       ["NotoSerifDevanagari", "NotoSansDevanagari"],
+        "Times-Bold":        ["NotoSerifDevanagari-Bold", "NotoSerifDevanagari"],
+        "Courier":           ["NotoSansDevanagari",  "NotoSerifDevanagari"],
+    }
+    for candidate in _PREF.get(rl_name, ["NotoSansDevanagari", "NotoSerifDevanagari"]):
+        if candidate in _REGISTERED_FONTS:
+            return candidate
+
+    print(f"  🚨  No Unicode font for '{rl_name}' — text may render as boxes.")
+    return rl_name
+
+
+# Latin fallback map: when Devanagari font is active, use these for Latin runs
+_LATIN_FALLBACK: dict[str, str] = {
+    "NotoSerifDevanagari":      "Times-Roman",
+    "NotoSerifDevanagari-Bold": "Times-Roman",
+    "NotoSansDevanagari":       "Helvetica",
+    "NotoSansDevanagari-Bold":  "Helvetica",
+}
+
+# DOCX latin fallback
+_DOCX_LATIN_FALLBACK: dict[str, str] = {
+    "NotoSerifDevanagari":      "Times New Roman",
+    "NotoSerifDevanagari-Bold": "Times New Roman",
+    "NotoSansDevanagari":       "Arial",
+    "NotoSansDevanagari-Bold":  "Arial",
+}
+
+
+def _mixed_font_html(safe_escaped_text: str, deva_font: str) -> str:
+    """Given HTML-escaped paragraph text and the Devanagari font name,
+    return ReportLab XML markup with dual-font tags for Latin runs.
+    Only called when has_unicode is True."""
+    latin_font = _LATIN_FALLBACK.get(deva_font)
+    if not latin_font:
+        return safe_escaped_text
+
+    fragments = re.split(r"(<br\s*/>)", safe_escaped_text)
+    result_parts: list[str] = []
+
+    for frag in fragments:
+        if re.fullmatch(r"<br\s*/>", frag):
+            result_parts.append(frag)
+            continue
+        if not frag:
+            continue
+
+        frag_plain = (
+            frag.replace("&amp;", "&")
+                .replace("&lt;",  "<")
+                .replace("&gt;",  ">")
+                .replace("&quot;", '"')
+                .replace("&#39;",  "'")
+        )
+
+        def _is_latin_char(ch: str) -> bool:
+            cp = ord(ch)
+            if ch.isspace():
+                return False
+            if 0x0900 <= cp <= 0x097F:
+                return False   # Devanagari → Devanagari font
+            if 0x0020 <= cp <= 0x024F:
+                return True    # Basic Latin + Latin Extended A/B
+            if 0x2000 <= cp <= 0x206F:
+                return True    # General Punctuation (—, ", ", …)
+            return False
+
+        runs: list[tuple[bool, str]] = []
+        if frag_plain:
+            cur_latin = _is_latin_char(frag_plain[0])
+            cur_buf   = frag_plain[0]
+            for ch in frag_plain[1:]:
+                ch_latin = _is_latin_char(ch)
+                if ch_latin == cur_latin or ch.isspace():
+                    cur_buf += ch
+                else:
+                    runs.append((cur_latin, cur_buf))
+                    cur_latin = ch_latin
+                    cur_buf   = ch
+            if cur_buf:
+                runs.append((cur_latin, cur_buf))
+
+        frag_html = ""
+        for is_latin, chunk in runs:
+            esc = (
+                chunk.replace("&", "&amp;")
+                     .replace("<", "&lt;")
+                     .replace(">", "&gt;")
+            )
+            if is_latin and chunk.strip():
+                frag_html += f'<font name="{latin_font}">{esc}</font>'
+            else:
+                frag_html += esc
+
+        result_parts.append(frag_html)
+
+    return "".join(result_parts)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -623,17 +891,33 @@ def structure_transcription(pages: list[dict], book_title: str = "") -> dict:
 
 def generate_scanned_pdf(structure: dict, output_path: str) -> str:
     try:
-        from reportlab.lib.pagesizes import A4
-        from reportlab.lib.units import mm
-        from reportlab.lib.styles import ParagraphStyle
-        from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT
-        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, HRFlowable
-        from reportlab.lib.colors import HexColor, white
+        from reportlab.lib.pagesizes import A4                                      # pyrefly: ignore [missing-import]
+        from reportlab.lib.units import mm                                          # pyrefly: ignore [missing-import]
+        from reportlab.lib.styles import ParagraphStyle                             # pyrefly: ignore [missing-import]
+        from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT             # pyrefly: ignore [missing-import]
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, HRFlowable  # pyrefly: ignore [missing-import]
+        from reportlab.lib.colors import HexColor, white                            # pyrefly: ignore [missing-import]
         import datetime
+
+        # ── Register Unicode/Devanagari fonts so Hindi text renders correctly ──────
+        _ensure_unicode_fonts()
+
+        # ── Detect whether this document contains non-Latin (e.g. Hindi) text ─────
+        all_text = structure.get("title", "") + " ".join(
+            ch.get("title", "") + " " + ch.get("content", "")
+            for ch in structure.get("chapters", [])
+        )
+        has_unicode = _has_non_latin(all_text)
+
+        # ── Resolve fonts: swap Helvetica → Noto Devanagari when needed ───────────
+        # Body / chapter titles may contain Hindi → Unicode-aware font.
+        # Header/footer are always Latin (page numbers, ASCII date) → Helvetica OK.
+        body_font_base = _unicode_body_font("Helvetica", has_unicode)
+        ch_title_font  = _unicode_body_font("Helvetica", has_unicode)
+        header_font    = "Helvetica"
 
         DARK   = HexColor("#1E293B")
         ACCENT = HexColor("#7C3AED")
-        GRAY   = HexColor("#64748B")
         MARGIN = 22 * mm
 
         def on_cover(canvas, doc):
@@ -645,7 +929,7 @@ def generate_scanned_pdf(structure: dict, output_path: str) -> str:
             canvas.setFillColor(HexColor("#0a0614"))
             canvas.rect(0, 0, w, 18*mm, fill=1, stroke=0)
             canvas.setFillColor(HexColor("#475569"))
-            canvas.setFont("Helvetica", 8)
+            canvas.setFont(header_font, 8)
             canvas.drawCentredString(w/2, 7*mm, f"Transcribed by AI Scanner  ·  {datetime.date.today()}")
 
         def on_page(canvas, doc):
@@ -654,18 +938,31 @@ def generate_scanned_pdf(structure: dict, output_path: str) -> str:
             canvas.setFillColor(DARK)
             canvas.rect(0, 0, w, 9*mm, fill=1, stroke=0)
             canvas.setFillColor(white)
-            canvas.setFont("Helvetica", 7.5)
+            canvas.setFont(header_font, 7.5)
             canvas.drawString(MARGIN, 3*mm, structure.get("title", "Manuscript"))
             canvas.drawRightString(w - MARGIN, 3*mm, f"Page {doc.page}")
             canvas.restoreState()
 
         S = lambda name, **kw: ParagraphStyle(name, **kw)
-        cover_title = S("ct", fontName="Helvetica-Bold", fontSize=30, textColor=white, leading=38, alignment=TA_CENTER, spaceAfter=8)
-        cover_sub   = S("cs", fontName="Helvetica",      fontSize=12, textColor=HexColor("#94a3b8"), leading=16, alignment=TA_CENTER)
-        ch_label    = S("cl", fontName="Helvetica",      fontSize=10, textColor=ACCENT, leading=14, spaceBefore=0, spaceAfter=3)
-        ch_title    = S("cht",fontName="Helvetica-Bold", fontSize=20, textColor=DARK, leading=26, spaceBefore=2, spaceAfter=5)
-        body        = S("bs", fontName="Helvetica",      fontSize=10.5, textColor=HexColor("#334155"), leading=17, spaceAfter=8, alignment=TA_JUSTIFY)
-        lang_badge  = S("lb", fontName="Helvetica",      fontSize=9, textColor=HexColor("#7C3AED"), leading=14, alignment=TA_CENTER)
+        # Cover styles — always Latin (dates, language label)
+        cover_title = S("ct", fontName="Helvetica-Bold", fontSize=30, textColor=white,
+                        leading=38, alignment=TA_CENTER, spaceAfter=8, wordWrap="LTR")
+        cover_sub   = S("cs", fontName="Helvetica",      fontSize=12, textColor=HexColor("#94a3b8"),
+                        leading=16, alignment=TA_CENTER, wordWrap="LTR")
+        # Chapter label ("Chapter N") — always Latin
+        ch_label    = S("cl", fontName="Helvetica", fontSize=10, textColor=ACCENT,
+                        leading=14, spaceBefore=0, spaceAfter=3, wordWrap="LTR")
+        # Chapter title — may be Hindi; use Unicode-aware font
+        ch_title    = S("cht", fontName=ch_title_font, fontSize=20, textColor=DARK,
+                        leading=26, spaceBefore=2, spaceAfter=5, wordWrap="LTR")
+        # Body — may be Hindi; use Unicode-aware font + LTR word wrap (never CJK —
+        # CJK mode breaks Devanagari conjunct ligatures)
+        body        = S("bs", fontName=body_font_base, fontSize=10.5,
+                        textColor=HexColor("#334155"), leading=17, spaceAfter=8,
+                        alignment=TA_JUSTIFY, wordWrap="LTR")
+        lang_badge  = S("lb", fontName="Helvetica", fontSize=9,
+                        textColor=HexColor("#7C3AED"), leading=14, alignment=TA_CENTER,
+                        wordWrap="LTR")
 
         doc = SimpleDocTemplate(output_path, pagesize=A4,
                                 leftMargin=MARGIN, rightMargin=MARGIN,
@@ -675,7 +972,12 @@ def generate_scanned_pdf(structure: dict, output_path: str) -> str:
 
         story = []
         story.append(Spacer(1, 50*mm))
-        story.append(Paragraph(structure.get("title", "Manuscript"), cover_title))
+        # Cover title: HTML-escape then apply dual-font markup if mixed script
+        safe_cov_title = (structure.get("title", "Manuscript")
+                          .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+        if has_unicode:
+            safe_cov_title = _mixed_font_html(safe_cov_title, body_font_base)
+        story.append(Paragraph(safe_cov_title, cover_title))
         story.append(Spacer(1, 5*mm))
         lang = structure.get("language", "")
         if lang:
@@ -687,12 +989,23 @@ def generate_scanned_pdf(structure: dict, output_path: str) -> str:
         for ch in structure.get("chapters", []):
             story.append(Spacer(1, 8*mm))
             story.append(Paragraph(f"Chapter {ch['chapter_number']}", ch_label))
-            story.append(Paragraph(ch["title"], ch_title))
+            # Chapter title — may contain Hindi
+            safe_ch_title = (ch["title"]
+                             .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+            if has_unicode:
+                safe_ch_title = _mixed_font_html(safe_ch_title, ch_title_font)
+            story.append(Paragraph(safe_ch_title, ch_title))
             story.append(HRFlowable(width="100%", thickness=1.5, color=ACCENT, spaceAfter=10))
             for para in ch["content"].split("\n\n"):
                 para = para.strip()
-                if para:
-                    story.append(Paragraph(para, body))
+                if not para:
+                    continue
+                # HTML-escape, then apply dual-font markup for mixed Hindi+Latin
+                safe_para = (para
+                             .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+                if has_unicode:
+                    safe_para = _mixed_font_html(safe_para, body_font_base)
+                story.append(Paragraph(safe_para, body))
             story.append(PageBreak())
 
         doc.build(story, onFirstPage=on_cover, onLaterPages=on_page)
@@ -720,9 +1033,100 @@ def generate_scanned_docx(structure: dict, output_path: str) -> str:
         from docx.oxml import OxmlElement
         import datetime
 
+        # ── Detect whether this document contains Hindi/Devanagari text ──────────
+        all_text_docx = structure.get("title", "") + " ".join(
+            ch.get("title", "") + " " + ch.get("content", "")
+            for ch in structure.get("chapters", [])
+        )
+        has_unicode_docx = _has_non_latin(all_text_docx)
+
+        # ── Choose the right Word font for body content ───────────────────────────
+        # For Devanagari content we need a Unicode-capable font.
+        # Map the ReportLab unicode font names back to Word font names.
+        _RL_TO_WORD: dict[str, str] = {
+            "NotoSansDevanagari":       "Noto Sans Devanagari",
+            "NotoSansDevanagari-Bold":  "Noto Sans Devanagari",
+            "NotoSerifDevanagari":      "Noto Serif Devanagari",
+            "NotoSerifDevanagari-Bold": "Noto Serif Devanagari",
+        }
+        rl_body_font = _unicode_body_font("Helvetica", has_unicode_docx)
+        word_body_font = _RL_TO_WORD.get(rl_body_font, "Calibri")
+        word_latin_fallback = _DOCX_LATIN_FALLBACK.get(rl_body_font, "Calibri")
+
         def set_color(paragraph, hex_color="7C3AED"):
             for run in paragraph.runs:
                 run.font.color.rgb = RGBColor(int(hex_color[0:2],16), int(hex_color[2:4],16), int(hex_color[4:6],16))
+
+        def _set_run_font_cs(run, font_name: str) -> None:
+            """Set complex-script and East-Asian font on a run so Word uses
+            the Devanagari font for Devanagari codepoints rather than falling
+            back to the theme Latin font."""
+            rPr = run._r.get_or_add_rPr()
+            existing = rPr.find(qn("w:rFonts"))
+            if existing is None:
+                existing = OxmlElement("w:rFonts")
+                rPr.insert(0, existing)
+            existing.set(qn("w:ascii"),    font_name)
+            existing.set(qn("w:hAnsi"),    font_name)
+            existing.set(qn("w:cs"),       font_name)   # complex-script (Devanagari)
+            existing.set(qn("w:eastAsia"), font_name)
+
+        def _is_latin_char_docx(ch: str) -> bool:
+            cp = ord(ch)
+            if ch.isspace():
+                return False
+            if 0x0900 <= cp <= 0x097F:
+                return False   # Devanagari → Devanagari font
+            if 0x0020 <= cp <= 0x024F:
+                return True    # Basic Latin + Latin Extended A/B
+            if 0x2000 <= cp <= 0x206F:
+                return True    # General Punctuation
+            return False
+
+        def add_para_unicode(p, text: str, size_pt: float, bold: bool = False,
+                             italic: bool = False, color_rgb: RGBColor = None,
+                             align=WD_ALIGN_PARAGRAPH.LEFT) -> None:
+            """Add text to paragraph p with dual-run support for mixed Hindi+Latin.
+            When has_unicode_docx is True, Latin characters use word_latin_fallback
+            so digits, English words, and punctuation render with correct metrics."""
+            p.alignment = align
+            if not has_unicode_docx or not text.strip():
+                run = p.add_run(text)
+                run.font.name   = word_body_font
+                run.font.size   = Pt(size_pt)
+                run.font.bold   = bold
+                run.font.italic = italic
+                if color_rgb:
+                    run.font.color.rgb = color_rgb
+                _set_run_font_cs(run, word_body_font)
+                return
+
+            # Split into Devanagari vs Latin runs
+            runs_list: list[tuple[bool, str]] = []
+            if text:
+                cur_latin = _is_latin_char_docx(text[0])
+                cur_buf   = text[0]
+                for ch in text[1:]:
+                    ch_lat = _is_latin_char_docx(ch)
+                    if ch.isspace() or ch_lat == cur_latin:
+                        cur_buf += ch
+                    else:
+                        runs_list.append((cur_latin, cur_buf))
+                        cur_latin = ch_lat
+                        cur_buf   = ch
+                if cur_buf:
+                    runs_list.append((cur_latin, cur_buf))
+
+            for is_latin, chunk in runs_list:
+                chosen_font = word_latin_fallback if (is_latin and chunk.strip()) else word_body_font
+                run = p.add_run(chunk)
+                run.font.name   = chosen_font
+                run.font.size   = Pt(size_pt)
+                run.font.bold   = bold
+                run.font.italic = italic
+                if color_rgb:
+                    run.font.color.rgb = color_rgb
+                _set_run_font_cs(run, chosen_font)
 
         doc = Document()
         section = doc.sections[0]
@@ -733,16 +1137,15 @@ def generate_scanned_docx(structure: dict, output_path: str) -> str:
         section.bottom_margin = Cm(2.0)
 
         style_normal = doc.styles['Normal']
-        style_normal.font.name = 'Calibri'
+        style_normal.font.name = word_body_font
         style_normal.font.size = Pt(11)
 
         # Cover page
         for _ in range(4): doc.add_paragraph()
         t = doc.add_paragraph()
         t.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        r = t.add_run(structure.get("title", "Manuscript"))
-        r.font.size = Pt(26); r.font.bold = True
-        r.font.color.rgb = RGBColor(0x1E, 0x29, 0x3B)
+        add_para_unicode(t, structure.get("title", "Manuscript"), 26, bold=True,
+                         color_rgb=RGBColor(0x1E, 0x29, 0x3B), align=WD_ALIGN_PARAGRAPH.CENTER)
 
         lang = structure.get("language", "")
         if lang:
@@ -763,18 +1166,22 @@ def generate_scanned_docx(structure: dict, output_path: str) -> str:
             lr.font.size = Pt(10); lr.font.bold = True
             lr.font.color.rgb = RGBColor(0x7C, 0x3A, 0xED)
 
-            heading = doc.add_heading(ch["title"], level=1)
-            set_color(heading, "1E293B")
+            # Chapter title — add via heading then patch with dual-run Unicode support
+            heading = doc.add_heading("", level=1)
+            add_para_unicode(heading, ch["title"], 16, bold=True,
+                             color_rgb=RGBColor(0x1E, 0x29, 0x3B),
+                             align=WD_ALIGN_PARAGRAPH.LEFT)
             doc.add_paragraph()
 
             for para in ch["content"].split("\n\n"):
                 para = para.strip()
-                if para:
-                    p = doc.add_paragraph(para)
-                    p.style = doc.styles['Normal']
-                    p.paragraph_format.space_after = Pt(6)
-                    p.paragraph_format.line_spacing = Pt(16)
-                    p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+                if not para:
+                    continue
+                p = doc.add_paragraph()
+                p.style = doc.styles['Normal']
+                p.paragraph_format.space_after = Pt(6)
+                p.paragraph_format.line_spacing = Pt(16)
+                add_para_unicode(p, para, 11, align=WD_ALIGN_PARAGRAPH.JUSTIFY)
 
             doc.add_page_break()
 
