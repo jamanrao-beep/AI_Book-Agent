@@ -13,5 +13,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# Use a startup script so $PORT expands correctly at runtime
-CMD sh -c "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"
+CMD ["python", "start.py"]
