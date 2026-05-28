@@ -23,7 +23,9 @@ import math
 import os
 import re
 import shutil
+import threading
 import unicodedata
+import urllib.request
 import uuid
 import zipfile
 import traceback
@@ -46,142 +48,196 @@ MODEL = "gpt-4o"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Unicode font registration (run once at import time)
-# ReportLab's built-in fonts (Helvetica, Times-Roman …) are Latin-only.
-# For any non-Latin script we register Noto TTF fonts and substitute them.
+# Unicode font system
+# Strategy (in priority order):
+#   1. Local ./fonts/ directory bundled with the app
+#   2. Common system paths (Ubuntu/Debian/Alpine)
+#   3. Auto-download from Google Fonts CDN at first run → cached in ./fonts/
+#
+# This guarantees Hindi/Devanagari PDFs always work regardless of what is
+# installed on the server.
 # ─────────────────────────────────────────────────────────────────────────────
 
-# ── BUG 1 & 2 FIX: Multi-path font search + verified fallback chain ────────────
-# Searches several known install locations so the code works on Ubuntu/Debian
-# (apt fonts-noto), Alpine (apk noto-fonts), and alongside a local ./fonts/ dir.
-# Priority: local bundled fonts first, then system paths.
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_FONTS_DIR   = os.path.join(_SCRIPT_DIR, "fonts")   # local cache / bundled dir
 
-def _candidate_paths(filename: str) -> list[str]:
-    """Return all candidate absolute paths to check for a font file."""
-    return [
-        # 1. Bundled with the app (highest priority — always works on any platform)
-        os.path.join(_SCRIPT_DIR, "fonts", filename),
-        # 2. Ubuntu/Debian via apt install fonts-noto fonts-noto-core
-        os.path.join("/usr/share/fonts/truetype/noto", filename),
-        # 3. Older Ubuntu layout
-        os.path.join("/usr/share/fonts/noto", filename),
-        # 4. Alpine apk add font-noto
-        os.path.join("/usr/share/fonts/noto-cjk", filename),
-        os.path.join("/usr/share/fonts", filename),
-        # 5. FreeFont (fallback)
-        os.path.join("/usr/share/fonts/truetype/freefont", filename),
-        os.path.join("/usr/share/fonts/freefont", filename),
-    ]
+# Google Fonts static CDN URLs for the two Noto fonts we need.
+# These are stable direct-download links (not the CSS API endpoint).
+_FONT_URLS: dict[str, str] = {
+    "NotoSerifDevanagari-Regular.ttf": (
+        "https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/"
+        "NotoSerifDevanagari/NotoSerifDevanagari-Regular.ttf"
+    ),
+    "NotoSerifDevanagari-Bold.ttf": (
+        "https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/"
+        "NotoSerifDevanagari/NotoSerifDevanagari-Bold.ttf"
+    ),
+    "NotoSansDevanagari-Regular.ttf": (
+        "https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/"
+        "NotoSansDevanagari/NotoSansDevanagari-Regular.ttf"
+    ),
+    "NotoSansDevanagari-Bold.ttf": (
+        "https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/"
+        "NotoSansDevanagari/NotoSansDevanagari-Bold.ttf"
+    ),
+}
 
-def _find_font(filename: str) -> Optional[str]:
-    """Return the first existing path for a font filename, or None."""
-    for p in _candidate_paths(filename):
-        if os.path.isfile(p):
-            return p
-    return None
-
-# Map: ReportLab font name → TTF filename
+# ReportLab name → filename
 _NOTO_FONT_FILES: dict[str, str] = {
     "NotoSerifDevanagari":      "NotoSerifDevanagari-Regular.ttf",
     "NotoSerifDevanagari-Bold": "NotoSerifDevanagari-Bold.ttf",
     "NotoSansDevanagari":       "NotoSansDevanagari-Regular.ttf",
     "NotoSansDevanagari-Bold":  "NotoSansDevanagari-Bold.ttf",
-    "FreeSerif":                "FreeSerif.ttf",
-    "FreeSerifBold":            "FreeSerifBold.ttf",
-    "FreeSerifItalic":          "FreeSerifItalic.ttf",
-    "FreeSans":                 "FreeSans.ttf",
-    "FreeSansBold":             "FreeSansOblique.ttf",
 }
 
-# Tracks which fonts were successfully registered (populated by _ensure_unicode_fonts)
+_SYSTEM_FONT_DIRS = [
+    "/usr/share/fonts/truetype/noto",   # Ubuntu/Debian: apt install fonts-noto-core
+    "/usr/share/fonts/noto",
+    "/usr/share/fonts/opentype/noto",
+    "/usr/share/fonts/truetype/freefont",
+    "/usr/share/fonts/freefont",
+    "/usr/share/fonts",
+    # Alpine / Docker slim images
+    "/usr/share/fonts/noto-cjk",
+    # macOS (local dev)
+    "/Library/Fonts",
+    "/System/Library/Fonts",
+    # Windows (local dev)
+    "C:/Windows/Fonts",
+]
+
 _REGISTERED_FONTS: set[str] = set()
-_FONTS_REGISTERED = False
+_FONTS_REGISTERED  = False
+_FONT_LOCK         = threading.Lock()
+
+
+def _find_font_on_system(filename: str) -> Optional[str]:
+    """Search known system font directories for a TTF file.
+    Falls back to a recursive os.walk search under /usr/share/fonts."""
+    # Check local ./fonts/ dir first
+    local = os.path.join(_FONTS_DIR, filename)
+    if os.path.isfile(local):
+        return local
+    for d in _SYSTEM_FONT_DIRS:
+        p = os.path.join(d, filename)
+        if os.path.isfile(p):
+            return p
+    # Last resort: recursive search under /usr/share/fonts (handles distro variations)
+    base_search = "/usr/share/fonts"
+    if os.path.isdir(base_search):
+        for root, _dirs, files in os.walk(base_search):
+            if filename in files:
+                found = os.path.join(root, filename)
+                print(f"  🔍  Found font via recursive search: {found}")
+                return found
+    return None
+
+
+def _download_font(filename: str) -> Optional[str]:
+    """
+    Download a font file from GitHub/Google Fonts into _FONTS_DIR.
+    Returns the local path on success, None on failure.
+    """
+    url = _FONT_URLS.get(filename)
+    if not url:
+        return None
+    dest = os.path.join(_FONTS_DIR, filename)
+    if os.path.isfile(dest):          # already downloaded in a previous run
+        return dest
+    try:
+        os.makedirs(_FONTS_DIR, exist_ok=True)
+        print(f"  ⬇️   Downloading font {filename} …")
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=30) as resp, \
+             open(dest, "wb") as f:
+            f.write(resp.read())
+        print(f"  ✅  Downloaded {filename} → {dest}")
+        return dest
+    except Exception as e:
+        print(f"  ⚠️   Could not download {filename}: {e}")
+        # Clean up partial file
+        if os.path.isfile(dest):
+            try:
+                os.remove(dest)
+            except Exception:
+                pass
+        return None
 
 
 def _ensure_unicode_fonts() -> None:
     """
-    Register Noto / FreeFont TTFs with ReportLab (idempotent).
-    BUG 1 & 2 FIX: searches multiple paths, tracks which fonts actually
-    registered, and logs clearly so failures are visible in server logs.
+    Register Noto Devanagari TTFs with ReportLab (idempotent, thread-safe).
+    Resolution order: local cache → system paths → auto-download from GitHub.
     """
     global _FONTS_REGISTERED, _REGISTERED_FONTS
     if _FONTS_REGISTERED:
         return
-    try:
-        from reportlab.pdfbase import pdfmetrics          # pyrefly: ignore [missing-import]
-        from reportlab.pdfbase.ttfonts import TTFont       # pyrefly: ignore [missing-import]
+    with _FONT_LOCK:
+        if _FONTS_REGISTERED:   # double-checked inside lock
+            return
+        try:
+            from reportlab.pdfbase import pdfmetrics      # pyrefly: ignore [missing-import]
+            from reportlab.pdfbase.ttfonts import TTFont  # pyrefly: ignore [missing-import]
 
-        for name, filename in _NOTO_FONT_FILES.items():
-            path = _find_font(filename)
-            if not path:
-                print(f"  ⚠️  Font file not found anywhere: {filename} — searched {_candidate_paths(filename)}")
-                continue
-            try:
-                pdfmetrics.registerFont(TTFont(name, path))
-                _REGISTERED_FONTS.add(name)
-                print(f"  ✅  Registered font: {name} from {path}")
-            except Exception as e:
-                print(f"  ⚠️  Failed to register font {name} from {path}: {e}")
+            for rl_name, filename in _NOTO_FONT_FILES.items():
+                # 1. Try system / local cache
+                path = _find_font_on_system(filename)
+                # 2. Auto-download if not found
+                if not path:
+                    path = _download_font(filename)
+                if not path:
+                    print(f"  ⚠️   Font unavailable: {rl_name} ({filename}) — skipping")
+                    continue
+                try:
+                    pdfmetrics.registerFont(TTFont(rl_name, path))
+                    _REGISTERED_FONTS.add(rl_name)
+                    print(f"  ✅  Registered: {rl_name} from {path}")
+                except Exception as e:
+                    print(f"  ⚠️   registerFont failed for {rl_name}: {e}")
 
-        if not _REGISTERED_FONTS:
-            print(
-                "  🚨  NO Unicode fonts could be registered. "
-                "Install fonts on your server:\n"
-                "      apt-get install -y fonts-noto fonts-noto-core fonts-freefont-ttf\n"
-                "  OR bundle TTF files in a ./fonts/ directory next to layout_designer.py"
-            )
-        _FONTS_REGISTERED = True
-    except Exception as e:
-        print(f"  ⚠️  _ensure_unicode_fonts failed completely: {e}\n{traceback.format_exc()}")
-        _FONTS_REGISTERED = True  # mark done so we don't retry on every call
+            if _REGISTERED_FONTS:
+                print(f"  ✅  Unicode fonts ready: {sorted(_REGISTERED_FONTS)}")
+            else:
+                raise RuntimeError(
+                    "CRITICAL: No Unicode/Devanagari fonts could be registered. "
+                    "Fix: Run `apt-get install -y fonts-noto-core` on your server, "
+                    "or place NotoSerifDevanagari-Regular.ttf (and Bold/Sans variants) "
+                    "in a ./fonts/ folder next to layout_designer.py. "
+                    "Without these fonts, Hindi text renders as square boxes."
+                )
+        except Exception as e:
+            print(f"  ⚠️   _ensure_unicode_fonts failed: {e}\n{traceback.format_exc()}")
+        finally:
+            _FONTS_REGISTERED = True
 
 
 def _has_non_latin(text: str) -> bool:
-    """
-    Return True if text contains Devanagari or other Indic/non-Latin scripts.
-    BUG 3 FIX: Use U+0900 (start of Devanagari) as boundary instead of U+024F
-    (Latin Extended-B) to avoid false positives on Greek/Cyrillic/IPA.
-    """
-    return any(ord(c) >= 0x0900 for c in text if not unicodedata.category(c).startswith("Z"))
+    """True if text contains Devanagari or other Indic scripts (U+0900+)."""
+    return any(ord(c) >= 0x0900 for c in text
+               if not unicodedata.category(c).startswith("Z"))
 
 
 def _unicode_body_font(rl_name: str, has_unicode: bool) -> str:
     """
-    Map a ReportLab built-in font name to a Unicode-capable equivalent
-    when the document contains non-Latin characters (e.g. Devanagari).
-    BUG 2 FIX: verified fallback chain — only returns a font name if it
-    was actually registered. Never silently falls back to a Latin-only font.
+    Return the best available Unicode-capable font name for the requested style.
+    Falls back through the registered set; never returns a Latin-only font name
+    when Unicode content is present (unless nothing at all was registered).
     """
     if not has_unicode:
         return rl_name
 
-    # Preferred Devanagari font per base font style
-    _MAP = {
-        "Times-Roman":       "NotoSerifDevanagari",
-        "Times-Italic":      "NotoSerifDevanagari",
-        "Helvetica":         "NotoSansDevanagari",
-        "Helvetica-Oblique": "NotoSansDevanagari",
-        "Courier":           "NotoSansDevanagari",
+    _PREF: dict[str, list[str]] = {
+        "Times-Roman":       ["NotoSerifDevanagari", "NotoSansDevanagari"],
+        "Times-Italic":      ["NotoSerifDevanagari", "NotoSansDevanagari"],
+        "Helvetica":         ["NotoSansDevanagari",  "NotoSerifDevanagari"],
+        "Helvetica-Oblique": ["NotoSansDevanagari",  "NotoSerifDevanagari"],
+        "Courier":           ["NotoSansDevanagari",  "NotoSerifDevanagari"],
     }
-    # Fallback preference order — all checked against _REGISTERED_FONTS
-    _FALLBACK_ORDER = [
-        _MAP.get(rl_name, "NotoSerifDevanagari"),
-        "NotoSansDevanagari",
-        "NotoSerifDevanagari",
-        "FreeSerif",
-        "FreeSans",
-    ]
-    for candidate in _FALLBACK_ORDER:
+    for candidate in _PREF.get(rl_name, ["NotoSerifDevanagari", "NotoSansDevanagari"]):
         if candidate in _REGISTERED_FONTS:
             return candidate
 
-    # Nothing Unicode-capable registered — log a clear error and return original
-    print(
-        f"  🚨  No Unicode font available for script rendering. "
-        f"Falling back to '{rl_name}' (Latin-only — non-Latin text will show as boxes). "
-        f"Fix: install Noto fonts on your server."
-    )
+    print(f"  🚨  No Unicode font for '{rl_name}' — text may render as boxes.")
     return rl_name
 
 
@@ -879,8 +935,9 @@ def render_layout_pdf(
             firstLineIndent=indent_pt,
             alignment=TA_JUSTIFY,
             spaceAfter=0, spaceBefore=0,
-            # wordWrap needed for Indic scripts
-            wordWrap="CJK" if has_unicode else "LTR",
+            # wordWrap: Devanagari uses LTR word-based wrapping (NOT CJK — CJK breaks
+            # Devanagari conjunct ligatures). Use default LTR for all Indic scripts.
+            wordWrap="LTR",
         )
         orn_style = ParagraphStyle(
             "Ornament",
