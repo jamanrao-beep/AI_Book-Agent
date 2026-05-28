@@ -585,14 +585,18 @@ def _draw_image_on_canvas(c, img_bytes: bytes, x: float, y: float,
 
 def render_cover_pdf(concept: dict, output_path: str,
                      book_image_bytes: bytes | None = None,
-                     dalle_image_bytes: bytes | None = None) -> str:
+                     dalle_image_bytes: bytes | None = None,
+                     cover_image_bytes: bytes | None = None) -> str:
     """
     Render a professional A4 book cover PDF.
 
-    Priority:
-      1. If dalle_image_bytes supplied → use as full-bleed illustrated background
-      2. Else if book_image_bytes supplied → use blurred/tinted book page as bg
-      3. Else → pure gradient background
+    Priority (background image):
+      1. cover_image_bytes  → user-supplied illustration; used as full-bleed,
+                              no tinting/blurring so the artwork is fully visible.
+                              Only a dark gradient scrim at the bottom ~30% for text.
+      2. dalle_image_bytes  → DALL-E 3 generated image (same full-bleed treatment)
+      3. book_image_bytes   → blurred/tinted book page as atmospheric background
+      4. (none)             → pure gradient background
 
     All text (title, subtitle, tagline, author) is composited with Pillow on
     top of the background, then embedded into a ReportLab PDF page.
@@ -632,14 +636,23 @@ def render_cover_pdf(concept: dict, output_path: str,
 
     # ── Build background canvas ───────────────────────────────────────────────
     try:
-        if dalle_image_bytes:
-            ai_img = Image.open(io.BytesIO(dalle_image_bytes)).convert("RGBA")
-            ratio  = max(W_px / ai_img.width, H_px / ai_img.height)
-            nw, nh = int(ai_img.width * ratio), int(ai_img.height * ratio)
-            ai_img = ai_img.resize((nw, nh), Image.LANCZOS)
-            left   = (nw - W_px) // 2
-            top    = (nh - H_px) // 2
-            bg     = ai_img.crop((left, top, left + W_px, top + H_px)).convert("RGBA")
+        def _fit_to_canvas(img_bytes: bytes) -> "Image.Image":
+            img   = Image.open(io.BytesIO(img_bytes)).convert("RGBA")
+            ratio = max(W_px / img.width, H_px / img.height)
+            nw    = int(img.width  * ratio)
+            nh    = int(img.height * ratio)
+            img   = img.resize((nw, nh), Image.LANCZOS)
+            left  = (nw - W_px) // 2
+            top_  = (nh - H_px) // 2
+            return img.crop((left, top_, left + W_px, top_ + H_px))
+
+        if cover_image_bytes:
+            # User-supplied illustration: full-bleed, no blur/tint
+            bg = _fit_to_canvas(cover_image_bytes)
+            print("  ✅ User-supplied cover image composited as full-bleed background")
+
+        elif dalle_image_bytes:
+            bg = _fit_to_canvas(dalle_image_bytes)
             print("  ✅ DALL-E 3 image composited as cover background")
 
         elif book_image_bytes:
@@ -677,7 +690,7 @@ def render_cover_pdf(concept: dict, output_path: str,
         # ── Overlay strategy depends on whether we have a real DALL-E image ───────
         # For DALL-E: keep image visible in upper 65%, only darken bottom 35% for text
         # For gradient-only: darken from 40% down (original behaviour)
-        has_dalle = dalle_image_bytes is not None
+        has_dalle = (cover_image_bytes is not None) or (dalle_image_bytes is not None)
         overlay = Image.new("RGBA", (W_px, H_px), (0, 0, 0, 0))
         od = ImageDraw.Draw(overlay)
 
@@ -809,14 +822,16 @@ def render_cover_pdf(concept: dict, output_path: str,
                 draw.text((text_left, sub_y), ln, font=sub_font, fill=scol_rgb + (230,))
                 sub_y += int(H_px * 0.030)
 
-        # ── Tagline ───────────────────────────────────────────────────────────────
+        # ── Tagline — subtle caption-level text, not prominent ──────────────────
         tagline = concept.get("tagline", "").strip()
-        if tagline:
-            tag_font = _load_font(int(H_px * 0.019))
-            tag_y    = sub_y + int(H_px * 0.006)
+        if tagline and has_dalle:
+            # Only show tagline when there's a real image background (not plain gradient)
+            # Keep it tiny and semi-transparent so it doesn't dominate
+            tag_font = _load_font(int(H_px * 0.014))
+            tag_y    = sub_y + int(H_px * 0.004)
             for ln in _wrap_text(tagline, tag_font, text_width):
-                draw.text((text_left, tag_y), ln, font=tag_font, fill=tgcol_rgb + (200,))
-                tag_y += int(H_px * 0.023)
+                draw.text((text_left, tag_y), ln, font=tag_font, fill=tgcol_rgb + (150,))
+                tag_y += int(H_px * 0.017)
 
         # ── Bottom author band ────────────────────────────────────────────────────
         band_top  = H_px - BOTTOM_BAND_H
@@ -1412,10 +1427,13 @@ def _wrap(text: str, max_chars: int = 50) -> list[str]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def prepend_cover_to_pdf(cover_pdf: str, original_pdf: str, output_pdf: str) -> str:
+    """Add cover as page 1, then ALL pages of original (never replaces them)."""
     from pypdf import PdfWriter, PdfReader   # pyrefly: ignore [missing-import]
     writer = PdfWriter()
+    # Cover first
     for page in PdfReader(cover_pdf).pages:
         writer.add_page(page)
+    # Then every page of the original book — none skipped
     for page in PdfReader(original_pdf).pages:
         writer.add_page(page)
     with open(output_pdf, "wb") as f:
@@ -1548,12 +1566,13 @@ def prepend_cover_to_docx(concept: dict, original_docx: str, output_docx: str) -
 # ─────────────────────────────────────────────────────────────────────────────
 
 def design_cover(
-    file_path   : str,
-    filename    : str,
-    output_dir  : str,
-    book_title  : str = "",
-    description : str = "",
-    design_style: str = "",
+    file_path         : str,
+    filename          : str,
+    output_dir        : str,
+    book_title        : str = "",
+    description       : str = "",
+    design_style      : str = "",
+    cover_image_bytes : bytes | None = None,
 ) -> dict:
     """
     Full pipeline:
@@ -1609,7 +1628,8 @@ def design_cover(
             # Step 5: Render the cover PDF
             render_cover_pdf(concept, cover_pdf,
                              book_image_bytes=book_image,
-                             dalle_image_bytes=dalle_image)
+                             dalle_image_bytes=dalle_image,
+                             cover_image_bytes=cover_image_bytes)
 
             # Step 6: Prepend cover to original PDF
             prepend_cover_to_pdf(cover_pdf, file_path, out_path)

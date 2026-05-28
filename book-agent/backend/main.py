@@ -445,15 +445,18 @@ COVER_ALLOWED_DIRECT = {".pdf", ".docx"}
 COVER_ALLOWED_ALL    = {".pdf", ".docx", ".zip"}
 
 
-def _design_single(tmp_path: str, filename: str, book_title: str, description: str, design_style: str = "") -> dict:
+def _design_single(tmp_path: str, filename: str, book_title: str, description: str,
+                   design_style: str = "",
+                   cover_image_bytes: bytes | None = None) -> dict:
     """Run design_cover on one PDF or DOCX and return the result dict."""
     return design_cover(
-        file_path    = tmp_path,
-        filename     = filename,
-        output_dir   = OUTPUT_DIR,
-        book_title   = book_title,
-        description  = description,
-        design_style = design_style,
+        file_path         = tmp_path,
+        filename          = filename,
+        output_dir        = OUTPUT_DIR,
+        book_title        = book_title,
+        description       = description,
+        design_style      = design_style,
+        cover_image_bytes = cover_image_bytes,
     )
 
 
@@ -539,6 +542,7 @@ async def design_cover_endpoint(
     book_title: str = Form(default=""),
     description: str = Form(default=""),
     design_style: str = Form(default=""),
+    cover_image: Optional[UploadFile] = File(default=None),
 ):
     """
     Upload a .pdf, .docx, or .zip file.
@@ -547,10 +551,14 @@ async def design_cover_endpoint(
     • .zip          → extracts all .pdf/.docx inside, designs a cover for each,
                       returns per-file concepts + a bundle zip download URL.
 
-    Optionally pass `book_title`, `description`, and `design_style` as form fields.
-    `design_style` accepts: normal | premium | scifi | minimalist | fantasy |
-                            thriller | romance | academic | vibrant | retro
-    Defaults to "premium" when omitted.
+    Optionally pass:
+      `book_title`   — overrides the title extracted from the filename
+      `description`  — extra context for the AI cover concept
+      `design_style` — normal | premium | scifi | minimalist | fantasy |
+                       thriller | romance | academic | vibrant | retro
+      `cover_image`  — optional illustration to use as the full-bleed background
+                       (PNG/JPEG). When provided, DALL-E is not called and the
+                       supplied image is used directly — no tinting or blurring.
     """
     filename = file.filename or "document.pdf"
     ext = os.path.splitext(filename)[1].lower()
@@ -562,13 +570,24 @@ async def design_cover_endpoint(
             "Upload a .pdf, .docx, or a .zip containing .pdf/.docx files."
         )
 
+    # Read optional cover illustration
+    cover_img_bytes: bytes | None = None
+    if cover_image and cover_image.filename:
+        cov_ext = os.path.splitext(cover_image.filename)[1].lower()
+        if cov_ext in {".png", ".jpg", ".jpeg", ".webp", ".bmp"}:
+            cover_img_bytes = await cover_image.read()
+            logger.info("Cover image supplied: %s (%d bytes)", cover_image.filename, len(cover_img_bytes))
+        else:
+            logger.warning("Unsupported cover_image extension '%s' — ignoring", cov_ext)
+
     tmp_path = os.path.join(OUTPUT_DIR, f"upload_{uuid.uuid4().hex}{ext}")
     try:
         await _stream_upload_to_disk(file, tmp_path)
 
         # ── Single file (PDF / DOCX) ──────────────────────────────────────────
         if ext in COVER_ALLOWED_DIRECT:
-            result  = _design_single(tmp_path, filename, book_title, description, design_style)
+            result  = _design_single(tmp_path, filename, book_title, description, design_style,
+                                     cover_image_bytes=cover_img_bytes)
             job_id  = result["job_id"]
 
             _cover_jobs[job_id] = {
