@@ -280,7 +280,7 @@ def generate_cover_image(concept: dict, book_title: str,
     """
     try:
         dalle_prompt = generate_dalle_prompt(concept, book_title, book_text)
-        print(f"  🎨 DALL-E 3 prompt: {dalle_prompt[:160]}…")
+        print(f"  🎨 DALL-E 3 prompt ({len(dalle_prompt)} chars): {dalle_prompt[:200]}…")
 
         resp = client.images.generate(
             model="dall-e-3",
@@ -290,12 +290,23 @@ def generate_cover_image(concept: dict, book_title: str,
             n=1,
         )
         image_url = resp.data[0].url
-        print("  ✅ DALL-E 3 image generated")
+        if not image_url:
+            print("  ⚠️  DALL-E 3 returned no image URL — will fall back to gradient cover")
+            return None
+        print("  ✅ DALL-E 3 image generated successfully")
 
         with urllib.request.urlopen(image_url) as r:
-            return r.read()
+            data = r.read()
+        print(f"  ✅ DALL-E 3 image downloaded ({len(data)//1024} KB)")
+        return data
     except Exception as ex:
-        print(f"  ⚠️  DALL-E 3 image generation failed: {ex}\n{traceback.format_exc()}")
+        # Log the full error so it's visible in Railway / server logs
+        print(
+            f"  ⚠️  DALL-E 3 image generation FAILED for '{book_title}'.\n"
+            f"      Error: {ex}\n"
+            f"      Cover will fall back to gradient background.\n"
+            f"{traceback.format_exc()}"
+        )
         return None
 
 
@@ -695,14 +706,16 @@ def render_cover_pdf(concept: dict, output_path: str,
         od = ImageDraw.Draw(overlay)
 
         if has_dalle:
-            # Subtle vignette on top half; strong dark scrim starting at 65% for text
+            # Keep top 70% of image almost untouched so the illustration is fully visible.
+            # Only darken the bottom 30% to create a readable text panel.
             for yi in range(H_px):
                 t = yi / H_px
-                if t < 0.65:
-                    alpha = int(20 * t)           # max ~13 alpha in top 65%
+                if t < 0.70:
+                    # Tiny edge vignette only — max ~8 alpha so artwork shows through
+                    alpha = int(8 * t)
                 else:
-                    tt = (t - 0.65) / 0.35
-                    alpha = int(13 + 200 * (tt ** 0.6))   # ramps to ~213 at very bottom
+                    tt = (t - 0.70) / 0.30
+                    alpha = int(8 + 220 * (tt ** 0.55))   # ramps to ~228 at very bottom
                 od.line([(0, yi), (W_px, yi)], fill=(0, 0, 0, alpha))
         else:
             grad_start = int(H_px * 0.40)
@@ -795,8 +808,8 @@ def render_cover_pdf(concept: dict, output_path: str,
         total_title_h = len(title_lines) * line_gap
 
         if has_dalle:
-            # Anchor title TOP to the dark-scrim start (65%) so art is fully visible
-            ty_start  = int(H_px * 0.655)
+            # Anchor title TOP to the dark-scrim start (70%) so art is fully visible
+            ty_start  = int(H_px * 0.705)
             ty_bottom = ty_start + total_title_h
         else:
             ty_bottom = H_px - BOTTOM_BAND_H - int(H_px * 0.025)
@@ -822,16 +835,19 @@ def render_cover_pdf(concept: dict, output_path: str,
                 draw.text((text_left, sub_y), ln, font=sub_font, fill=scol_rgb + (230,))
                 sub_y += int(H_px * 0.030)
 
-        # ── Tagline — subtle caption-level text, not prominent ──────────────────
+        # ── Tagline — tiny caption, only when a real image background is present ──
         tagline = concept.get("tagline", "").strip()
         if tagline and has_dalle:
-            # Only show tagline when there's a real image background (not plain gradient)
-            # Keep it tiny and semi-transparent so it doesn't dominate
-            tag_font = _load_font(int(H_px * 0.014))
-            tag_y    = sub_y + int(H_px * 0.004)
-            for ln in _wrap_text(tagline, tag_font, text_width):
-                draw.text((text_left, tag_y), ln, font=tag_font, fill=tgcol_rgb + (150,))
-                tag_y += int(H_px * 0.017)
+            # Only show when there's a real image (DALL-E or user-supplied).
+            # Keep it very small and semi-transparent — a whisper, not a headline.
+            tag_font = _load_font(int(H_px * 0.012))   # ~21px — noticeably smaller
+            tag_y    = sub_y + int(H_px * 0.005)
+            # Check we still have vertical room before the author band
+            if tag_y < (H_px - BOTTOM_BAND_H - int(H_px * 0.04)):
+                for ln in _wrap_text(tagline, tag_font, text_width):
+                    draw.text((text_left, tag_y), ln, font=tag_font,
+                              fill=tgcol_rgb + (120,))  # 120/255 ≈ 47% opacity
+                    tag_y += int(H_px * 0.015)
 
         # ── Bottom author band ────────────────────────────────────────────────────
         band_top  = H_px - BOTTOM_BAND_H
@@ -1621,9 +1637,20 @@ def design_cover(
         if ext == ".pdf":
             cover_pdf = os.path.join(output_dir, f"coverpage_{job_id}.pdf")
 
-            # Step 4: Generate DALL-E illustration based on real book content
-            print("  🖼️  Generating content-aware cover illustration with DALL-E 3…")
-            dalle_image = generate_cover_image(concept, book_title, book_text)
+            # Step 4: Generate DALL-E illustration — only when no user image supplied
+            dalle_image: bytes | None = None
+            if cover_image_bytes:
+                print("  🖼️  User-supplied cover image provided — skipping DALL-E generation")
+            else:
+                print("  🖼️  No cover image supplied — generating with DALL-E 3…")
+                dalle_image = generate_cover_image(concept, book_title, book_text)
+                if dalle_image:
+                    print(f"  ✅ DALL-E image ready ({len(dalle_image)//1024} KB)")
+                else:
+                    print(
+                        "  ⚠️  DALL-E image not available — cover will use gradient background.\n"
+                        "      TIP: Upload a cover_image (PNG/JPEG) to bypass DALL-E entirely."
+                    )
 
             # Step 5: Render the cover PDF
             render_cover_pdf(concept, cover_pdf,
@@ -1631,8 +1658,10 @@ def design_cover(
                              dalle_image_bytes=dalle_image,
                              cover_image_bytes=cover_image_bytes)
 
-            # Step 6: Prepend cover to original PDF
+            # Step 6: ALWAYS prepend — never replace — the cover onto the original PDF
+            print(f"  📎 Prepending cover to original PDF ({os.path.basename(file_path)})…")
             prepend_cover_to_pdf(cover_pdf, file_path, out_path)
+            print(f"  ✅ Output written: {out_path}")
 
             if os.path.exists(cover_pdf):
                 os.remove(cover_pdf)
