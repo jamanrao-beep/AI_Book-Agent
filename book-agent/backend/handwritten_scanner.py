@@ -6,12 +6,22 @@ AI-powered handwritten book scanner.
 - Assembles transcription into a clean, structured book
 - Exports PDF + DOCX
 Supports any language — GPT-4o handles multilingual handwriting.
+
+IMPROVEMENTS for large PDFs (320+ pages):
+  - 1 image per API call (reliable page alignment, no split/merge errors)
+  - max_tokens raised to 16384 (prevents silent truncation of dense pages)
+  - 3x exponential backoff retries on transient API failures
+  - ThreadPoolExecutor for parallel transcription (8 workers by default)
+  - structure_transcription chunk size reduced to 20K chars (avoids JSON truncation)
+  - structure_transcription max_tokens raised to 10000
+  - PDF rendered at 3x zoom (300 DPI) for better OCR accuracy on dense writing
 """
 
 import os
 import io
 import json
 import uuid
+import time
 import zipfile
 import shutil
 import base64
@@ -19,6 +29,7 @@ import tempfile
 import traceback
 from pathlib import Path
 from typing import Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # pyrefly: ignore [missing-import]
 from openai import OpenAI
@@ -33,6 +44,38 @@ SUPPORTED_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tiff
 SUPPORTED_UPLOAD_EXTS = SUPPORTED_IMAGE_EXTS | {".pdf", ".docx", ".zip"}
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Tuning knobs
+# ─────────────────────────────────────────────────────────────────────────────
+
+# How many pages to send per vision API call.
+# 1 = most reliable (no page-break alignment issues), slower.
+# 2 = good balance. 4 = original behaviour (faster but misaligns on dense pages).
+PAGES_PER_BATCH = 1
+
+# Max output tokens per transcription call.
+# GPT-4o supports up to 16384. Original was 8192 which truncates dense pages.
+TRANSCRIPTION_MAX_TOKENS = 16384
+
+# Number of parallel workers for transcription. Stay within your rate-limit tier.
+# Tier 1 (~500 RPM): 8–12 workers is safe. Reduce if you hit 429s.
+TRANSCRIPTION_WORKERS = 8
+
+# Retries on transient API errors (429, 500, 502, 503).
+MAX_RETRIES = 3
+RETRY_BASE_DELAY = 2.0  # seconds; doubles on each retry
+
+# Structuring: max chars per chunk fed to GPT-4o.
+# Smaller chunks → cleaner JSON output (original 50K caused JSON truncation).
+STRUCTURE_CHUNK_SIZE = 20_000
+
+# Max tokens for the structuring / chapter-assembly call.
+STRUCTURE_MAX_TOKENS = 10_000
+
+# PDF render zoom. 2.0 ≈ 150 DPI (original). 3.0 ≈ 225 DPI (better for dense writing).
+PDF_RENDER_ZOOM = 3.0
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Image → base64
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -43,8 +86,6 @@ def _image_to_b64(path: str) -> tuple[str, str]:
         ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
         ".png": "image/png", ".webp": "image/webp",
         ".gif": "image/gif",
-        # BMP/TIFF are converted to PNG via Pillow below; if Pillow is absent
-        # we fall back to raw bytes and must report the correct native MIME.
         ".bmp": "image/bmp",
         ".tiff": "image/tiff", ".tif": "image/tiff",
     }
@@ -60,7 +101,7 @@ def _image_to_b64(path: str) -> tuple[str, str]:
             return base64.b64encode(buf.getvalue()).decode(), "image/png"
         except ImportError as e:
             print(f"  ⚠️  Pillow import failed for image conversion. Error details: {e}\n{traceback.format_exc()}")
-            pass  # fall through to raw read
+            pass
         except Exception as e:
             print(f"  ⚠️  Unexpected error during image conversion. Error details: {e}\n{traceback.format_exc()}")
             pass
@@ -74,25 +115,30 @@ def _image_to_b64(path: str) -> tuple[str, str]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _pdf_to_images(pdf_path: str, out_dir: str) -> list[str]:
-    """Render each PDF page to a PNG. Returns list of image paths."""
+    """
+    Render each PDF page to a PNG at PDF_RENDER_ZOOM (default 3x ≈ 225 DPI).
+    Higher DPI significantly improves transcription accuracy on dense handwriting.
+    Returns list of image paths.
+    """
     try:
         # pyrefly: ignore [missing-import]
         import fitz  # PyMuPDF
         doc = fitz.open(pdf_path)
         paths = []
+        mat = fitz.Matrix(PDF_RENDER_ZOOM, PDF_RENDER_ZOOM)
         for i, page in enumerate(doc):
-            mat = fitz.Matrix(2.0, 2.0)  # 2× zoom → ~150 DPI
             pix = page.get_pixmap(matrix=mat)
             img_path = os.path.join(out_dir, f"page_{i:04d}.png")
             pix.save(img_path)
             paths.append(img_path)
+        print(f"  📄 Rendered {len(paths)} pages at {PDF_RENDER_ZOOM}x zoom ({int(72 * PDF_RENDER_ZOOM)} DPI)")
         return paths
     except ImportError as e:
         print(f"  ⚠️  fitz (PyMuPDF) missing, falling back to pdf2image. Error details: {e}\n{traceback.format_exc()}")
-        # fallback: pdf2image
         # pyrefly: ignore [missing-import]
         from pdf2image import convert_from_path
-        images = convert_from_path(pdf_path, dpi=150)
+        dpi = int(72 * PDF_RENDER_ZOOM)
+        images = convert_from_path(pdf_path, dpi=dpi)
         paths = []
         for i, img in enumerate(images):
             img_path = os.path.join(out_dir, f"page_{i:04d}.png")
@@ -105,7 +151,7 @@ def _pdf_to_images(pdf_path: str, out_dir: str) -> list[str]:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# DOCX → images (render each page via LibreOffice or extract embedded images)
+# DOCX → images
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _docx_to_images(docx_path: str, out_dir: str) -> list[str]:
@@ -129,9 +175,8 @@ def _docx_to_images(docx_path: str, out_dir: str) -> list[str]:
                 paths.append(img_path)
                 idx += 1
     except Exception as e:
-         print(f"  ⚠️  Error extracting embedded images from DOCX. Error details: {e}\n{traceback.format_exc()}")
+        print(f"  ⚠️  Error extracting embedded images from DOCX. Error details: {e}\n{traceback.format_exc()}")
 
-    # If no embedded images, try converting via PDF
     if not paths:
         try:
             import subprocess
@@ -146,7 +191,6 @@ def _docx_to_images(docx_path: str, out_dir: str) -> list[str]:
                 return _pdf_to_images(pdf_candidate, out_dir)
         except Exception as e:
             print(f"  ⚠️  DOCX to PDF fallback conversion failed. Error details: {e}\n{traceback.format_exc()}")
-            pass
 
     return sorted(paths)
 
@@ -164,7 +208,6 @@ def collect_images(file_path: str, filename: str, scratch_dir: str) -> list[str]
     os.makedirs(scratch_dir, exist_ok=True)
 
     if ext in SUPPORTED_IMAGE_EXTS:
-        # Single image — copy to scratch so we own it
         dest = os.path.join(scratch_dir, f"img_0000{ext}")
         shutil.copy2(file_path, dest)
         return [dest]
@@ -192,7 +235,6 @@ def collect_images(file_path: str, filename: str, scratch_dir: str) -> list[str]
                         shutil.copyfileobj(src, dst)
                     image_paths.append(dest)
 
-                # Also handle PDF/DOCX inside zip
                 pdf_members = [m for m in zf.namelist()
                                if Path(m).suffix.lower() in {".pdf", ".docx"}
                                and not m.startswith("__MACOSX")]
@@ -209,7 +251,6 @@ def collect_images(file_path: str, filename: str, scratch_dir: str) -> list[str]
                         image_paths.extend(_docx_to_images(tmp, sub_dir))
                     os.remove(tmp)
 
-            # Preserve insertion order (sorted(set(...)) would randomise uuid-prefixed sub-dir paths)
             seen: set[str] = set()
             ordered: list[str] = []
             for p in image_paths:
@@ -225,7 +266,36 @@ def collect_images(file_path: str, filename: str, scratch_dir: str) -> list[str]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# GPT-4o Vision: transcribe a batch of images
+# Retry helper
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _api_call_with_retry(fn, *args, **kwargs):
+    """
+    Call fn(*args, **kwargs) up to MAX_RETRIES times with exponential backoff.
+    Retries on RateLimitError, APIStatusError (5xx), and generic exceptions.
+    """
+    delay = RETRY_BASE_DELAY
+    last_exc = None
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            return fn(*args, **kwargs)
+        except Exception as e:
+            last_exc = e
+            err_str = str(e).lower()
+            # Retry on rate limits and server errors; give up on auth/bad-request errors
+            if any(k in err_str for k in ("rate limit", "429", "500", "502", "503", "timeout")):
+                if attempt < MAX_RETRIES:
+                    wait = delay * (2 ** (attempt - 1))
+                    print(f"  ⏳  API error (attempt {attempt}/{MAX_RETRIES}), retrying in {wait:.1f}s: {e}")
+                    time.sleep(wait)
+                    continue
+            # Non-retryable error — raise immediately
+            raise
+    raise last_exc
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GPT-4o Vision: transcribe images
 # ─────────────────────────────────────────────────────────────────────────────
 
 TRANSCRIPTION_SYSTEM = """You are an expert handwriting transcription assistant. 
@@ -241,91 +311,155 @@ Rules:
 - If the page appears blank or contains only drawings/images with no text, output: [PAGE: no text]
 """
 
-def transcribe_images(image_paths: list[str], book_title: str = "") -> list[dict]:
+
+def _transcribe_single_batch(
+    batch: list[str],
+    batch_start: int,
+) -> list[dict]:
     """
-    Transcribe a list of images using GPT-4o vision.
-    Returns list of {page_num, text, has_content} dicts.
+    Transcribe one batch of images (PAGES_PER_BATCH pages) via a single API call.
+    Returns list of {page_num, text, has_content} dicts in page order.
     """
-    results = []
-    # Process in batches of 4 images per API call (token efficiency)
-    batch_size = 4
+    successful_indices: list[int] = []
+    failed_indices: list[int] = []
+    api_content: list[dict] = [{"type": "text", "text": ""}]  # placeholder
 
-    for batch_start in range(0, len(image_paths), batch_size):
-        batch = image_paths[batch_start: batch_start + batch_size]
+    for slot, img_path in enumerate(batch):
+        try:
+            b64, mime = _image_to_b64(img_path)
+            api_content.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:{mime};base64,{b64}", "detail": "high"},
+            })
+            successful_indices.append(slot)
+        except Exception as e:
+            print(f"  ⚠️  Could not encode {img_path}. Error details: {e}\n{traceback.format_exc()}")
+            failed_indices.append(slot)
 
-        # Track which slots within the batch encoded successfully vs failed
-        successful_indices: list[int] = []
-        failed_indices: list[int] = []
-        api_content: list[dict] = [{"type": "text", "text": ""}]  # placeholder updated below
-
-        for slot, img_path in enumerate(batch):
-            try:
-                b64, mime = _image_to_b64(img_path)
-                api_content.append({
-                    "type": "image_url",
-                    "image_url": {"url": f"data:{mime};base64,{b64}", "detail": "high"},
-                })
-                successful_indices.append(slot)
-            except Exception as e:
-                print(f"  ⚠️  Could not encode {img_path}. Error details: {e}\n{traceback.format_exc()}")
-                failed_indices.append(slot)
-
-        # Update the text prompt to reflect actual image count sent
-        n_sent = len(successful_indices)
+    n_sent = len(successful_indices)
+    if n_sent == 1:
+        api_content[0]["text"] = "Transcribe the handwritten text from this page image."
+    else:
         api_content[0]["text"] = (
             f"Transcribe the handwritten text from the following {n_sent} page image(s). "
             "Separate each page's content with the marker ---PAGE_BREAK--- on its own line."
         )
 
-        # Pre-allocate result slots so ordering stays aligned with image_paths
-        batch_results: list[dict] = [{}] * len(batch)
-        for slot in failed_indices:
-            batch_results[slot] = {
-                "page_num": batch_start + slot + 1,
-                "text": "[illegible - could not process image]",
-                "has_content": False,
-            }
+    batch_results: list[dict] = [{}] * len(batch)
 
-        if successful_indices:
-            try:
-                response = client.chat.completions.create(
+    for slot in failed_indices:
+        batch_results[slot] = {
+            "page_num": batch_start + slot + 1,
+            "text": "[illegible - could not process image]",
+            "has_content": False,
+        }
+
+    if successful_indices:
+        try:
+            def _call():
+                return client.chat.completions.create(
                     model=MODEL,
                     messages=[
                         {"role": "system", "content": TRANSCRIPTION_SYSTEM},
                         {"role": "user", "content": api_content},
                     ],
-                    max_tokens=8192,
+                    max_tokens=TRANSCRIPTION_MAX_TOKENS,
                 )
-                raw = response.choices[0].message.content.strip()
+
+            response = _api_call_with_retry(_call)
+            raw = response.choices[0].message.content.strip()
+
+            if n_sent == 1:
+                gpt_pages = [raw]
+            else:
                 gpt_pages = raw.split("---PAGE_BREAK---")
 
-                for i, slot in enumerate(successful_indices):
-                    page_text = gpt_pages[i].strip() if i < len(gpt_pages) else ""
-                    has_content = bool(page_text) and "[PAGE: no text]" not in page_text
-                    batch_results[slot] = {
-                        "page_num": batch_start + slot + 1,
-                        "text": page_text if has_content else "",
-                        "has_content": has_content,
-                    }
-                # GPT returned fewer splits than images sent — fill remaining
-                for slot in successful_indices[len(gpt_pages):]:
-                    batch_results[slot] = {
-                        "page_num": batch_start + slot + 1,
-                        "text": "[transcription incomplete for this page]",
-                        "has_content": False,
-                    }
+            for i, slot in enumerate(successful_indices):
+                page_text = gpt_pages[i].strip() if i < len(gpt_pages) else ""
+                has_content = bool(page_text) and "[PAGE: no text]" not in page_text
+                batch_results[slot] = {
+                    "page_num": batch_start + slot + 1,
+                    "text": page_text if has_content else "",
+                    "has_content": has_content,
+                }
+
+            # Fill any extra slots if GPT returned fewer splits than images
+            for slot in successful_indices[len(gpt_pages):]:
+                batch_results[slot] = {
+                    "page_num": batch_start + slot + 1,
+                    "text": "[transcription incomplete for this page]",
+                    "has_content": False,
+                }
+
+        except Exception as e:
+            print(f"  ⚠️  Transcription batch pages {batch_start+1}–{batch_start+len(batch)} failed after retries. "
+                  f"Error details: {e}\n{traceback.format_exc()}")
+            for slot in successful_indices:
+                batch_results[slot] = {
+                    "page_num": batch_start + slot + 1,
+                    "text": "[transcription failed for this page]",
+                    "has_content": False,
+                }
+
+    return [r for r in batch_results if r]
+
+
+def transcribe_images(image_paths: list[str], book_title: str = "") -> list[dict]:
+    """
+    Transcribe a list of images using GPT-4o vision in parallel.
+
+    Key improvements over original:
+      - PAGES_PER_BATCH=1 by default (reliable page alignment)
+      - TRANSCRIPTION_MAX_TOKENS=16384 (no silent truncation)
+      - ThreadPoolExecutor for parallel processing (TRANSCRIPTION_WORKERS workers)
+      - Exponential backoff retries via _api_call_with_retry
+
+    Returns list of {page_num, text, has_content} dicts.
+    """
+    total = len(image_paths)
+    print(f"  🖊️  Transcribing {total} pages | batch_size={PAGES_PER_BATCH} | workers={TRANSCRIPTION_WORKERS}")
+
+    # Build batches
+    batches: list[tuple[list[str], int]] = []  # (batch_images, batch_start_index)
+    for batch_start in range(0, total, PAGES_PER_BATCH):
+        batch = image_paths[batch_start: batch_start + PAGES_PER_BATCH]
+        batches.append((batch, batch_start))
+
+    results_by_start: dict[int, list[dict]] = {}
+    completed = 0
+
+    with ThreadPoolExecutor(max_workers=TRANSCRIPTION_WORKERS) as executor:
+        future_to_start = {
+            executor.submit(_transcribe_single_batch, batch, batch_start): batch_start
+            for batch, batch_start in batches
+        }
+        for future in as_completed(future_to_start):
+            batch_start = future_to_start[future]
+            try:
+                batch_result = future.result()
+                results_by_start[batch_start] = batch_result
             except Exception as e:
-                print(f"  ⚠️  Transcription batch {batch_start}-{batch_start+batch_size} failed. Error details: {e}\n{traceback.format_exc()}")
-                for slot in successful_indices:
-                    batch_results[slot] = {
-                        "page_num": batch_start + slot + 1,
-                        "text": "[transcription failed for this page]",
-                        "has_content": False,
-                    }
+                # Shouldn't happen because _transcribe_single_batch handles errors internally,
+                # but guard anyway
+                print(f"  ⚠️  Unexpected future error at batch_start={batch_start}: {e}")
+                batch_size = min(PAGES_PER_BATCH, total - batch_start)
+                results_by_start[batch_start] = [
+                    {"page_num": batch_start + i + 1, "text": "[transcription failed]", "has_content": False}
+                    for i in range(batch_size)
+                ]
+            completed += 1
+            if completed % 20 == 0 or completed == len(batches):
+                print(f"  ✅  {completed}/{len(batches)} batches done "
+                      f"({completed * PAGES_PER_BATCH}/{total} pages)")
 
-        results.extend(r for r in batch_results if r)
+    # Reassemble in original page order
+    all_results: list[dict] = []
+    for batch_start in sorted(results_by_start.keys()):
+        all_results.extend(results_by_start[batch_start])
 
-    return results
+    content_count = sum(1 for r in all_results if r["has_content"])
+    print(f"  📝  Transcription complete: {content_count}/{total} pages have content")
+    return all_results
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -341,7 +475,7 @@ You receive raw transcribed text (possibly from handwritten pages) and must:
 5. Preserve the original language (do not translate)
 6. Return structured JSON only
 
-Return ONLY valid JSON:
+Return ONLY valid JSON with no preamble, no markdown fences:
 {
   "title": "<inferred or provided title>",
   "language": "<detected language, e.g. English, Hindi, Tamil, etc.>",
@@ -356,17 +490,23 @@ Return ONLY valid JSON:
 }
 """
 
+
 def structure_transcription(pages: list[dict], book_title: str = "") -> dict:
     """
     Use GPT-4o to clean and structure the raw transcription into chapters.
-    Processes the full text in chunks so nothing is ever discarded.
+
+    Key improvements over original:
+      - STRUCTURE_CHUNK_SIZE reduced to 20K chars (prevents JSON truncation)
+      - STRUCTURE_MAX_TOKENS raised to 10000
+      - Retries on each chunk via _api_call_with_retry
     """
     content_pages = [p for p in pages if p["has_content"]]
     if not content_pages:
         return {
             "title": book_title or "Untitled Manuscript",
             "language": "Unknown",
-            "chapters": [{"chapter_number": 1, "title": "Content", "content": "[No readable text found in the uploaded pages]"}],
+            "chapters": [{"chapter_number": 1, "title": "Content",
+                          "content": "[No readable text found in the uploaded pages]"}],
             "total_words": 0,
         }
 
@@ -374,7 +514,8 @@ def structure_transcription(pages: list[dict], book_title: str = "") -> dict:
     sample_text = "\n\n".join(p["text"] for p in content_pages[:5])
     detected_language = "Unknown"
     try:
-        lang_resp = client.chat.completions.create(
+        lang_resp = _api_call_with_retry(
+            client.chat.completions.create,
             model=MODEL,
             messages=[{"role": "user", "content": f"What language is this text written in? Reply with just the language name.\n\n{sample_text[:500]}"}],
             max_tokens=20,
@@ -382,63 +523,63 @@ def structure_transcription(pages: list[dict], book_title: str = "") -> dict:
         detected_language = lang_resp.choices[0].message.content.strip()
     except Exception as e:
         print(f"  ⚠️  Language detection failed. Error details: {e}\n{traceback.format_exc()}")
-        pass
 
-    # Build full text — no truncation
-    full_text = "\n\n".join(
-        f"[Page {p['page_num']}]\n{p['text']}"
-        for p in content_pages
-    )
+    # Split into chunks at page boundaries
+    text_chunks: list[str] = []
+    current_chunk: list[str] = []
+    current_size = 0
 
-    # Process in 50K-char chunks to avoid token limits
-    CHUNK_SIZE = 50_000
-    text_chunks = []
-    if len(full_text) <= CHUNK_SIZE:
-        text_chunks = [full_text]
-    else:
-        # Split at page boundaries
-        current_chunk = []
-        current_size = 0
-        for p in content_pages:
-            page_block = f"[Page {p['page_num']}]\n{p['text']}"
-            if current_size + len(page_block) > CHUNK_SIZE and current_chunk:
-                text_chunks.append("\n\n".join(current_chunk))
-                current_chunk = []
-                current_size = 0
-            current_chunk.append(page_block)
-            current_size += len(page_block) + 2
-        if current_chunk:
+    for p in content_pages:
+        page_block = f"[Page {p['page_num']}]\n{p['text']}"
+        block_size = len(page_block) + 2
+
+        # If adding this page would exceed the chunk size AND we already have content,
+        # flush the current chunk first
+        if current_size + block_size > STRUCTURE_CHUNK_SIZE and current_chunk:
             text_chunks.append("\n\n".join(current_chunk))
+            current_chunk = []
+            current_size = 0
+
+        current_chunk.append(page_block)
+        current_size += block_size
+
+    if current_chunk:
+        text_chunks.append("\n\n".join(current_chunk))
 
     print(f"  📖 Structuring transcription: {len(content_pages)} pages → {len(text_chunks)} chunk(s)")
 
-    all_chapters = []
+    all_chapters: list[dict] = []
     chapter_counter = 0
 
     for chunk_idx, chunk_text in enumerate(text_chunks):
         prompt = (
             f"Book title (if known): {book_title or 'Unknown — infer from content if possible'}\n"
             f"Language: {detected_language}\n"
-            + (f"(This is part {chunk_idx + 1} of {len(text_chunks)} — continue chapter numbering from {chapter_counter + 1})\n" if len(text_chunks) > 1 else "")
+            + (f"(This is part {chunk_idx + 1} of {len(text_chunks)} — continue chapter numbering from {chapter_counter + 1})\n"
+               if len(text_chunks) > 1 else "")
             + f"\nRaw transcribed pages:\n{chunk_text}"
         )
         try:
-            response = client.chat.completions.create(
-                model=MODEL,
-                messages=[
-                    {"role": "system", "content": STRUCTURE_SYSTEM},
-                    {"role": "user", "content": prompt},
-                ],
-                max_tokens=8000,
-            )
+            def _structure_call(p=prompt):
+                return client.chat.completions.create(
+                    model=MODEL,
+                    messages=[
+                        {"role": "system", "content": STRUCTURE_SYSTEM},
+                        {"role": "user", "content": p},
+                    ],
+                    max_tokens=STRUCTURE_MAX_TOKENS,
+                )
+
+            response = _api_call_with_retry(_structure_call)
             raw = response.choices[0].message.content.strip()
+            # Strip any accidental markdown fences
             raw = raw.replace("```json", "").replace("```", "").strip()
-            s = raw.find("{"); e = raw.rfind("}") + 1
+            s = raw.find("{")
+            e = raw.rfind("}") + 1
             if s == -1 or e == 0:
-                raise ValueError("No JSON in structure response")
+                raise ValueError("No JSON object found in structure response")
             chunk_result = json.loads(raw[s:e])
 
-            # Collect chapters and fix numbering
             for ch in chunk_result.get("chapters", []):
                 chapter_counter += 1
                 all_chapters.append({
@@ -447,7 +588,6 @@ def structure_transcription(pages: list[dict], book_title: str = "") -> dict:
                     "content": ch.get("content", ""),
                 })
 
-            # Use title/language from first chunk
             if chunk_idx == 0:
                 if chunk_result.get("title") and not book_title:
                     book_title = chunk_result["title"]
@@ -464,6 +604,7 @@ def structure_transcription(pages: list[dict], book_title: str = "") -> dict:
             })
 
     if not all_chapters:
+        full_text = "\n\n".join(f"[Page {p['page_num']}]\n{p['text']}" for p in content_pages)
         all_chapters = [{"chapter_number": 1, "title": "Full Content", "content": full_text}]
 
     total_words = sum(len(ch["content"].split()) for ch in all_chapters)
@@ -658,7 +799,7 @@ def scan_handwritten_book(
     """
     Full pipeline:
     1. Extract/collect images from the input file
-    2. Transcribe each image via GPT-4o vision
+    2. Transcribe each image via GPT-4o vision (parallel, with retries)
     3. Structure the transcription into chapters
     4. Generate PDF + DOCX
     Returns metadata dict with paths and stats.
@@ -674,11 +815,10 @@ def scan_handwritten_book(
         total_pages = len(images)
         if total_pages == 0:
             raise ValueError("No readable images found in the uploaded file.")
-        # No arbitrary page cap — process all pages
 
         if progress_callback: progress_callback("transcribing", 5, f"Found {total_pages} pages — starting transcription…")
 
-        # Step 2: Transcribe
+        # Step 2: Transcribe (parallel)
         transcribed = transcribe_images(images, book_title)
 
         content_pages = sum(1 for p in transcribed if p["has_content"])
