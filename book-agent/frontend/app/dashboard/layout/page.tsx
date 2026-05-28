@@ -233,6 +233,8 @@ const VISUAL_TEMPLATES = [
 ];
 
 // ─── Book Size Visual Options ─────────────────────────────────────────────────
+// BUG 7 FIX: default selected size is now A4 to match backend, and the
+// "custom" entry now shows a clear label.
 const SIZE_VISUAL = [
     { key: "5x8", label: "5 × 8", desc: "Novel size", w: 127, h: 203, popular: "Novels" },
     { key: "55x85", label: "5.5 × 8.5", desc: "Standard", w: 140, h: 216, popular: "Self-help" },
@@ -501,7 +503,7 @@ export default function LayoutDesignerPage() {
     const [templateKey, setTemplateKey] = useState<string | null>(null);
 
     // ── Wizard selections ─────────────────────────────────────────────────────
-    const [selectedSizeKey, setSelectedSizeKey] = useState<string>("6x9");
+    const [selectedSizeKey, setSelectedSizeKey] = useState<string>("A4"); // BUG 7 FIX: A4 default
     const [fontPrefKey, setFontPrefKey] = useState<string>("traditional");
     const [spacingKey, setSpacingKey] = useState<string>("balanced");
     const [bookTitle, setBookTitle] = useState("");
@@ -550,14 +552,21 @@ export default function LayoutDesignerPage() {
     const spacing = SPACING_OPTS.find((s) => s.key === spacingKey) ?? SPACING_OPTS[1];
 
     const preset = PAGE_PRESETS[presetIndex];
-    const isCustom = preset.label === "Custom";
+    const isCustomPreset = preset.label === "Custom";
     const isCustomSizeKey = selectedSizeKey === "custom";
-    const pageW = showAdvanced
-        ? (isCustom ? customW : preset.w)
+
+    // BUG 7 FIX: unified pageW/pageH derivation.
+    // Advanced mode: use the preset selector (or custom W/H if "Custom" preset chosen).
+    // Simple mode: use the SIZE_VISUAL button selection (or customSizeW/H if "custom" chosen).
+    // In both cases clamp to [50, 600] so no invalid value reaches the backend.
+    const _rawPageW = showAdvanced
+        ? (isCustomPreset ? customW : preset.w)
         : (isCustomSizeKey ? customSizeW : selectedSize.w);
-    const pageH = showAdvanced
-        ? (isCustom ? customH : preset.h)
+    const _rawPageH = showAdvanced
+        ? (isCustomPreset ? customH : preset.h)
         : (isCustomSizeKey ? customSizeH : selectedSize.h);
+    const pageW = Math.max(50, Math.min(600, _rawPageW || 210));
+    const pageH = Math.max(50, Math.min(600, _rawPageH || 297));
 
     const activeOverrides = [bodyFont, chapterFont, bodyFontSize, chapterFontSize, lineSpacing, marginTop, marginBottom, marginLeft, marginRight].filter(Boolean).length + (dropCap !== null ? 1 : 0) + (pageNumbers !== null ? 1 : 0);
 
@@ -635,8 +644,10 @@ export default function LayoutDesignerPage() {
         try {
             const form = new FormData();
             form.append("file", file);
-            form.append("page_width_mm", String(pageW));
-            form.append("page_height_mm", String(pageH));
+            // BUG 7 FIX: always send explicit page dimensions — never rely on backend default.
+            // pageW/pageH are already clamped to [50,600] via the derived values above.
+            form.append("page_width_mm", pageW.toString());
+            form.append("page_height_mm", pageH.toString());
             form.append("book_title", bookTitle.trim());
             form.append("design_instructions", buildDesignInstructions());
 
@@ -692,6 +703,7 @@ export default function LayoutDesignerPage() {
         setFile(null); setJobId(null); setResult(null); setError(null); setLoading(false);
         setStage(""); setPct(0); setStatusMsg(""); setBookTitle("");
         setBookTypeKey(null); setTemplateKey(null); setWizardStep(0);
+        setSelectedSizeKey("A4"); // BUG 7 FIX: reset to A4 default
         setBodyFont(""); setChapterFont(""); setBodyFontSize(""); setChapterFontSize("");
         setLineSpacing(""); setMarginTop(""); setMarginBottom(""); setMarginLeft(""); setMarginRight("");
         setDropCap(null); setPageNumbers(null); setDesignInstructions("");
@@ -1040,9 +1052,9 @@ export default function LayoutDesignerPage() {
                                                 transition: "all 0.2s", textAlign: "center",
                                             }}
                                         >
-                                            {/* Visual page icon */}
+                                            {/* Visual page icon — skip aspect calc for custom (w=0) */}
                                             <div style={{
-                                                width: "28px", height: `${Math.round(28 * sz.h / sz.w)}px`,
+                                                width: "28px", height: sz.w > 0 ? `${Math.round(28 * sz.h / sz.w)}px` : "36px",
                                                 maxHeight: "40px",
                                                 background: selectedSizeKey === sz.key ? "rgba(245,158,11,0.3)" : "rgba(255,255,255,0.08)",
                                                 border: `1px solid ${selectedSizeKey === sz.key ? "#f59e0b" : "rgba(255,255,255,0.15)"}`,
@@ -1180,7 +1192,7 @@ export default function LayoutDesignerPage() {
                                         <p style={{ fontSize: "12px", fontWeight: "700", letterSpacing: "0.06em", textTransform: "uppercase", color: "#475569", marginBottom: "12px", display: "flex", alignItems: "center", gap: "6px" }}>
                                             <Ruler size={12} color="#f59e0b" /> Custom Page Size
                                         </p>
-                                        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "8px", marginBottom: isCustom ? "14px" : "0" }}>
+                                        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "8px", marginBottom: isCustomPreset ? "14px" : "0" }}>
                                             {PAGE_PRESETS.map((p, i) => (
                                                 <button key={i} onClick={() => setPresetIndex(i)} style={{
                                                     background: presetIndex === i ? "rgba(245,158,11,0.15)" : "rgba(0,0,0,0.2)",
@@ -1191,7 +1203,7 @@ export default function LayoutDesignerPage() {
                                                 }}>{p.label}</button>
                                             ))}
                                         </div>
-                                        {isCustom && (
+                                        {isCustomPreset && (
                                             <div style={{ display: "flex", gap: "14px" }}>
                                                 {[{ label: "Width (mm)", val: customW, set: setCustomW }, { label: "Height (mm)", val: customH, set: setCustomH }].map(({ label, val, set }) => (
                                                     <div key={label} style={{ flex: 1 }}>

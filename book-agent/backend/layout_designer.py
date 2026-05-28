@@ -51,56 +51,112 @@ MODEL = "gpt-4o"
 # For any non-Latin script we register Noto TTF fonts and substitute them.
 # ─────────────────────────────────────────────────────────────────────────────
 
-_NOTO_PATHS = {
-    "NotoSerifDevanagari":      "/usr/share/fonts/truetype/noto/NotoSerifDevanagari-Regular.ttf",
-    "NotoSerifDevanagari-Bold": "/usr/share/fonts/truetype/noto/NotoSerifDevanagari-Bold.ttf",
-    "NotoSansDevanagari":       "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf",
-    "NotoSansDevanagari-Bold":  "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Bold.ttf",
-    # Fallback general-purpose Unicode fonts
-    "FreeSerif":        "/usr/share/fonts/truetype/freefont/FreeSerif.ttf",
-    "FreeSerifBold":    "/usr/share/fonts/truetype/freefont/FreeSerifBold.ttf",
-    "FreeSerifItalic":  "/usr/share/fonts/truetype/freefont/FreeSerifItalic.ttf",
-    "FreeSans":         "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
-    "FreeSansBold":     "/usr/share/fonts/truetype/freefont/FreeSansOblique.ttf",
+# ── BUG 1 & 2 FIX: Multi-path font search + verified fallback chain ────────────
+# Searches several known install locations so the code works on Ubuntu/Debian
+# (apt fonts-noto), Alpine (apk noto-fonts), and alongside a local ./fonts/ dir.
+# Priority: local bundled fonts first, then system paths.
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+def _candidate_paths(filename: str) -> list[str]:
+    """Return all candidate absolute paths to check for a font file."""
+    return [
+        # 1. Bundled with the app (highest priority — always works on any platform)
+        os.path.join(_SCRIPT_DIR, "fonts", filename),
+        # 2. Ubuntu/Debian via apt install fonts-noto fonts-noto-core
+        os.path.join("/usr/share/fonts/truetype/noto", filename),
+        # 3. Older Ubuntu layout
+        os.path.join("/usr/share/fonts/noto", filename),
+        # 4. Alpine apk add font-noto
+        os.path.join("/usr/share/fonts/noto-cjk", filename),
+        os.path.join("/usr/share/fonts", filename),
+        # 5. FreeFont (fallback)
+        os.path.join("/usr/share/fonts/truetype/freefont", filename),
+        os.path.join("/usr/share/fonts/freefont", filename),
+    ]
+
+def _find_font(filename: str) -> Optional[str]:
+    """Return the first existing path for a font filename, or None."""
+    for p in _candidate_paths(filename):
+        if os.path.isfile(p):
+            return p
+    return None
+
+# Map: ReportLab font name → TTF filename
+_NOTO_FONT_FILES: dict[str, str] = {
+    "NotoSerifDevanagari":      "NotoSerifDevanagari-Regular.ttf",
+    "NotoSerifDevanagari-Bold": "NotoSerifDevanagari-Bold.ttf",
+    "NotoSansDevanagari":       "NotoSansDevanagari-Regular.ttf",
+    "NotoSansDevanagari-Bold":  "NotoSansDevanagari-Bold.ttf",
+    "FreeSerif":                "FreeSerif.ttf",
+    "FreeSerifBold":            "FreeSerifBold.ttf",
+    "FreeSerifItalic":          "FreeSerifItalic.ttf",
+    "FreeSans":                 "FreeSans.ttf",
+    "FreeSansBold":             "FreeSansOblique.ttf",
 }
 
+# Tracks which fonts were successfully registered (populated by _ensure_unicode_fonts)
+_REGISTERED_FONTS: set[str] = set()
 _FONTS_REGISTERED = False
 
 
 def _ensure_unicode_fonts() -> None:
-    """Register Noto / FreeFont TTFs with ReportLab (idempotent)."""
-    global _FONTS_REGISTERED
+    """
+    Register Noto / FreeFont TTFs with ReportLab (idempotent).
+    BUG 1 & 2 FIX: searches multiple paths, tracks which fonts actually
+    registered, and logs clearly so failures are visible in server logs.
+    """
+    global _FONTS_REGISTERED, _REGISTERED_FONTS
     if _FONTS_REGISTERED:
         return
     try:
         from reportlab.pdfbase import pdfmetrics          # pyrefly: ignore [missing-import]
         from reportlab.pdfbase.ttfonts import TTFont       # pyrefly: ignore [missing-import]
-        for name, path in _NOTO_PATHS.items():
-            if os.path.exists(path):
-                try:
-                    pdfmetrics.registerFont(TTFont(name, path))
-                except Exception as e:
-                    print(f"  ⚠️  Failed to register font {name}: {e}\n{traceback.format_exc()}")
-                    pass  # already registered or unavailable
+
+        for name, filename in _NOTO_FONT_FILES.items():
+            path = _find_font(filename)
+            if not path:
+                print(f"  ⚠️  Font file not found anywhere: {filename} — searched {_candidate_paths(filename)}")
+                continue
+            try:
+                pdfmetrics.registerFont(TTFont(name, path))
+                _REGISTERED_FONTS.add(name)
+                print(f"  ✅  Registered font: {name} from {path}")
+            except Exception as e:
+                print(f"  ⚠️  Failed to register font {name} from {path}: {e}")
+
+        if not _REGISTERED_FONTS:
+            print(
+                "  🚨  NO Unicode fonts could be registered. "
+                "Install fonts on your server:\n"
+                "      apt-get install -y fonts-noto fonts-noto-core fonts-freefont-ttf\n"
+                "  OR bundle TTF files in a ./fonts/ directory next to layout_designer.py"
+            )
         _FONTS_REGISTERED = True
     except Exception as e:
         print(f"  ⚠️  _ensure_unicode_fonts failed completely: {e}\n{traceback.format_exc()}")
-        pass
+        _FONTS_REGISTERED = True  # mark done so we don't retry on every call
 
 
 def _has_non_latin(text: str) -> bool:
-    """Return True if *text* contains characters outside the Latin-1 range."""
-    return any(ord(c) > 0x024F for c in text if not unicodedata.category(c).startswith("Z"))
+    """
+    Return True if text contains Devanagari or other Indic/non-Latin scripts.
+    BUG 3 FIX: Use U+0900 (start of Devanagari) as boundary instead of U+024F
+    (Latin Extended-B) to avoid false positives on Greek/Cyrillic/IPA.
+    """
+    return any(ord(c) >= 0x0900 for c in text if not unicodedata.category(c).startswith("Z"))
 
 
 def _unicode_body_font(rl_name: str, has_unicode: bool) -> str:
     """
     Map a ReportLab built-in font name to a Unicode-capable equivalent
     when the document contains non-Latin characters (e.g. Devanagari).
-    Falls back to the original name for pure-Latin documents.
+    BUG 2 FIX: verified fallback chain — only returns a font name if it
+    was actually registered. Never silently falls back to a Latin-only font.
     """
     if not has_unicode:
         return rl_name
+
+    # Preferred Devanagari font per base font style
     _MAP = {
         "Times-Roman":       "NotoSerifDevanagari",
         "Times-Italic":      "NotoSerifDevanagari",
@@ -108,15 +164,25 @@ def _unicode_body_font(rl_name: str, has_unicode: bool) -> str:
         "Helvetica-Oblique": "NotoSansDevanagari",
         "Courier":           "NotoSansDevanagari",
     }
-    mapped = _MAP.get(rl_name, rl_name)
-    # Only use mapped name if the font was actually registered
-    try:
-        from reportlab.pdfbase import pdfmetrics          # pyrefly: ignore [missing-import]
-        pdfmetrics.getFont(mapped)
-        return mapped
-    except Exception as e:
-        print(f"  ⚠️  Failed mapping font to {mapped}: {e}\n{traceback.format_exc()}")
-        return "FreeSerif" if os.path.exists(_NOTO_PATHS.get("FreeSerif", "")) else rl_name
+    # Fallback preference order — all checked against _REGISTERED_FONTS
+    _FALLBACK_ORDER = [
+        _MAP.get(rl_name, "NotoSerifDevanagari"),
+        "NotoSansDevanagari",
+        "NotoSerifDevanagari",
+        "FreeSerif",
+        "FreeSans",
+    ]
+    for candidate in _FALLBACK_ORDER:
+        if candidate in _REGISTERED_FONTS:
+            return candidate
+
+    # Nothing Unicode-capable registered — log a clear error and return original
+    print(
+        f"  🚨  No Unicode font available for script rendering. "
+        f"Falling back to '{rl_name}' (Latin-only — non-Latin text will show as boxes). "
+        f"Fix: install Noto fonts on your server."
+    )
+    return rl_name
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -847,16 +913,22 @@ def render_layout_pdf(
         story.append(PageBreak())
 
         # ── Chapters ──────────────────────────────────────────────────────────────
-        for idx, chapter in enumerate(chapters, start=1):
+        # BUG 4 FIX: use a dedicated counter so "Front Matter" chapters injected
+        # by parse_chapters don't shift all real chapter numbers up by 1.
+        real_chapter_num = 0
+        for chapter in chapters:
             
             # FIX: Prevent Double Chapter Headings & Exclude Intro
             ch_title_lower = chapter["title"].lower()
             already_has_chapter = ch_title_lower.startswith("chapter") or ch_title_lower.startswith("part")
             is_intro = "introduction" in ch_title_lower or "front matter" in ch_title_lower
-            
+
+            if not is_intro:
+                real_chapter_num += 1
+
             if chapter_prefix and not already_has_chapter and not is_intro:
                 safe_prefix = chapter_prefix.replace("&", "&amp;")
-                story.append(Paragraph(f"{safe_prefix.upper()} {idx}".strip(), prefix_style))
+                story.append(Paragraph(f"{safe_prefix.upper()} {real_chapter_num}".strip(), prefix_style))
                 
             safe_ch_title = chapter["title"].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
             story.append(Paragraph(safe_ch_title, ch_style))
@@ -893,13 +965,16 @@ def render_layout_pdf(
                 safe = "".join(cleaned_lines)
 
                 # Drop cap logic
+                # BUG 6 FIX: build rest_orig by slicing `safe` after the
+                # escaped first character, not by re-escaping first_char and
+                # using its *escaped* length (which is wrong for &, <, >).
                 if p_idx == 0 and show_drop and not is_intro and len(para_text) > 1:
-                    # Work on the original text to get the first real character
-                    first_char = para_text[0]   # ← codepoint-safe (Python str)
-                    rest_orig  = safe[len(first_char.replace("&", "&amp;").replace("<", "&lt;")):]
+                    first_char = para_text[0]   # original codepoint
                     # Only do drop cap if first char is a basic Latin letter
                     if first_char.isalpha() and ord(first_char) < 0x0250:
                         first_esc = first_char.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                        # `safe` starts with first_esc — slice past it correctly
+                        rest_orig = safe[len(first_esc):]
                         drop_html = (
                             f'<font name="{chapter_font}" size="{int(body_size * 2.8)}">'
                             f"{first_esc}</font>{rest_orig}"
@@ -1013,15 +1088,20 @@ def render_layout_docx(
         doc.add_page_break()
 
         # Chapters
-        for idx, chapter in enumerate(chapters, start=1):
+        # BUG 5 FIX: dedicated counter so Front Matter doesn't shift numbering
+        real_chapter_num = 0
+        for chapter in chapters:
             
             # --- FIX: Prevent Double Headings in DOCX ---
             ch_title_lower = chapter["title"].lower()
             already_has_chapter = ch_title_lower.startswith("chapter") or ch_title_lower.startswith("part")
             is_intro = "introduction" in ch_title_lower or "front matter" in ch_title_lower
-            
+
+            if not is_intro:
+                real_chapter_num += 1
+
             if prefix and not already_has_chapter and not is_intro:
-                add_para(f"{prefix.upper()} {idx}".strip(), body_fn, body_size * 0.82,
+                add_para(f"{prefix.upper()} {real_chapter_num}".strip(), body_fn, body_size * 0.82,
                          color=concept["accent_color"], space_before=6, space_after=2)
                          
             add_para(chapter["title"], ch_fn, ch_size, bold=True,
@@ -1078,8 +1158,8 @@ def design_layout(
     file_path: str,
     filename: str,
     output_dir: str,
-    page_width_mm: float = 127.0,  # CRITICAL FIX: HARD DEFAULT TO 5x8 INCHES
-    page_height_mm: float = 203.2, # CRITICAL FIX: HARD DEFAULT TO 5x8 INCHES
+    page_width_mm: float = 210.0,   # BUG 7 FIX: default A4 to match FastAPI endpoint
+    page_height_mm: float = 297.0,  # BUG 7 FIX: default A4 to match FastAPI endpoint
     book_title: str = "",
     design_instructions: str = "",
     book_type: Optional[str] = None,

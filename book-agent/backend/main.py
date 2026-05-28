@@ -1230,8 +1230,8 @@ def _run_layout_job(
 @app.post("/design-layout")
 async def design_layout_endpoint(
     file: UploadFile = File(...),
-    page_width_mm: float = Form(default=210.0),
-    page_height_mm: float = Form(default=297.0),
+    page_width_mm: float = Form(default=210.0),   # BUG 7 FIX: A4 default — matches layout_designer.py
+    page_height_mm: float = Form(default=297.0),  # BUG 7 FIX: A4 default — matches layout_designer.py
     book_title: str = Form(default=""),
     design_instructions: str = Form(default=""),
     book_type: Optional[str] = Form(default=None),
