@@ -217,6 +217,41 @@ def _has_non_latin(text: str) -> bool:
                if not unicodedata.category(c).startswith("Z"))
 
 
+def _clean_extracted_text(text: str) -> str:
+    """
+    Remove null bytes, private-use Unicode characters, and other garbage that
+    PDF extractors emit when a font uses a custom encoding map.
+    Also normalises non-breaking spaces and zero-width characters.
+    Returns the cleaned string.
+    """
+    # Strip null bytes and C0/C1 control characters (except newline/tab)
+    text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]", "", text)
+    # Strip Unicode private-use area blocks (U+E000–U+F8FF, U+F0000–U+FFFFF)
+    text = re.sub(r"[\ue000-\uf8ff]", "", text)
+    # Normalise non-breaking spaces and zero-width joiners/non-joiners to regular space
+    text = text.replace("\u00a0", " ").replace("\u200b", "").replace("\u200c", "").replace("\u200d", "")
+    # Collapse runs of whitespace-only lines (3+ blank lines → 2)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text
+
+
+def _text_looks_corrupt(text: str) -> bool:
+    """
+    Returns True when the extracted text is mostly garbage (null bytes,
+    private-use codepoints, or extremely low printable-character density).
+    This is the signal to discard PDF extraction and try another source.
+    """
+    if not text:
+        return True
+    sample = text[:2000]
+    null_count = sample.count("\x00")
+    pua_count  = sum(1 for c in sample if "\ue000" <= c <= "\uf8ff")
+    printable  = sum(1 for c in sample if c.isprintable() and c not in "\x00")
+    total      = max(len(sample), 1)
+    # Corrupt if >5 % null/PUA bytes OR printable ratio below 60 %
+    return (null_count + pua_count) / total > 0.05 or printable / total < 0.60
+
+
 def _unicode_body_font(rl_name: str, has_unicode: bool) -> str:
     """
     Return the best available Unicode-capable font name for the requested style.
@@ -475,7 +510,9 @@ def _hex_to_docx_rgb(h: str):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _extract_from_pdf(path: str) -> str:
-    """Extract text from PDF. Tries pypdf first, pdfplumber as fallback for better coverage."""
+    """Extract text from PDF. Tries pypdf first, pdfplumber as fallback.
+    Cleans null-bytes and private-use garbage from both extractors.
+    Returns cleaned text, or raises RuntimeError if both fail."""
     text = ""
     # Primary: pypdf
     try:
@@ -486,13 +523,14 @@ def _extract_from_pdf(path: str) -> str:
             t = page.extract_text()
             if t:
                 pages.append(t)
-        text = "\n\n".join(pages)
+        text = _clean_extracted_text("\n\n".join(pages))
     except Exception as e:
         print(f"  ⚠️  pypdf extraction failed: {e}\n{traceback.format_exc()}")
-        pass
 
-    # Fallback/supplement: pdfplumber (better at complex layouts)
-    if not text.strip():
+    # Detect custom-encoding corruption (null bytes / private-use characters)
+    if _text_looks_corrupt(text):
+        print("  ⚠️  pypdf produced corrupt/null-byte text — trying pdfplumber…")
+        text = ""
         try:
             import pdfplumber  # pyrefly: ignore [missing-import]
             pages = []
@@ -501,11 +539,23 @@ def _extract_from_pdf(path: str) -> str:
                     t = page.extract_text()
                     if t:
                         pages.append(t)
-            text = "\n\n".join(pages)
+            text = _clean_extracted_text("\n\n".join(pages))
         except Exception as exc:
             print(f"  ⚠️  pdfplumber fallback failed: {exc}\n{traceback.format_exc()}")
             if not text:
-                raise RuntimeError(f"PDF extraction failed: {exc}\n{traceback.format_exc()}") from exc
+                raise RuntimeError(
+                    f"PDF text extraction failed — both pypdf and pdfplumber produced no usable text. "
+                    f"This usually means the PDF uses a custom/private font encoding. "
+                    f"Please provide a .docx version of the manuscript instead. ({exc})"
+                ) from exc
+
+    # Final corruption check after both attempts
+    if _text_looks_corrupt(text):
+        raise RuntimeError(
+            "PDF text extraction produced only garbage (null bytes / private-use characters). "
+            "The PDF likely uses a custom font encoding that cannot be decoded without the "
+            "original font. Please upload a .docx version of the manuscript."
+        )
 
     return text
 
@@ -514,7 +564,8 @@ def _extract_from_docx(path: str) -> str:
     try:
         from docx import Document  # pyrefly: ignore [missing-import]
         doc = Document(path)
-        return "\n\n".join(p.text for p in doc.paragraphs if p.text.strip())
+        raw = "\n\n".join(p.text for p in doc.paragraphs if p.text.strip())
+        return _clean_extracted_text(raw)
     except Exception as exc:
         print(f"  ⚠️  DOCX extraction failed: {exc}\n{traceback.format_exc()}")
         raise RuntimeError(f"DOCX extraction failed: {exc}\n{traceback.format_exc()}") from exc
@@ -934,7 +985,10 @@ def render_layout_pdf(
             textColor=Color(tx_r, tx_g, tx_b),
             firstLineIndent=indent_pt,
             alignment=TA_JUSTIFY,
-            spaceAfter=0, spaceBefore=0,
+            # Paragraph breathing room: half a line-height between paragraphs,
+            # and a small spaceBefore so paragraph boundaries are always visible.
+            spaceAfter=leading * 0.45,
+            spaceBefore=leading * 0.15,
             # wordWrap: Devanagari uses LTR word-based wrapping (NOT CJK — CJK breaks
             # Devanagari conjunct ligatures). Use default LTR for all Indic scripts.
             wordWrap="LTR",
@@ -947,9 +1001,120 @@ def render_layout_pdf(
             alignment=TA_CENTER, spaceBefore=10, spaceAfter=10,
         )
 
-        story = []
+        # ── Dual-font run builder for mixed Devanagari + Latin text ─────────────
+        # When a paragraph contains both Hindi (Devanagari, U+0900–U+097F) and
+        # English/Latin characters (or digits/punctuation), we need to tag the
+        # Latin portions with a Latin-capable font so they render correctly.
+        # Noto Devanagari fonts do include Latin glyphs, but their metrics and
+        # hinting are optimised for Devanagari; using a proper Latin font (e.g.
+        # Times-Roman) for the Latin runs gives much crisper output.
+        #
+        # Strategy: split the escaped text into runs of "Devanagari" vs "Latin",
+        # wrap each Latin run in a <font name="..."> tag.
+        #
+        # We only apply this when has_unicode is True (the document has Devanagari)
+        # AND a proper Latin fallback font is available.
 
-        # ── Title page ────────────────────────────────────────────────────────────
+        _LATIN_FALLBACK: dict[str, str] = {
+            "NotoSerifDevanagari":      "Times-Roman",
+            "NotoSerifDevanagari-Bold": "Times-Roman",
+            "NotoSansDevanagari":       "Helvetica",
+            "NotoSansDevanagari-Bold":  "Helvetica",
+        }
+
+        def _mixed_font_html(safe_escaped_text: str, deva_font: str) -> str:
+            """
+            Given HTML-escaped paragraph text and the Devanagari font name,
+            return ReportLab XML markup with dual-font tags for Latin runs.
+
+            Only called when has_unicode is True.  If no Latin fallback is
+            registered, returns the text unchanged.
+            """
+            latin_font = _LATIN_FALLBACK.get(deva_font)
+            if not latin_font:
+                return safe_escaped_text
+
+            # We work on the *unescaped* text to correctly classify codepoints,
+            # then re-escape each segment individually.
+            # NOTE: safe_escaped_text may contain <br/> tags — preserve them.
+            # Split on <br/> first, process each fragment, then rejoin.
+            fragments = re.split(r"(<br\s*/>)", safe_escaped_text)
+            result_parts: list[str] = []
+
+            for frag in fragments:
+                if re.fullmatch(r"<br\s*/>", frag):
+                    result_parts.append(frag)
+                    continue
+                if not frag:
+                    continue
+
+                # Un-escape HTML entities in this fragment so we can inspect codepoints
+                frag_plain = (
+                    frag.replace("&amp;", "&")
+                        .replace("&lt;",  "<")
+                        .replace("&gt;",  ">")
+                        .replace("&quot;", '"')
+                        .replace("&#39;",  "'")
+                )
+
+                def _is_latin_char(ch: str) -> bool:
+                    """
+                    Returns True for characters that benefit from a Latin font:
+                    Basic Latin, Latin-1 Supplement, common punctuation,
+                    digits, and ASCII symbols.  Devanagari and whitespace → False.
+                    """
+                    cp = ord(ch)
+                    if ch.isspace():
+                        return False   # spaces get the surrounding font context
+                    if 0x0900 <= cp <= 0x097F:
+                        return False   # Devanagari block → Devanagari font
+                    if 0x0020 <= cp <= 0x024F:
+                        return True    # Basic Latin + Latin Extended A/B
+                    if 0x2000 <= cp <= 0x206F:
+                        return True    # General Punctuation (—, ", ", …)
+                    if 0x0030 <= cp <= 0x0039:
+                        return True    # ASCII digits (redundant but explicit)
+                    return False
+
+                # Build runs: (is_latin, text_chunk)
+                runs: list[tuple[bool, str]] = []
+                if frag_plain:
+                    cur_latin = _is_latin_char(frag_plain[0])
+                    cur_buf   = frag_plain[0]
+                    for ch in frag_plain[1:]:
+                        ch_latin = _is_latin_char(ch)
+                        if ch_latin == cur_latin or ch.isspace():
+                            cur_buf += ch
+                        else:
+                            runs.append((cur_latin, cur_buf))
+                            cur_latin = ch_latin
+                            cur_buf   = ch
+                    if cur_buf:
+                        runs.append((cur_latin, cur_buf))
+
+                # Build the HTML for this fragment
+                frag_html = ""
+                for is_latin, chunk in runs:
+                    # Re-escape the chunk
+                    esc = (
+                        chunk.replace("&", "&amp;")
+                             .replace("<", "&lt;")
+                             .replace(">", "&gt;")
+                    )
+                    if is_latin and chunk.strip():
+                        frag_html += f'<font name="{latin_font}">{esc}</font>'
+                    else:
+                        frag_html += esc
+
+                result_parts.append(frag_html)
+
+            return "".join(result_parts)
+
+        # ── Story (flowable elements list) ────────────────────────────────────
+        # This MUST be initialised here — after all styles and helpers are
+        # defined, before any story.append() calls.
+        story: list = []
+
         title_style = ParagraphStyle(
             "TitlePage",
             fontName=chapter_font,
@@ -957,7 +1122,9 @@ def render_layout_pdf(
             leading=min(36, chapter_size * 1.6) * 1.2,
             textColor=Color(ch_r, ch_g, ch_b),
             alignment=TA_CENTER, spaceAfter=20,
-            wordWrap="CJK" if has_unicode else "LTR",
+            # Devanagari/Indic scripts use LTR word-based wrapping just like Latin.
+            # "CJK" mode breaks individual codepoints (wrong for Devanagari conjuncts).
+            wordWrap="LTR",
         )
         story.append(Spacer(1, PH * 0.28))
         # BUG FIX: escape HTML entities in the title too
@@ -1021,6 +1188,10 @@ def render_layout_pdf(
                 
                 safe = "".join(cleaned_lines)
 
+                # Apply dual-font markup for mixed Hindi + Latin text
+                if has_unicode:
+                    safe = _mixed_font_html(safe, body_font)
+
                 # Drop cap logic
                 # BUG 6 FIX: build rest_orig by slicing `safe` after the
                 # escaped first character, not by re-escaping first_char and
@@ -1071,25 +1242,6 @@ def render_layout_docx(
         from docx.oxml.ns import qn                                # pyrefly: ignore [missing-import]
         from docx.oxml import OxmlElement                          # pyrefly: ignore [missing-import]
 
-        # BUG FIX: map ReportLab font names to Word font names,
-        # and track italic flag correctly for oblique/italic variants.
-        _FONT_MAP = {
-            "Times-Roman":       ("Times New Roman", False),
-            "Times-Italic":      ("Times New Roman", True),   # ← was missing italic=True
-            "Helvetica":         ("Arial",            False),
-            "Helvetica-Oblique": ("Arial",            True),  # ← was missing italic=True
-            "Courier":           ("Courier New",      False),
-        }
-
-        def docx_font(rl_name: str) -> tuple[str, bool]:
-            """Return (word_font_name, is_italic)."""
-            return _FONT_MAP.get(rl_name, ("Times New Roman", False))
-
-        def rgb(hex_str: str) -> RGBColor:
-            return _hex_to_docx_rgb(hex_str)
-
-        body_fn, body_italic   = docx_font(concept["body_font"])
-        ch_fn,   ch_italic     = docx_font(concept["chapter_font"])
         body_size  = float(concept["body_font_size"])
         ch_size    = float(concept["chapter_font_size"])
         ls         = float(concept["line_spacing"])
@@ -1105,23 +1257,126 @@ def render_layout_docx(
         section.top_margin    = Cm(concept["margin_top_mm"]    / 10)
         section.bottom_margin = Cm(concept["margin_bottom_mm"] / 10)
 
-        def add_para(text, font_name, size, bold=False, italic=False,
-                     color="#1a1a1a", align=WD_ALIGN_PARAGRAPH.LEFT,
-                     space_before=0, space_after=0, line_space=1.5):
+        # Detect whether this book has mixed Hindi + Latin content
+        all_text_docx = book_title + " ".join(
+            c.get("title", "") + " " + c.get("body", "") for c in chapters
+        )
+        has_unicode_docx = _has_non_latin(all_text_docx)
+
+        # Map ReportLab font names → (Word font name, is_italic)
+        _FONT_MAP = {
+            "Times-Roman":       ("Times New Roman", False),
+            "Times-Italic":      ("Times New Roman", True),
+            "Helvetica":         ("Arial",            False),
+            "Helvetica-Oblique": ("Arial",            True),
+            "Courier":           ("Courier New",      False),
+        }
+        # Latin fallback fonts for body / chapter when document has Devanagari
+        _DOCX_LATIN_FALLBACK: dict[str, str] = {
+            "NotoSerifDevanagari":      "Times New Roman",
+            "NotoSerifDevanagari-Bold": "Times New Roman",
+            "NotoSansDevanagari":       "Arial",
+            "NotoSansDevanagari-Bold":  "Arial",
+        }
+
+        def docx_font(rl_name: str) -> tuple[str, bool]:
+            """Return (word_font_name, is_italic)."""
+            return _FONT_MAP.get(rl_name, ("Times New Roman", False))
+
+        body_fn, body_italic = docx_font(concept["body_font"])
+        ch_fn,   ch_italic   = docx_font(concept["chapter_font"])
+
+        def rgb(hex_str: str) -> RGBColor:
+            return _hex_to_docx_rgb(hex_str)
+
+        def _set_run_font(run, font_name: str, size_pt: float, bold: bool,
+                          italic: bool, color_hex: str) -> None:
+            """Apply font attributes to a single run."""
+            run.font.name   = font_name
+            run.font.size   = Pt(size_pt)
+            run.font.bold   = bold
+            run.font.italic = italic
+            run.font.color.rgb = rgb(color_hex)
+            # Also set the East-Asian / Complex-script font element so Word
+            # uses the Devanagari font for Devanagari codepoints, rather than
+            # falling through to the theme Latin font.
+            from docx.oxml.ns import qn as _qn  # pyrefly: ignore [missing-import]
+            rPr = run._r.get_or_add_rPr()
+            for tag in ("w:rFonts",):
+                existing = rPr.find(_qn(tag))
+                if existing is None:
+                    from docx.oxml import OxmlElement as _OxmlElement  # pyrefly: ignore [missing-import]
+                    existing = _OxmlElement(tag)
+                    rPr.insert(0, existing)
+                existing.set(_qn("w:ascii"),       font_name)
+                existing.set(_qn("w:hAnsi"),       font_name)
+                existing.set(_qn("w:cs"),          font_name)   # complex-script
+                existing.set(_qn("w:eastAsia"),    font_name)
+
+        def add_para(text: str, font_name: str, size: float, bold: bool = False,
+                     italic: bool = False, color: str = "#1a1a1a",
+                     align=WD_ALIGN_PARAGRAPH.LEFT,
+                     space_before: float = 0, space_after: float = 0,
+                     line_space: float = 1.5) -> None:
+            """
+            Add a paragraph with proper dual-font support for mixed Hindi + English.
+
+            When the document contains Devanagari text (has_unicode_docx is True),
+            the paragraph is split into runs so that Latin characters (digits,
+            English words, punctuation) use the appropriate Latin-script font
+            instead of the Devanagari font — giving correct glyph metrics for both
+            scripts within the same paragraph.
+            """
             p  = doc.add_paragraph()
             p.alignment = align
             pf = p.paragraph_format
             pf.space_before = Pt(space_before)
             pf.space_after  = Pt(space_after)
             pf.line_spacing = Pt(size * line_space)
-            run = p.add_run(text)
-            run.font.name   = font_name
-            run.font.size   = Pt(size)
-            run.font.bold   = bold
-            run.font.italic = italic
-            run.font.color.rgb = rgb(color)
 
-        def add_rule(color_hex):
+            if not has_unicode_docx or not text.strip():
+                # Simple single-run path (no Devanagari in this document)
+                run = p.add_run(text)
+                _set_run_font(run, font_name, size, bold, italic, color)
+                return
+
+            # Dual-run path: split text into Devanagari and Latin segments
+            latin_fallback = _DOCX_LATIN_FALLBACK.get(font_name, font_name)
+
+            def _is_latin_char_docx(ch: str) -> bool:
+                cp = ord(ch)
+                if ch.isspace():
+                    return False
+                if 0x0900 <= cp <= 0x097F:
+                    return False   # Devanagari → Devanagari font
+                if 0x0020 <= cp <= 0x024F:
+                    return True    # Basic Latin + Latin Extended A/B
+                if 0x2000 <= cp <= 0x206F:
+                    return True    # General Punctuation
+                return False
+
+            # Build character-level runs: (is_latin, chunk)
+            runs_list: list[tuple[bool, str]] = []
+            if text:
+                cur_latin = _is_latin_char_docx(text[0])
+                cur_buf   = text[0]
+                for ch in text[1:]:
+                    ch_lat = _is_latin_char_docx(ch)
+                    if ch.isspace() or ch_lat == cur_latin:
+                        cur_buf += ch
+                    else:
+                        runs_list.append((cur_latin, cur_buf))
+                        cur_latin = ch_lat
+                        cur_buf   = ch
+                if cur_buf:
+                    runs_list.append((cur_latin, cur_buf))
+
+            for is_latin, chunk in runs_list:
+                chosen_font = latin_fallback if (is_latin and chunk.strip()) else font_name
+                run = p.add_run(chunk)
+                _set_run_font(run, chosen_font, size, bold, italic, color)
+
+        def add_rule(color_hex: str) -> None:
             p   = doc.add_paragraph()
             pPr = p._p.get_or_add_pPr()
             pBdr = OxmlElement("w:pBdr")
@@ -1195,7 +1450,11 @@ def render_layout_docx(
                     align = WD_ALIGN_PARAGRAPH.LEFT if sub_line.startswith(('•', '-', '*')) else WD_ALIGN_PARAGRAPH.JUSTIFY
                     add_para(sub_line, body_fn, body_size, italic=body_italic,
                              color=concept["text_color"],
-                             align=align, space_after=4, line_space=ls)
+                             align=align,
+                             # Proper paragraph breathing room: ~45% of line height
+                             space_after=round(body_size * ls * 0.45, 1),
+                             space_before=round(body_size * ls * 0.10, 1),
+                             line_space=ls)
                 # -------------------------------------------------------
 
             doc.add_page_break()
