@@ -437,6 +437,38 @@ BOOK_TYPE_PROFILES: dict[str, dict] = {
         "show_page_numbers":   True,
     },
 
+    "biography": {
+        "_label": "Biography / Memoir",
+        "_description": (
+            "A biography or memoir needs an editorial, narrative feel that reads like "
+            "quality journalism.  Off-white page, classic serif body (Times-Roman), "
+            "generous margins, 1.5× line spacing, subtle drop caps on chapter opens.  "
+            "Chapter headings are left-aligned and understated.  Running header carries "
+            "the book title.  Page numbers at the bottom centre or bottom-right.  "
+            "An optional thin rule under the chapter title gives a clean editorial look.  "
+            "No heavy ornaments — dignity and restraint are key."
+        ),
+        "page_bg":             "#fdfcfa",
+        "text_color":          "#1a1a1a",
+        "chapter_title_color": "#1c2b3a",
+        "accent_color":        "#5c6f7e",
+        "body_font":           "Times-Roman",
+        "body_font_size":      11.5,
+        "line_spacing":        1.5,
+        "first_para_indent_mm": 5,
+        "margin_top_mm":       24,
+        "margin_bottom_mm":    24,
+        "margin_left_mm":      26,
+        "margin_right_mm":     24,
+        "chapter_font":        "Times-Roman",
+        "chapter_font_size":   22,
+        "chapter_prefix":      "Chapter",
+        "show_drop_cap":       True,
+        "ornament":            "—",
+        "header_text":         "",
+        "show_page_numbers":   True,
+    },
+
     "business": {
         "_label": "Business / Self-help",
         "_description": (
@@ -924,6 +956,32 @@ def render_layout_pdf(
         leading        = body_size * concept["line_spacing"]
         indent_pt      = concept["first_para_indent_mm"] * mm
         chapter_size   = concept["chapter_font_size"]
+        # paragraph_spacing_mm: if set by user, use it directly; else derive from leading
+        _para_sp_mm    = concept.get("paragraph_spacing_mm")
+        para_space_after  = float(_para_sp_mm) * mm if _para_sp_mm else leading * 0.45
+        para_space_before = float(_para_sp_mm) * mm * 0.35 if _para_sp_mm else leading * 0.15
+        # color_mode: bw forces monochrome palette
+        _color_mode    = concept.get("color_mode", "")
+        if _color_mode == "bw":
+            bg_r, bg_g, bg_b = 1.0, 1.0, 1.0
+            tx_r, tx_g, tx_b = 0.0, 0.0, 0.0
+            ch_r, ch_g, ch_b = 0.0, 0.0, 0.0
+            ac_r, ac_g, ac_b = 0.2, 0.2, 0.2
+        # mirror_margins: alternate left/right per page (handled in _on_page)
+        _mirror        = concept.get("mirror_margins", False)
+        # bleed: expand page dimensions outward
+        _bleed_mm      = float(concept.get("bleed_mm", 0) or 0)
+        bleed_pt       = _bleed_mm * mm
+        if bleed_pt > 0:
+            PW += bleed_pt * 2
+            PH += bleed_pt * 2
+            ml += bleed_pt
+            mr += bleed_pt
+            mt += bleed_pt
+            mb += bleed_pt
+        # page number start and style
+        _pn_start      = int(concept.get("page_number_start", 1) or 1)
+        _pn_roman      = concept.get("page_number_style", "") == "roman"
         # BUG FIX: only show drop cap for Latin scripts — Devanagari drop caps
         # require a Unicode-aware font that also supports large-size Devanagari,
         # and ReportLab's inline <font> tag does not re-shape multi-byte glyphs
@@ -938,18 +996,32 @@ def render_layout_pdf(
         header_text    = concept.get("header_text", book_title) or book_title
         show_pn        = concept["show_page_numbers"]
         chapter_prefix = concept.get("chapter_prefix", "Chapter")
+        _section_breaks = concept.get("section_breaks", False)
 
         # Footer config — always-on, book name bottom-left, page number bottom-right
-        footer_left  = concept.get("footer_left_text", header_text or book_title)
+        footer_left  = concept.get("footer_left_text") or book_title
         footer_right_is_pagenum = concept.get("footer_right_pagenum", True)
-        # If show_page_numbers is False, suppress both footer and running page number
-        _show_footer  = show_pn  # reuse the existing flag
+        _show_footer  = show_pn
+
+        def _roman(n: int) -> str:
+            """Convert positive integer to lowercase roman numeral."""
+            val = [(1000,'m'),(900,'cm'),(500,'d'),(400,'cd'),(100,'c'),(90,'xc'),
+                   (50,'l'),(40,'xl'),(10,'x'),(9,'ix'),(5,'v'),(4,'iv'),(1,'i')]
+            result = ''
+            for (arabic, roman) in val:
+                while n >= arabic:
+                    result += roman; n -= arabic
+            return result
 
         def _on_page(canvas, doc):
             canvas.saveState()
             # ── Page background ──────────────────────────────────────────────────
             canvas.setFillColorRGB(bg_r, bg_g, bg_b)
             canvas.rect(0, 0, PW, PH, fill=1, stroke=0)
+
+            # ── Mirror margins: swap left/right on even pages ────────────────────
+            _ml = mr if (_mirror and doc.page % 2 == 0) else ml
+            _mr = ml if (_mirror and doc.page % 2 == 0) else mr
 
             # ── Running header (page 2+, centred at top) ──────────────────────
             if header_text and doc.page > 1:
@@ -958,43 +1030,115 @@ def render_layout_pdf(
                 canvas.drawCentredString(PW / 2, PH - mt * 0.55, header_text)
                 canvas.setStrokeColorRGB(ac_r, ac_g, ac_b, alpha=0.35)
                 canvas.setLineWidth(0.4)
-                canvas.line(ml, PH - mt * 0.65, PW - mr, PH - mt * 0.65)
+                canvas.line(_ml, PH - mt * 0.65, PW - _mr, PH - mt * 0.65)
 
-            # ── Footer: ALL pages (including page 1 / chapter starts) ─────────
-            # Bottom-left: book title / custom text
-            # Bottom-right: page number
+            # ── Footer: ALL pages ─────────────────────────────────────────────
             footer_y = mb * 0.45
             canvas.setFont(body_font, 8)
             canvas.setFillColorRGB(ac_r, ac_g, ac_b)
             if footer_left:
-                canvas.drawString(ml, footer_y, footer_left)
+                canvas.drawString(_ml, footer_y, footer_left)
             if _show_footer and footer_right_is_pagenum:
-                canvas.drawRightString(PW - mr, footer_y, str(doc.page))
+                real_page = doc.page + _pn_start - 1
+                pn_str = _roman(real_page) if _pn_roman else str(real_page)
+                canvas.drawRightString(PW - _mr, footer_y, pn_str)
 
             canvas.restoreState()
 
-        doc = SimpleDocTemplate(
-            output_path,
-            pagesize=(PW, PH),
-            leftMargin=ml, rightMargin=mr,
-            topMargin=mt,  bottomMargin=mb,
-        )
+        # ── Mirror-margins: build the correct inner margin for each side ─────────
+        # When mirror_margins is True:
+        #   odd pages  (recto): inner = right side  → leftMargin  = mr+gutter, rightMargin = ml
+        #   even pages (verso): inner = left side   → leftMargin  = ml,        rightMargin = mr+gutter
+        # We use BaseDocTemplate with two PageTemplates so the text frame itself
+        # shifts; SimpleDocTemplate cannot do this natively.
+        # NOTE: _mirror was already set above before the _on_page closure; do NOT
+        # re-assign it here to avoid a fragile double-assignment.
+        # _gutter_pt is computed for completeness but gutter is already folded into ml.
+        _gutter_pt = float(concept.get("gutter_mm", 0) or 0) * mm  # already folded into ml by design_layout()
 
-        # ── Paragraph styles ──────────────────────────────────────────────────────
+        if _mirror:
+            from reportlab.platypus import BaseDocTemplate, PageTemplate, Frame  # pyrefly: ignore [missing-import]
+            # odd (recto): binding on left → left margin is the INNER (larger) one
+            inner_margin = ml   # ml already has gutter added by design_layout()
+            outer_margin = mr
+            frame_odd  = Frame(inner_margin, mb, PW - inner_margin - outer_margin, PH - mt - mb,
+                               leftPadding=0, rightPadding=0, topPadding=0, bottomPadding=0, id="odd")
+            frame_even = Frame(outer_margin, mb, PW - inner_margin - outer_margin, PH - mt - mb,
+                               leftPadding=0, rightPadding=0, topPadding=0, bottomPadding=0, id="even")
+            pt_odd  = PageTemplate(id="Odd",  frames=[frame_odd],  onPage=_on_page)
+            pt_even = PageTemplate(id="Even", frames=[frame_even], onPage=_on_page)
+            mirror_doc = BaseDocTemplate(
+                output_path, pagesize=(PW, PH),
+                leftMargin=inner_margin, rightMargin=outer_margin,
+                topMargin=mt, bottomMargin=mb,
+            )
+            mirror_doc.addPageTemplates([pt_odd, pt_even])
+        else:
+            simple_doc = SimpleDocTemplate(
+                output_path,
+                pagesize=(PW, PH),
+                leftMargin=ml, rightMargin=mr,
+                topMargin=mt,  bottomMargin=mb,
+            )
+
+        # ── Heading design: apply to ch_style alignment and decoration ───────────
+        _hd = concept.get("heading_design", "")
+        _ch_align    = TA_LEFT
+        _ch_caps     = False   # signal for ALL CAPS transform in text
+        _ch_italic   = False   # signal for italic_elegant rendering
+        _ch_smallcaps_letter_spacing = 0
+        if _hd == "centered_decorative":
+            _ch_align = TA_CENTER
+        elif _hd == "left_bold_clean":
+            _ch_align = TA_LEFT   # explicit; already default, but clear intent
+        elif _hd == "allcaps_rule":
+            _ch_caps  = True
+            _ch_align = TA_LEFT
+        elif _hd == "italic_elegant":
+            _ch_align  = TA_CENTER
+            _ch_italic = True
+        elif _hd == "numbered":
+            # chapter numbers handled in loop via real_chapter_num; left-aligned
+            _ch_align = TA_LEFT
+        elif _hd == "smallcaps_ornament":
+            # Small-caps effect: use a smaller font size with letter-spacing,
+            # centred, and ALL CAPS transform — distinct from centered_decorative
+            _ch_align = TA_CENTER
+            _ch_caps  = True
+            _ch_smallcaps_letter_spacing = 2.5
+
+        # Resolve chapter font name, applying italic for italic_elegant
+        _ch_font_for_style = chapter_font
+        if _ch_italic:
+            # Map to italic variant if available
+            _ITALIC_MAP = {
+                "Times-Roman":  "Times-Italic",
+                "Helvetica":    "Helvetica-Oblique",
+            }
+            _ch_font_for_style = _ITALIC_MAP.get(chapter_font, chapter_font)
+
+        # For left_bold_clean / numbered: slightly reduce chapter_size for a clean look
+        _ch_size_for_style = chapter_size
+        if _hd in ("left_bold_clean", "numbered"):
+            _ch_size_for_style = chapter_size * 0.92
+        elif _hd == "smallcaps_ornament":
+            _ch_size_for_style = chapter_size * 0.80   # smaller size mimics small-caps
+
         ch_style = ParagraphStyle(
             "ChapterTitle",
-            fontName=chapter_font, fontSize=chapter_size,
-            leading=chapter_size * 1.25,
+            fontName=_ch_font_for_style, fontSize=_ch_size_for_style,
+            leading=_ch_size_for_style * 1.25,
             textColor=Color(ch_r, ch_g, ch_b),
-            spaceAfter=chapter_size * 0.55, spaceBefore=chapter_size * 0.35,
-            alignment=TA_LEFT,
+            spaceAfter=_ch_size_for_style * 0.55, spaceBefore=_ch_size_for_style * 0.35,
+            alignment=_ch_align,
+            letterSpacing=_ch_smallcaps_letter_spacing,
         )
         prefix_style = ParagraphStyle(
             "ChapterPrefix",
             fontName=body_font, fontSize=body_size * 0.82,
             leading=body_size * 1.2,
             textColor=Color(ac_r, ac_g, ac_b),
-            spaceBefore=0, spaceAfter=3, alignment=TA_LEFT, letterSpacing=1.8,
+            spaceBefore=0, spaceAfter=3, alignment=_ch_align, letterSpacing=1.8,
         )
         body_style = ParagraphStyle(
             "Body",
@@ -1002,12 +1146,8 @@ def render_layout_pdf(
             textColor=Color(tx_r, tx_g, tx_b),
             firstLineIndent=indent_pt,
             alignment=TA_JUSTIFY,
-            # Paragraph breathing room: half a line-height between paragraphs,
-            # and a small spaceBefore so paragraph boundaries are always visible.
-            spaceAfter=leading * 0.45,
-            spaceBefore=leading * 0.15,
-            # wordWrap: Devanagari uses LTR word-based wrapping (NOT CJK — CJK breaks
-            # Devanagari conjunct ligatures). Use default LTR for all Indic scripts.
+            spaceAfter=para_space_after,
+            spaceBefore=para_space_before,
             wordWrap="LTR",
         )
         orn_style = ParagraphStyle(
@@ -1143,23 +1283,109 @@ def render_layout_pdf(
             # "CJK" mode breaks individual codepoints (wrong for Devanagari conjuncts).
             wordWrap="LTR",
         )
-        story.append(Spacer(1, PH * 0.28))
-        # BUG FIX: escape HTML entities in the title too
-        safe_title = book_title.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-        story.append(Paragraph(safe_title, title_style))
-        if ornament:
-            story.append(Spacer(1, 14))
-            safe_orn = ornament.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-            story.append(Paragraph(safe_orn, orn_style))
-        story.append(PageBreak())
+        # ── Front/back matter config ──────────────────────────────────────────────
+        _front_matter = concept.get("front_matter") or []
+        _back_matter  = concept.get("back_matter")  or []
+        # Always generate a title page (it's the cover/splash); only skip if
+        # front_matter is explicitly set AND does NOT include "title_page"
+        _show_title_page = (not _front_matter) or ("title_page" in _front_matter)
+
+        # ── Helper: small body-text paragraph for matter pages ───────────────────
+        matter_style = ParagraphStyle(
+            "Matter",
+            fontName=body_font, fontSize=body_size,
+            leading=leading,
+            textColor=Color(tx_r, tx_g, tx_b),
+            alignment=TA_CENTER, spaceAfter=leading * 0.6,
+            wordWrap="LTR",
+        )
+        matter_small = ParagraphStyle(
+            "MatterSmall",
+            fontName=body_font, fontSize=max(7, body_size - 2),
+            leading=leading * 0.85,
+            textColor=Color(tx_r, tx_g, tx_b),
+            alignment=TA_CENTER, spaceAfter=leading * 0.4,
+            wordWrap="LTR",
+        )
+
+        def _safe(t: str) -> str:
+            return t.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+        # ── Title page ────────────────────────────────────────────────────────────
+        if _show_title_page:
+            story.append(Spacer(1, PH * 0.28))
+            story.append(Paragraph(_safe(book_title), title_style))
+            if ornament:
+                story.append(Spacer(1, 14))
+                story.append(Paragraph(_safe(ornament), orn_style))
+            story.append(PageBreak())
+
+        # ── Copyright page ────────────────────────────────────────────────────────
+        if "copyright_page" in _front_matter:
+            import datetime as _dt
+            year = _dt.datetime.now().year
+            story.append(Spacer(1, PH * 0.40))
+            story.append(Paragraph(_safe(f"Copyright © {year} {book_title}"), matter_style))
+            story.append(Spacer(1, leading))
+            story.append(Paragraph(_safe("All rights reserved. No part of this publication may be reproduced, "
+                                         "distributed, or transmitted in any form or by any means without the "
+                                         "prior written permission of the publisher."), matter_small))
+            story.append(Spacer(1, leading * 0.5))
+            story.append(Paragraph(_safe("First published edition."), matter_small))
+            story.append(PageBreak())
+
+        # ── Dedication ────────────────────────────────────────────────────────────
+        if "dedication" in _front_matter:
+            story.append(Spacer(1, PH * 0.38))
+            story.append(Paragraph(_safe("For those who love stories."), matter_style))
+            story.append(PageBreak())
+
+        # ── Foreword ─────────────────────────────────────────────────────────────
+        if "foreword" in _front_matter:
+            story.append(Paragraph(_safe("Foreword"), ch_style))
+            story.append(Spacer(1, leading))
+            story.append(Paragraph(_safe("This foreword was generated as a placeholder. "
+                                         "Please replace it with your own foreword text."), matter_style))
+            story.append(PageBreak())
+
+        # ── Preface ───────────────────────────────────────────────────────────────
+        if "preface" in _front_matter:
+            story.append(Paragraph(_safe("Preface"), ch_style))
+            story.append(Spacer(1, leading))
+            story.append(Paragraph(_safe("This preface was generated as a placeholder. "
+                                         "Please replace it with your own preface text."), matter_style))
+            story.append(PageBreak())
+
+        # ── Acknowledgements ──────────────────────────────────────────────────────
+        if "acknowledgement" in _front_matter:
+            story.append(Paragraph(_safe("Acknowledgements"), ch_style))
+            story.append(Spacer(1, leading))
+            story.append(Paragraph(_safe("The author wishes to thank everyone who made this book possible."), matter_style))
+            story.append(PageBreak())
+
+        # ── Table of Contents ─────────────────────────────────────────────────────
+        if "toc" in _front_matter:
+            story.append(Paragraph(_safe("Contents"), ch_style))
+            story.append(Spacer(1, leading * 0.5))
+            toc_num = 0
+            for ch in chapters:
+                ch_tl = ch["title"].lower()
+                if not ("introduction" in ch_tl or "front matter" in ch_tl):
+                    toc_num += 1
+                    story.append(Paragraph(
+                        _safe(f"{toc_num}.  {ch['title']}"),
+                        ParagraphStyle("TOCEntry", fontName=body_font, fontSize=body_size,
+                                       leading=leading * 1.1, textColor=Color(tx_r, tx_g, tx_b),
+                                       spaceAfter=leading * 0.25, wordWrap="LTR")
+                    ))
+            story.append(PageBreak())
 
         # ── Chapters ──────────────────────────────────────────────────────────────
-        # BUG 4 FIX: use a dedicated counter so "Front Matter" chapters injected
-        # by parse_chapters don't shift all real chapter numbers up by 1.
+        _chapter_start = concept.get("chapter_start", "")  # "right_page", "left_page", "any_page"
         real_chapter_num = 0
+        _story_page_counter = [2]  # title page = 1, body starts at 2; track parity for chapter_start
+
         for chapter in chapters:
-            
-            # FIX: Prevent Double Chapter Headings & Exclude Intro
             ch_title_lower = chapter["title"].lower()
             already_has_chapter = ch_title_lower.startswith("chapter") or ch_title_lower.startswith("part")
             is_intro = "introduction" in ch_title_lower or "front matter" in ch_title_lower
@@ -1167,72 +1393,180 @@ def render_layout_pdf(
             if not is_intro:
                 real_chapter_num += 1
 
+            # ── Chapter start: ensure right-hand (odd) or left-hand (even) page ──
+            # We track physical page via _story_page_counter[0].
+            # A PageBreak advances the page before we render headings.
+            if not is_intro and _chapter_start in ("right_page", "left_page"):
+                cur_page = _story_page_counter[0]
+                target_odd = (_chapter_start == "right_page")
+                # If already on the correct parity we don't need a blank
+                if target_odd and cur_page % 2 == 0:
+                    story.append(PageBreak())  # add blank to land on next odd page
+                    _story_page_counter[0] += 1
+                elif not target_odd and cur_page % 2 == 1:
+                    story.append(PageBreak())  # add blank to land on next even page
+                    _story_page_counter[0] += 1
+
             if chapter_prefix and not already_has_chapter and not is_intro:
                 safe_prefix = chapter_prefix.replace("&", "&amp;")
-                story.append(Paragraph(f"{safe_prefix.upper()} {real_chapter_num}".strip(), prefix_style))
-                
-            safe_ch_title = chapter["title"].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                # For 'numbered' design, embed the number directly in the heading text
+                # (no separate prefix line — the heading IS "1. Title" style)
+                if _hd != "numbered":
+                    story.append(Paragraph(f"{safe_prefix.upper()} {real_chapter_num}".strip(), prefix_style))
+
+            # Apply heading caps/transforms
+            if _hd == "numbered" and not already_has_chapter and not is_intro:
+                _raw_ch_title = f"{real_chapter_num}. {chapter['title']}"
+            else:
+                _raw_ch_title = chapter["title"].upper() if _ch_caps else chapter["title"]
+            safe_ch_title = _raw_ch_title.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
             story.append(Paragraph(safe_ch_title, ch_style))
+
+            # Post-heading decoration per design
+            if _hd == "allcaps_rule":
+                from reportlab.platypus import HRFlowable  # pyrefly: ignore [missing-import]
+                story.append(HRFlowable(width="100%", thickness=1.2, color=Color(ac_r, ac_g, ac_b), spaceAfter=6))
+            elif _hd == "left_bold_clean":
+                from reportlab.platypus import HRFlowable  # pyrefly: ignore [missing-import]
+                story.append(HRFlowable(width="40%", thickness=0.8, color=Color(ac_r, ac_g, ac_b), spaceAfter=6, hAlign="LEFT"))
+            elif _hd == "numbered":
+                from reportlab.platypus import HRFlowable  # pyrefly: ignore [missing-import]
+                story.append(HRFlowable(width="15%", thickness=2, color=Color(ac_r, ac_g, ac_b), spaceAfter=8, hAlign="LEFT"))
+            elif _hd == "smallcaps_ornament":
+                # Extra ornament line directly under the small-caps title
+                if ornament:
+                    safe_orn2 = ornament.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                    story.append(Paragraph(safe_orn2, orn_style))
+
             story.append(Spacer(1, 4))
-            
+
             if ornament:
                 safe_orn = ornament.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
                 story.append(Paragraph(safe_orn, orn_style))
                 story.append(Spacer(1, 6))
 
             raw_body = chapter.get("body", "").strip()
-            paragraphs = [p.strip() for p in re.split(r"\n{2,}", raw_body) if p.strip()]
-            if not paragraphs:
-                paragraphs = ["[No content]"]
+            # Detect explicit section dividers (---, ***, ~~~, ###) in source
+            # Split on them when section_breaks is enabled
+            _SEC_DIV_RE = re.compile(r"^\s*(?:---+|\*\*\*+|~~~+|###)\s*$", re.MULTILINE)
+            if _section_breaks:
+                # Split into sections; each section is separated by a visual break
+                raw_sections = _SEC_DIV_RE.split(raw_body)
+            else:
+                raw_sections = [raw_body]
 
-            for p_idx, para_text in enumerate(paragraphs):
-                # FIX: Smart Line Break & Bullet Handling
-                lines = para_text.split('\n')
-                cleaned_lines = []
-                for line in lines:
-                    line = line.strip()
-                    if not line: continue
-                    # If it's a bullet point, force a hard break
-                    if line.startswith(('•', '-', '*')) or re.match(r'^\d+\.', line):
-                        cleaned_lines.append('<br/>' + line.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
-                    else:
-                        # Otherwise, join physical PDF lines with a space
-                        safe_line = line.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-                        if cleaned_lines and not cleaned_lines[-1].startswith('<br/>'):
-                            cleaned_lines[-1] += " " + safe_line
+            all_para_items: list = []   # will be appended to story at end
+            for sec_idx, section_text in enumerate(raw_sections):
+                if sec_idx > 0 and _section_breaks:
+                    # Insert section break ornament (asterism or custom ornament)
+                    sec_orn = ornament if ornament else "* * *"
+                    safe_sec_orn = sec_orn.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                    all_para_items.append(Spacer(1, leading * 0.5))
+                    all_para_items.append(Paragraph(safe_sec_orn, orn_style))
+                    all_para_items.append(Spacer(1, leading * 0.5))
+
+                paragraphs = [p.strip() for p in re.split(r"\n{2,}", section_text) if p.strip()]
+                if not paragraphs and sec_idx == 0:
+                    paragraphs = ["[No content]"]
+
+                for p_idx, para_text in enumerate(paragraphs):
+                    # FIX: Smart Line Break & Bullet Handling
+                    lines = para_text.split('\n')
+                    cleaned_lines = []
+                    for line in lines:
+                        line = line.strip()
+                        if not line: continue
+                        # If it's a bullet point, force a hard break
+                        if line.startswith(('•', '-', '*')) or re.match(r'^\d+\.', line):
+                            cleaned_lines.append('<br/>' + line.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
                         else:
-                            cleaned_lines.append(safe_line)
-                
-                safe = "".join(cleaned_lines)
+                            # Otherwise, join physical PDF lines with a space
+                            safe_line = line.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                            if cleaned_lines and not cleaned_lines[-1].startswith('<br/>'):
+                                cleaned_lines[-1] += " " + safe_line
+                            else:
+                                cleaned_lines.append(safe_line)
 
-                # Apply dual-font markup for mixed Hindi + Latin text
-                if has_unicode:
-                    safe = _mixed_font_html(safe, body_font)
+                    safe = "".join(cleaned_lines)
 
-                # Drop cap logic
-                # BUG 6 FIX: build rest_orig by slicing `safe` after the
-                # escaped first character, not by re-escaping first_char and
-                # using its *escaped* length (which is wrong for &, <, >).
-                if p_idx == 0 and show_drop and not is_intro and len(para_text) > 1:
-                    first_char = para_text[0]   # original codepoint
-                    # Only do drop cap if first char is a basic Latin letter
-                    if first_char.isalpha() and ord(first_char) < 0x0250:
-                        first_esc = first_char.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-                        # `safe` starts with first_esc — slice past it correctly
-                        rest_orig = safe[len(first_esc):]
-                        drop_html = (
-                            f'<font name="{chapter_font}" size="{int(body_size * 2.8)}">'
-                            f"{first_esc}</font>{rest_orig}"
-                        )
-                        story.append(Paragraph(drop_html, body_style))
+                    # Apply dual-font markup for mixed Hindi + Latin text
+                    if has_unicode:
+                        safe = _mixed_font_html(safe, body_font)
+
+                    # Drop cap logic
+                    if p_idx == 0 and show_drop and not is_intro and len(para_text) > 1:
+                        first_char = para_text[0]   # original codepoint
+                        # Only do drop cap if first char is a basic Latin letter
+                        if first_char.isalpha() and ord(first_char) < 0x0250:
+                            first_esc = first_char.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                            rest_orig = safe[len(first_esc):]
+                            drop_html = (
+                                f'<font name="{_ch_font_for_style}" size="{int(body_size * 2.8)}">'
+                                f"{first_esc}</font>{rest_orig}"
+                            )
+                            all_para_items.append(Paragraph(drop_html, body_style))
+                        else:
+                            all_para_items.append(Paragraph(safe, body_style))
                     else:
-                        story.append(Paragraph(safe, body_style))
-                else:
-                    story.append(Paragraph(safe, body_style))
+                        all_para_items.append(Paragraph(safe, body_style))
+
+            # Flush collected flowables to story
+            story.extend(all_para_items)
 
             story.append(PageBreak())
+            _story_page_counter[0] += 1
 
-        doc.build(story, onFirstPage=_on_page, onLaterPages=_on_page)
+        # ── Back matter pages ─────────────────────────────────────────────────────
+        if "about_author" in _back_matter:
+            story.append(Paragraph(_safe("About the Author"), ch_style))
+            story.append(Spacer(1, leading))
+            story.append(Paragraph(_safe("The author is a writer and storyteller. "
+                                         "Please replace this placeholder with your biographical note."), matter_style))
+            story.append(PageBreak())
+        if "about_publisher" in _back_matter:
+            story.append(Paragraph(_safe("About the Publisher"), ch_style))
+            story.append(Spacer(1, leading))
+            story.append(Paragraph(_safe("Published by [Publisher Name]. "
+                                         "Please replace this with your publisher information."), matter_style))
+            story.append(PageBreak())
+        if "references" in _back_matter:
+            story.append(Paragraph(_safe("References"), ch_style))
+            story.append(Spacer(1, leading))
+            story.append(Paragraph(_safe("[References list placeholder — replace with your citations.]"), matter_style))
+            story.append(PageBreak())
+        if "bibliography" in _back_matter:
+            story.append(Paragraph(_safe("Bibliography"), ch_style))
+            story.append(Spacer(1, leading))
+            story.append(Paragraph(_safe("[Bibliography placeholder — replace with your bibliography.]"), matter_style))
+            story.append(PageBreak())
+        if "index" in _back_matter:
+            story.append(Paragraph(_safe("Index"), ch_style))
+            story.append(Spacer(1, leading))
+            story.append(Paragraph(_safe("[Index placeholder — replace with your index entries.]"), matter_style))
+            story.append(PageBreak())
+        if "other_books" in _back_matter:
+            story.append(Paragraph(_safe("Other Books by the Author"), ch_style))
+            story.append(Spacer(1, leading))
+            story.append(Paragraph(_safe("[List your other books here.]"), matter_style))
+            story.append(PageBreak())
+
+        if _mirror:
+            from reportlab.platypus import NextPageTemplate  # pyrefly: ignore [missing-import]
+            # Inject NextPageTemplate switches before each PageBreak so frames alternate
+            mirrored_story: list = []
+            page_counter = [1]
+            for item in story:
+                if isinstance(item, PageBreak):
+                    page_counter[0] += 1
+                    next_tpl = "Even" if page_counter[0] % 2 == 0 else "Odd"
+                    mirrored_story.append(NextPageTemplate(next_tpl))
+                mirrored_story.append(item)
+            mirror_doc = BaseDocTemplate(...)    
+            mirror_doc.build(mirrored_story)
+            mirror_doc.addPageTemplates([pt_odd, pt_even])
+        else:
+            simple_doc = SimpleDocTemplate(...)
+            simple_doc.build(story, onFirstPage=_on_page, onLaterPages=_on_page)
         return output_path
     except Exception as e:
         print(f"  ⚠️  render_layout_pdf failed completely: {e}\n{traceback.format_exc()}")
@@ -1265,20 +1599,73 @@ def render_layout_docx(
         ornament   = concept.get("ornament", "")
         prefix     = concept.get("chapter_prefix", "Chapter")
 
+        # Advanced fields
+        _color_mode_d   = concept.get("color_mode", "")
+        _mirror_d       = concept.get("mirror_margins", False)
+        _para_sp_mm_d   = concept.get("paragraph_spacing_mm")
+        _pn_start_d     = int(concept.get("page_number_start", 1) or 1)
+        _pn_roman_d     = concept.get("page_number_style", "") == "roman"
+        _chapter_start_d= concept.get("chapter_start", "")
+        _hd_d           = concept.get("heading_design", "")
+        _ch_caps_d      = _hd_d == "allcaps_rule"
+        _ch_center_d    = _hd_d in ("centered_decorative", "italic_elegant", "smallcaps_ornament")
+        _ch_numbered_d  = _hd_d == "numbered"
+        _ch_italic_d    = _hd_d == "italic_elegant"
+        _ch_smallcaps_d = _hd_d == "smallcaps_ornament"
+
+        # Font/size adjustments per heading design
+        _ch_size_d      = ch_size
+        if _hd_d in ("left_bold_clean", "numbered"):
+            _ch_size_d  = ch_size * 0.92
+        elif _hd_d == "smallcaps_ornament":
+            _ch_size_d  = ch_size * 0.80
+
+        # color_mode bw: override palette
+        if _color_mode_d == "bw":
+            concept = dict(concept)  # shallow copy so we don't mutate the original
+            concept["page_bg"]            = "#ffffff"
+            concept["text_color"]         = "#000000"
+            concept["chapter_title_color"]= "#000000"
+            concept["accent_color"]       = "#333333"
+
         doc     = Document()
         section = doc.sections[0]
-        section.page_width    = Cm(page_width_mm  / 10)
-        section.page_height   = Cm(page_height_mm / 10)
-        section.left_margin   = Cm(concept["margin_left_mm"]   / 10)
-        section.right_margin  = Cm(concept["margin_right_mm"]  / 10)
-        section.top_margin    = Cm(concept["margin_top_mm"]    / 10)
-        section.bottom_margin = Cm(concept["margin_bottom_mm"] / 10)
+
+        # ── Bleed: expand page canvas on all sides ───────────────────────────────
+        _bleed_mm_d   = float(concept.get("bleed_mm", 0) or 0)
+        _bleed_cm_d   = _bleed_mm_d / 10.0
+        section.page_width    = Cm((page_width_mm  + _bleed_mm_d * 2) / 10)
+        section.page_height   = Cm((page_height_mm + _bleed_mm_d * 2) / 10)
+        section.left_margin   = Cm((concept["margin_left_mm"]   + _bleed_mm_d) / 10)
+        section.right_margin  = Cm((concept["margin_right_mm"]  + _bleed_mm_d) / 10)
+        section.top_margin    = Cm((concept["margin_top_mm"]    + _bleed_mm_d) / 10)
+        section.bottom_margin = Cm((concept["margin_bottom_mm"] + _bleed_mm_d) / 10)
         section.footer_distance = Cm(0.8)
+
+        # ── Mirror margins XML flag ──────────────────────────────────────────────
+        if _mirror_d:
+            pgMar = section._sectPr.find(qn("w:pgMar"))
+            if pgMar is None:
+                pgMar = OxmlElement("w:pgMar"); section._sectPr.append(pgMar)
+            mirror_el = section._sectPr.find(qn("w:mirrorMargins"))
+            if mirror_el is None:
+                mirror_el = OxmlElement("w:mirrorMargins"); section._sectPr.append(mirror_el)
+
+        # ── Page number start and style via w:pgNumType ──────────────────────────
+        if _pn_start_d != 1 or _pn_roman_d:
+            pgNumType = section._sectPr.find(qn("w:pgNumType"))
+            if pgNumType is None:
+                pgNumType = OxmlElement("w:pgNumType")
+                section._sectPr.append(pgNumType)
+            pgNumType.set(qn("w:start"), str(_pn_start_d))
+            if _pn_roman_d:
+                pgNumType.set(qn("w:fmt"), "lowerRoman")
+            else:
+                pgNumType.set(qn("w:fmt"), "decimal")
 
         # ── Footer: book name bottom-left, page number bottom-right ─────────────
         show_pn_docx = concept.get("show_page_numbers", True)
-        footer_left_text = concept.get("header_text", book_title) or book_title
-        accent_hex = concept.get("accent_color", "#555555").lstrip("#")
+        footer_left_text_d = concept.get("footer_left_text") or book_title
 
         if show_pn_docx:
             from docx.oxml.ns import qn as _qn_footer   # pyrefly: ignore [missing-import]
@@ -1299,7 +1686,7 @@ def render_layout_docx(
             pPr.append(tabs_el)
 
             # Left run: book name
-            run_left = fp.add_run(footer_left_text)
+            run_left = fp.add_run(footer_left_text_d)
             run_left.font.name  = "Times New Roman"
             run_left.font.size  = Pt(8)
             try:
@@ -1319,7 +1706,9 @@ def render_layout_docx(
             except Exception:
                 pass
             fld_begin  = _OxmlEl("w:fldChar"); fld_begin.set(_qn_footer("w:fldCharType"),  "begin")
-            instr      = _OxmlEl("w:instrText"); instr.text = " PAGE "; instr.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+            instr      = _OxmlEl("w:instrText")
+            instr.text = " PAGE \\* lowerRoman " if _pn_roman_d else " PAGE "
+            instr.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
             fld_sep    = _OxmlEl("w:fldChar"); fld_sep.set(_qn_footer("w:fldCharType"),    "separate")
             fld_text   = _OxmlEl("w:t");        fld_text.text = "1"
             fld_end    = _OxmlEl("w:fldChar"); fld_end.set(_qn_footer("w:fldCharType"),    "end")
@@ -1449,35 +1838,116 @@ def render_layout_docx(
                 run = p.add_run(chunk)
                 _set_run_font(run, chosen_font, size, bold, italic, color)
 
-        def add_rule(color_hex: str) -> None:
+        def add_rule(color_hex: str, width_pct: int = 100, thickness: float = 1.0) -> None:
+            """Add a paragraph with a bottom border that acts as a horizontal rule.
+            width_pct is advisory via indentation (100% = full width, 40% = half etc).
+            thickness maps to w:sz in eighths of a point."""
             p   = doc.add_paragraph()
             pPr = p._p.get_or_add_pPr()
+            # Indent right side to simulate partial-width rule
+            if width_pct < 100:
+                ind = OxmlElement("w:ind")
+                # Approximate: at 9000 twips body width, 40% ≈ 5400 twips right indent
+                right_twips = int(9000 * (1 - width_pct / 100))
+                ind.set(qn("w:right"), str(right_twips))
+                pPr.append(ind)
             pBdr = OxmlElement("w:pBdr")
             bt   = OxmlElement("w:bottom")
             bt.set(qn("w:val"),   "single")
-            bt.set(qn("w:sz"),    "6")
+            bt.set(qn("w:sz"),    str(max(2, int(thickness * 8))))   # w:sz in 1/8 pt
             bt.set(qn("w:space"), "1")
             bt.set(qn("w:color"), color_hex.lstrip("#"))
             pBdr.append(bt)
             pPr.append(pBdr)
 
         # Title page
-        for _ in range(4):
-            doc.add_paragraph()
-        add_para(book_title, ch_fn, min(36, ch_size * 1.5), bold=True,
-                 italic=ch_italic,
-                 color=concept["chapter_title_color"], align=WD_ALIGN_PARAGRAPH.CENTER, space_after=10)
-        if ornament:
-            add_para(ornament, body_fn, body_size + 2, color=concept["accent_color"],
-                     align=WD_ALIGN_PARAGRAPH.CENTER, space_before=6, space_after=6)
-        doc.add_page_break()
+        _front_matter_d = concept.get("front_matter") or []
+        _back_matter_d  = concept.get("back_matter")  or []
+        _show_title_page_d = (not _front_matter_d) or ("title_page" in _front_matter_d)
+
+        if _show_title_page_d:
+            for _ in range(4):
+                doc.add_paragraph()
+            add_para(book_title, ch_fn, min(36, ch_size * 1.5), bold=True,
+                     italic=ch_italic or _ch_italic_d,
+                     color=concept["chapter_title_color"], align=WD_ALIGN_PARAGRAPH.CENTER, space_after=10)
+            if ornament:
+                add_para(ornament, body_fn, body_size + 2, color=concept["accent_color"],
+                         align=WD_ALIGN_PARAGRAPH.CENTER, space_before=6, space_after=6)
+            doc.add_page_break()
+
+        # Copyright page
+        if "copyright_page" in _front_matter_d:
+            import datetime as _dt_d
+            year_d = _dt_d.datetime.now().year
+            for _ in range(3):
+                doc.add_paragraph()
+            add_para(f"Copyright © {year_d} {book_title}", body_fn, body_size,
+                     color=concept["text_color"], align=WD_ALIGN_PARAGRAPH.CENTER, space_after=8)
+            add_para("All rights reserved. No part of this publication may be reproduced, "
+                     "distributed, or transmitted in any form or by any means without the "
+                     "prior written permission of the publisher.",
+                     body_fn, max(7, body_size - 2), color=concept["text_color"],
+                     align=WD_ALIGN_PARAGRAPH.CENTER, space_after=6, line_space=ls)
+            add_para("First published edition.", body_fn, max(7, body_size - 2),
+                     color=concept["text_color"], align=WD_ALIGN_PARAGRAPH.CENTER)
+            doc.add_page_break()
+
+        if "dedication" in _front_matter_d:
+            for _ in range(3):
+                doc.add_paragraph()
+            add_para("For those who love stories.", body_fn, body_size + 1,
+                     italic=True, color=concept["text_color"], align=WD_ALIGN_PARAGRAPH.CENTER)
+            doc.add_page_break()
+
+        if "foreword" in _front_matter_d:
+            add_para("Foreword", ch_fn, ch_size * 0.85, bold=True,
+                     color=concept["chapter_title_color"], align=WD_ALIGN_PARAGRAPH.LEFT, space_after=8)
+            add_rule(concept["accent_color"], width_pct=100, thickness=0.5)
+            add_para("This foreword was generated as a placeholder. "
+                     "Please replace it with your own foreword text.",
+                     body_fn, body_size, color=concept["text_color"],
+                     align=WD_ALIGN_PARAGRAPH.LEFT, line_space=ls)
+            doc.add_page_break()
+
+        if "preface" in _front_matter_d:
+            add_para("Preface", ch_fn, ch_size * 0.85, bold=True,
+                     color=concept["chapter_title_color"], align=WD_ALIGN_PARAGRAPH.LEFT, space_after=8)
+            add_rule(concept["accent_color"], width_pct=100, thickness=0.5)
+            add_para("This preface was generated as a placeholder. "
+                     "Please replace it with your own preface text.",
+                     body_fn, body_size, color=concept["text_color"],
+                     align=WD_ALIGN_PARAGRAPH.LEFT, line_space=ls)
+            doc.add_page_break()
+
+        if "acknowledgement" in _front_matter_d:
+            add_para("Acknowledgements", ch_fn, ch_size * 0.85, bold=True,
+                     color=concept["chapter_title_color"], align=WD_ALIGN_PARAGRAPH.LEFT, space_after=8)
+            add_rule(concept["accent_color"], width_pct=100, thickness=0.5)
+            add_para("The author wishes to thank everyone who made this book possible.",
+                     body_fn, body_size, color=concept["text_color"],
+                     align=WD_ALIGN_PARAGRAPH.LEFT, line_space=ls)
+            doc.add_page_break()
+
+        if "toc" in _front_matter_d:
+            add_para("Contents", ch_fn, ch_size * 0.85, bold=True,
+                     color=concept["chapter_title_color"], align=WD_ALIGN_PARAGRAPH.LEFT, space_after=8)
+            add_rule(concept["accent_color"], width_pct=100, thickness=0.5)
+            toc_num_d = 0
+            for ch_toc in chapters:
+                tl = ch_toc["title"].lower()
+                if not ("introduction" in tl or "front matter" in tl):
+                    toc_num_d += 1
+                    add_para(f"{toc_num_d}.  {ch_toc['title']}", body_fn, body_size,
+                             color=concept["text_color"], align=WD_ALIGN_PARAGRAPH.LEFT,
+                             space_after=round(body_size * ls * 0.2, 1))
+            doc.add_page_break()
 
         # Chapters
-        # BUG 5 FIX: dedicated counter so Front Matter doesn't shift numbering
         real_chapter_num = 0
+        _docx_page_counter = [2]  # track for chapter_start parity
+
         for chapter in chapters:
-            
-            # --- FIX: Prevent Double Headings in DOCX ---
             ch_title_lower = chapter["title"].lower()
             already_has_chapter = ch_title_lower.startswith("chapter") or ch_title_lower.startswith("part")
             is_intro = "introduction" in ch_title_lower or "front matter" in ch_title_lower
@@ -1485,54 +1955,155 @@ def render_layout_docx(
             if not is_intro:
                 real_chapter_num += 1
 
-            if prefix and not already_has_chapter and not is_intro:
+            # ── Chapter start: insert blank page to land on correct parity ─────
+            if not is_intro and _chapter_start_d in ("right_page", "left_page"):
+                cur_p = _docx_page_counter[0]
+                want_odd = (_chapter_start_d == "right_page")
+                if want_odd and cur_p % 2 == 0:
+                    doc.add_page_break()
+                    _docx_page_counter[0] += 1
+                elif not want_odd and cur_p % 2 == 1:
+                    doc.add_page_break()
+                    _docx_page_counter[0] += 1
+
+            _ch_align_d = WD_ALIGN_PARAGRAPH.CENTER if _ch_center_d else WD_ALIGN_PARAGRAPH.LEFT
+
+            if prefix and not already_has_chapter and not is_intro and not _ch_numbered_d:
                 add_para(f"{prefix.upper()} {real_chapter_num}".strip(), body_fn, body_size * 0.82,
-                         color=concept["accent_color"], space_before=6, space_after=2)
-                         
-            add_para(chapter["title"], ch_fn, ch_size, bold=True,
-                     italic=ch_italic,
-                     color=concept["chapter_title_color"], space_after=8)
-            add_rule(concept["accent_color"])
+                         color=concept["accent_color"], space_before=6, space_after=2, align=_ch_align_d)
+
+            # Apply heading design transforms
+            if _ch_numbered_d and not already_has_chapter and not is_intro:
+                _ch_title_text = f"{real_chapter_num}. {chapter['title']}"
+            elif _ch_caps_d or _ch_smallcaps_d:
+                _ch_title_text = chapter["title"].upper()
+            else:
+                _ch_title_text = chapter["title"]
+
+            add_para(_ch_title_text, ch_fn, _ch_size_d, bold=True,
+                     italic=ch_italic or _ch_italic_d,
+                     color=concept["chapter_title_color"], space_after=8, align=_ch_align_d)
+
+            # Post-heading decoration per design
+            if _hd_d == "allcaps_rule":
+                add_rule(concept["accent_color"], width_pct=100, thickness=1.2)
+            elif _hd_d == "left_bold_clean":
+                add_rule(concept["accent_color"], width_pct=40, thickness=0.8)
+            elif _hd_d == "numbered":
+                add_rule(concept["accent_color"], width_pct=15, thickness=2.0)
+            elif _hd_d in ("centered_decorative", "italic_elegant", "smallcaps_ornament"):
+                pass   # ornament paragraph handles decoration; no rule
+            else:
+                # Default (no heading_design set): thin full-width rule
+                add_rule(concept["accent_color"], width_pct=100, thickness=0.5)
+
             if ornament:
                 add_para(ornament, body_fn, body_size + 1, color=concept["accent_color"],
                          align=WD_ALIGN_PARAGRAPH.CENTER, space_before=4, space_after=8)
+            elif _ch_smallcaps_d and ornament:
+                # Extra ornament pass already handled above via general ornament block
+                pass
+
+            # Paragraph spacing: use explicit mm if set, else derive from line spacing
+            _para_sp_after  = round(float(_para_sp_mm_d) * 2.835, 1) if _para_sp_mm_d else round(body_size * ls * 0.45, 1)
+            _para_sp_before = round(float(_para_sp_mm_d) * 2.835 * 0.35, 1) if _para_sp_mm_d else round(body_size * ls * 0.10, 1)
 
             raw_body = chapter.get("body", "").strip()
-            paragraphs = [p.strip() for p in re.split(r"\n{2,}", raw_body) if p.strip()]
-            if not paragraphs:
-                paragraphs = ["[No content]"]
-            
-            for para_text in paragraphs:
-                # --- FIX: Smart Line Break & Bullet Handling in DOCX ---
-                lines = para_text.split('\n')
-                cleaned_lines = []
-                for line in lines:
-                    line = line.strip()
-                    if not line: continue
-                    # If it's a bullet point, force a hard break
-                    if line.startswith(('•', '-', '*')) or re.match(r'^\d+\.', line):
-                        cleaned_lines.append(line)
-                    else:
-                        # Otherwise, join physical PDF lines with a space
-                        if cleaned_lines:
-                            cleaned_lines[-1] += " " + line
-                        else:
+            # Split on explicit section dividers when section_breaks enabled
+            _SEC_DIV_RE_DOCX = re.compile(r"^\s*(?:---+|\*\*\*+|~~~+|###)\s*$", re.MULTILINE)
+            _section_breaks_d = concept.get("section_breaks", False)
+            if _section_breaks_d:
+                raw_sections_d = _SEC_DIV_RE_DOCX.split(raw_body)
+            else:
+                raw_sections_d = [raw_body]
+
+            for sec_idx_d, section_text_d in enumerate(raw_sections_d):
+                if sec_idx_d > 0 and _section_breaks_d:
+                    sec_orn_d = ornament if ornament else "* * *"
+                    add_para(sec_orn_d, body_fn, body_size + 1, color=concept["accent_color"],
+                             align=WD_ALIGN_PARAGRAPH.CENTER, space_before=6, space_after=6)
+
+                paragraphs = [p.strip() for p in re.split(r"\n{2,}", section_text_d) if p.strip()]
+                if not paragraphs and sec_idx_d == 0:
+                    paragraphs = ["[No content]"]
+
+                for para_text in paragraphs:
+                    lines = para_text.split('\n')
+                    cleaned_lines = []
+                    for line in lines:
+                        line = line.strip()
+                        if not line: continue
+                        if line.startswith(('•', '-', '*')) or re.match(r'^\d+\.', line):
                             cleaned_lines.append(line)
-                            
-                for sub_line in cleaned_lines:
-                    align = WD_ALIGN_PARAGRAPH.LEFT if sub_line.startswith(('•', '-', '*')) else WD_ALIGN_PARAGRAPH.JUSTIFY
-                    add_para(sub_line, body_fn, body_size, italic=body_italic,
-                             color=concept["text_color"],
-                             align=align,
-                             # Proper paragraph breathing room: ~45% of line height
-                             space_after=round(body_size * ls * 0.45, 1),
-                             space_before=round(body_size * ls * 0.10, 1),
-                             line_space=ls)
-                # -------------------------------------------------------
+                        else:
+                            if cleaned_lines:
+                                cleaned_lines[-1] += " " + line
+                            else:
+                                cleaned_lines.append(line)
+
+                    for sub_line in cleaned_lines:
+                        align = WD_ALIGN_PARAGRAPH.LEFT if sub_line.startswith(('•', '-', '*')) else WD_ALIGN_PARAGRAPH.JUSTIFY
+                        add_para(sub_line, body_fn, body_size, italic=body_italic,
+                                 color=concept["text_color"],
+                                 align=align,
+                                 space_after=_para_sp_after,
+                                 space_before=_para_sp_before,
+                                 line_space=ls)
 
             doc.add_page_break()
+            _docx_page_counter[0] += 1
 
-        doc.save(output_path)
+        # ── DOCX back matter ──────────────────────────────────────────────────────
+        if "about_author" in _back_matter_d:
+            add_para("About the Author", ch_fn, ch_size * 0.85, bold=True,
+                     color=concept["chapter_title_color"], align=WD_ALIGN_PARAGRAPH.LEFT, space_after=8)
+            add_rule(concept["accent_color"], width_pct=100, thickness=0.5)
+            add_para("The author is a writer and storyteller. "
+                     "Please replace this placeholder with your biographical note.",
+                     body_fn, body_size, color=concept["text_color"],
+                     align=WD_ALIGN_PARAGRAPH.LEFT, line_space=ls)
+            doc.add_page_break()
+        if "about_publisher" in _back_matter_d:
+            add_para("About the Publisher", ch_fn, ch_size * 0.85, bold=True,
+                     color=concept["chapter_title_color"], align=WD_ALIGN_PARAGRAPH.LEFT, space_after=8)
+            add_rule(concept["accent_color"], width_pct=100, thickness=0.5)
+            add_para("Published by [Publisher Name]. "
+                     "Please replace this with your publisher information.",
+                     body_fn, body_size, color=concept["text_color"],
+                     align=WD_ALIGN_PARAGRAPH.LEFT, line_space=ls)
+            doc.add_page_break()
+        if "references" in _back_matter_d:
+            add_para("References", ch_fn, ch_size * 0.85, bold=True,
+                     color=concept["chapter_title_color"], align=WD_ALIGN_PARAGRAPH.LEFT, space_after=8)
+            add_rule(concept["accent_color"], width_pct=100, thickness=0.5)
+            add_para("[References list placeholder — replace with your citations.]",
+                     body_fn, body_size, color=concept["text_color"],
+                     align=WD_ALIGN_PARAGRAPH.LEFT, line_space=ls)
+            doc.add_page_break()
+        if "bibliography" in _back_matter_d:
+            add_para("Bibliography", ch_fn, ch_size * 0.85, bold=True,
+                     color=concept["chapter_title_color"], align=WD_ALIGN_PARAGRAPH.LEFT, space_after=8)
+            add_rule(concept["accent_color"], width_pct=100, thickness=0.5)
+            add_para("[Bibliography placeholder — replace with your bibliography.]",
+                     body_fn, body_size, color=concept["text_color"],
+                     align=WD_ALIGN_PARAGRAPH.LEFT, line_space=ls)
+            doc.add_page_break()
+        if "index" in _back_matter_d:
+            add_para("Index", ch_fn, ch_size * 0.85, bold=True,
+                     color=concept["chapter_title_color"], align=WD_ALIGN_PARAGRAPH.LEFT, space_after=8)
+            add_rule(concept["accent_color"], width_pct=100, thickness=0.5)
+            add_para("[Index placeholder — replace with your index entries.]",
+                     body_fn, body_size, color=concept["text_color"],
+                     align=WD_ALIGN_PARAGRAPH.LEFT, line_space=ls)
+            doc.add_page_break()
+        if "other_books" in _back_matter_d:
+            add_para("Other Books by the Author", ch_fn, ch_size * 0.85, bold=True,
+                     color=concept["chapter_title_color"], align=WD_ALIGN_PARAGRAPH.LEFT, space_after=8)
+            add_rule(concept["accent_color"], width_pct=100, thickness=0.5)
+            add_para("[List your other books here.]",
+                     body_fn, body_size, color=concept["text_color"],
+                     align=WD_ALIGN_PARAGRAPH.LEFT, line_space=ls)
+            doc.add_page_break()
         return output_path
     except Exception as e:
         print(f"  ⚠️  render_layout_docx failed: {e}\n{traceback.format_exc()}")
@@ -1567,13 +2138,23 @@ def design_layout(
     show_drop_cap: Optional[bool] = None,
     show_page_numbers: Optional[bool] = None,
     # ── Footer overrides ────────────────────────────────────────────────────
-    footer_left_text: Optional[str] = None,    # custom bottom-left text (default: book title)
-    footer_right_pagenum: Optional[bool] = True, # show page number bottom-right
+    footer_left_text: Optional[str] = None,
+    footer_right_pagenum: Optional[bool] = True,
     # ── Advanced layout overrides ───────────────────────────────────────────
     mirror_margins: Optional[bool] = None,
     gutter_mm: Optional[float] = None,
     paragraph_spacing_mm: Optional[float] = None,
     indent_mm: Optional[float] = None,
+    color_mode: Optional[str] = None,
+    bleed_mm: Optional[float] = None,
+    chapter_start: Optional[str] = None,
+    page_number_start: Optional[int] = None,
+    page_number_style: Optional[str] = None,
+    header_custom_text: Optional[str] = None,
+    heading_design: Optional[str] = None,
+    section_breaks: Optional[bool] = None,
+    front_matter: Optional[list] = None,
+    back_matter: Optional[list] = None,
 ) -> dict:
     """
     Full pipeline — book-type aware:
@@ -1700,7 +2281,6 @@ def design_layout(
             concept["show_page_numbers"]  = show_page_numbers
 
         # ── Footer overrides ─────────────────────────────────────────────────────
-        # footer_left_text: None → use book title; "" → suppress; str → use as-is
         concept["footer_left_text"]    = footer_left_text if footer_left_text is not None else (book_title or "")
         concept["footer_right_pagenum"] = footer_right_pagenum if footer_right_pagenum is not None else True
 
@@ -1709,13 +2289,34 @@ def design_layout(
             concept["mirror_margins"] = mirror_margins
         if gutter_mm is not None:
             concept["gutter_mm"]      = float(gutter_mm)
-            # Apply gutter to inner margin (left for odd pages; simplified: left margin)
-            gutter_pt = float(gutter_mm)
-            concept["margin_left_mm"] = float(concept.get("margin_left_mm", 22)) + gutter_pt
+            # Gutter adds to the inner (binding) margin.
+            # For single-sided: inner = left.  For mirror_margins: the PDF renderer
+            # already alternates left/right per page; we add to left_mm (recto inner).
+            concept["margin_left_mm"] = float(concept.get("margin_left_mm", 22)) + float(gutter_mm)
         if paragraph_spacing_mm is not None:
             concept["paragraph_spacing_mm"] = float(paragraph_spacing_mm)
         if indent_mm is not None:
             concept["first_para_indent_mm"] = float(indent_mm)
+        if color_mode:
+            concept["color_mode"] = color_mode
+        if bleed_mm is not None:
+            concept["bleed_mm"] = float(bleed_mm)
+        if chapter_start:
+            concept["chapter_start"] = chapter_start
+        if page_number_start is not None:
+            concept["page_number_start"] = int(page_number_start)
+        if page_number_style:
+            concept["page_number_style"] = page_number_style
+        if header_custom_text:
+            concept["header_text"] = header_custom_text
+        if heading_design:
+            concept["heading_design"] = heading_design
+        if section_breaks is not None:
+            concept["section_breaks"] = section_breaks
+        if front_matter:
+            concept["front_matter"] = front_matter
+        if back_matter:
+            concept["back_matter"] = back_matter
 
         concept["_book_type"]       = book_type or "auto"
         concept["_book_type_label"] = profile["_label"] if profile else "Auto (AI chosen)"

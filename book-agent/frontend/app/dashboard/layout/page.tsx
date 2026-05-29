@@ -193,6 +193,23 @@ interface LayoutConcept {
     ornament: string;
     header_text: string;
     show_page_numbers: boolean;
+    // Advanced fields
+    paragraph_spacing_mm?: number;
+    gutter_mm?: number;
+    mirror_margins?: boolean;
+    color_mode?: string;
+    bleed_mm?: number;
+    chapter_start?: string;
+    page_number_start?: number;
+    page_number_style?: string;
+    heading_design?: string;
+    section_breaks?: boolean;
+    footer_left_text?: string;
+    footer_right_pagenum?: boolean;
+    front_matter?: string[];
+    back_matter?: string[];
+    _book_type?: string;
+    _book_type_label?: string;
 }
 
 interface LayoutResult {
@@ -202,6 +219,8 @@ interface LayoutResult {
     concept: LayoutConcept;
     chapter_count: number;
     chapter_titles: string[];
+    book_type: string;
+    book_type_label: string;
     pdf_url: string;
     docx_url: string;
 }
@@ -550,14 +569,12 @@ export default function LayoutDesignerPage() {
         else if (colorMode === "color") parts.push("Full colour interior. Optimise for colour printing.");
         if (paperProfile.trim()) parts.push(`Paper profile: ${paperProfile.trim()}.`);
 
-        // Front matter
-        const enabledFront = frontMatter.filter(k => k !== "toc");
-        if (enabledFront.length > 0) {
-            const labels = enabledFront.map(k => FRONT_MATTER_ITEMS.find(i => i.key === k)?.label ?? k);
+        // Front matter — include all items in the text instruction for AI awareness
+        if (frontMatter.length > 0) {
+            const labels = frontMatter.map(k => FRONT_MATTER_ITEMS.find(i => i.key === k)?.label ?? k);
             parts.push(`Include front matter: ${labels.join(", ")}.`);
         }
         if (!frontMatter.includes("toc")) parts.push("Do NOT generate a Table of Contents.");
-        else parts.push("Generate a Table of Contents.");
 
         // Back matter
         if (backMatter.length > 0) {
@@ -648,7 +665,6 @@ export default function LayoutDesignerPage() {
             form.append("show_page_numbers", String(effectivePageNumbers));
 
             // ── Footer ────────────────────────────────────────────────────────
-            // bottom-left: book title unless custom text provided
             const effectiveFooterLeft = footerCustomLeft.trim() || (footerBookName ? bookTitle.trim() || "" : "");
             if (effectiveFooterLeft) form.append("footer_left_text", effectiveFooterLeft);
             form.append("footer_right_pagenum", String(effectivePageNumbers));
@@ -658,6 +674,18 @@ export default function LayoutDesignerPage() {
             if (gutterMm) form.append("gutter_mm", gutterMm);
             if (paragraphSpacingMm) form.append("paragraph_spacing_mm", paragraphSpacingMm);
             if (indentMm) form.append("indent_mm", indentMm);
+            if (colorMode) form.append("color_mode", colorMode);
+            if (bleedMm) form.append("bleed_mm", bleedMm);
+            if (chapterStart) form.append("chapter_start", chapterStart);
+            if (pageNumberStart) form.append("page_number_start", pageNumberStart);
+            if (pageNumberStyle) form.append("page_number_style", pageNumberStyle);
+            if (headerCustomText.trim()) form.append("header_custom_text", headerCustomText.trim());
+            if (headingDesign) form.append("heading_design", headingDesign);
+            if (sectionBreaks !== null) form.append("section_breaks", String(sectionBreaks));
+            // front/back matter as JSON arrays — send the full list including toc
+            // (toc key is handled natively by the backend renderer)
+            form.append("front_matter", JSON.stringify(frontMatter));
+            form.append("back_matter", JSON.stringify(backMatter));
 
             const res = await fetch(`${API_BASE}/design-layout`, { method: "POST", body: form });
             if (!res.ok) { const err = await res.json().catch(() => ({ detail: "Server error" })); throw new Error(err.detail || `HTTP ${res.status}`); }

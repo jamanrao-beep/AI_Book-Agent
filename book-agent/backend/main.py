@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 # pyrefly: ignore [missing-import]
 from pydantic import BaseModel
 from typing import Optional
-import os, sys, uuid, zipfile, shutil, threading, logging, traceback
+import os, sys, uuid, zipfile, shutil, threading, logging, traceback, json
 
 logging.basicConfig(
     level=logging.INFO,
@@ -1167,7 +1167,7 @@ def download_translate_docx(job_id: str):
 # Internal Layout Designer
 # ─────────────────────────────────────────────────────────────────────────────
 
-LAYOUT_ALLOWED_EXTS = {".pdf", ".docx", ".zip"}
+LAYOUT_ALLOWED_EXTS = {".pdf", ".docx", ".zip", ".txt", ".md"}
 
 
 def _run_layout_job(
@@ -1200,6 +1200,16 @@ def _run_layout_job(
     gutter_mm: Optional[float] = None,
     paragraph_spacing_mm: Optional[float] = None,
     indent_mm: Optional[float] = None,
+    color_mode: Optional[str] = None,
+    bleed_mm: Optional[float] = None,
+    chapter_start: Optional[str] = None,
+    page_number_start: Optional[int] = None,
+    page_number_style: Optional[str] = None,
+    header_custom_text: Optional[str] = None,
+    heading_design: Optional[str] = None,
+    section_breaks: Optional[bool] = None,
+    front_matter: Optional[list] = None,
+    back_matter: Optional[list] = None,
 ) -> None:
     """Background thread worker for layout design."""
 
@@ -1236,6 +1246,16 @@ def _run_layout_job(
             gutter_mm=gutter_mm,
             paragraph_spacing_mm=paragraph_spacing_mm,
             indent_mm=indent_mm,
+            color_mode=color_mode,
+            bleed_mm=bleed_mm,
+            chapter_start=chapter_start,
+            page_number_start=page_number_start,
+            page_number_style=page_number_style,
+            header_custom_text=header_custom_text,
+            heading_design=heading_design,
+            section_breaks=section_breaks,
+            front_matter=front_matter,
+            back_matter=back_matter,
         )
         _layout_jobs[job_id].update(
             {
@@ -1246,6 +1266,8 @@ def _run_layout_job(
                 "pdf_path": result["pdf_path"],
                 "docx_path": result["docx_path"],
                 "title": result["title"],
+                "book_type": result.get("book_type", "auto"),
+                "book_type_label": result.get("book_type_label", "Auto (AI chosen)"),
             }
         )
     except Exception as e:
@@ -1282,13 +1304,23 @@ async def design_layout_endpoint(
     show_drop_cap: Optional[str] = Form(default=None),
     show_page_numbers: Optional[str] = Form(default=None),
     # Footer overrides
-    footer_left_text: Optional[str] = Form(default=None),       # custom bottom-left text
-    footer_right_pagenum: Optional[str] = Form(default="true"), # "true"/"false"
+    footer_left_text: Optional[str] = Form(default=None),
+    footer_right_pagenum: Optional[str] = Form(default="true"),
     # Advanced layout overrides
     mirror_margins: Optional[str] = Form(default=None),
     gutter_mm: Optional[str] = Form(default=None),
     paragraph_spacing_mm: Optional[str] = Form(default=None),
     indent_mm: Optional[str] = Form(default=None),
+    color_mode: Optional[str] = Form(default=None),
+    bleed_mm: Optional[str] = Form(default=None),
+    chapter_start: Optional[str] = Form(default=None),
+    page_number_start: Optional[str] = Form(default=None),
+    page_number_style: Optional[str] = Form(default=None),
+    header_custom_text: Optional[str] = Form(default=None),
+    heading_design: Optional[str] = Form(default=None),
+    section_breaks: Optional[str] = Form(default=None),
+    front_matter: Optional[str] = Form(default=None),   # JSON array string
+    back_matter: Optional[str] = Form(default=None),    # JSON array string
 ):
     """
     Upload a PDF, DOCX, or ZIP book and apply an AI-generated internal layout.
@@ -1369,6 +1401,16 @@ async def design_layout_endpoint(
             gutter_mm=_float_or_none(gutter_mm),
             paragraph_spacing_mm=_float_or_none(paragraph_spacing_mm),
             indent_mm=_float_or_none(indent_mm),
+            color_mode=color_mode.strip() if color_mode and color_mode.strip() else None,
+            bleed_mm=_float_or_none(bleed_mm),
+            chapter_start=chapter_start.strip() if chapter_start and chapter_start.strip() else None,
+            page_number_start=int(_float_or_none(page_number_start) or 1) if page_number_start and page_number_start.strip() else None,
+            page_number_style=page_number_style.strip() if page_number_style and page_number_style.strip() else None,
+            header_custom_text=header_custom_text.strip() if header_custom_text and header_custom_text.strip() else None,
+            heading_design=heading_design.strip() if heading_design and heading_design.strip() else None,
+            section_breaks=_bool_or_none(section_breaks),
+            front_matter=json.loads(front_matter) if front_matter and front_matter.strip().startswith("[") else None,
+            back_matter=json.loads(back_matter) if back_matter and back_matter.strip().startswith("[") else None,
         ),
         daemon=True,
     )
@@ -1400,6 +1442,8 @@ def layout_status(job_id: str):
             "concept": r["concept"],
             "chapter_count": r["chapter_count"],
             "chapter_titles": r["chapter_titles"],
+            "book_type": r.get("book_type", job.get("book_type", "auto")),
+            "book_type_label": r.get("book_type_label", job.get("book_type_label", "Auto (AI chosen)")),
             "pdf_url": f"/layout/{job_id}/download/pdf",
             "docx_url": f"/layout/{job_id}/download/docx",
         }
