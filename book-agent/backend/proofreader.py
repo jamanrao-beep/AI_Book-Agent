@@ -305,8 +305,40 @@ IMPORTANT: Output ONLY the raw JSON object. Do not wrap it in markdown. Do not a
 # Chunking helper
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _chunk_text(text: str, max_chars: int = 30000) -> list[str]:
-    """Split long documents into chunks so we stay within token limits."""
+def _has_legacy_devanagari(text: str) -> bool:
+    """
+    Detect text encoded with legacy Devanagari fonts (Kruti Dev, Mangal, etc.)
+    These appear as sequences of mostly ASCII punctuation/digits that GPT
+    decodes to full Unicode Devanagari — causing 3-5× output expansion.
+    Heuristic: high ratio of chars in the ranges used by Kruti Dev mappings.
+    """
+    if not text:
+        return False
+    sample = text[:2000]
+    # Kruti Dev / legacy Hindi fonts map Devanagari to ~0x20-0x7E range
+    # combined with chars like ] [ ; ' / \ etc.  A genuine English text
+    # rarely has more than ~5% such characters.
+    legacy_chars = sum(
+        1 for c in sample
+        if c in "QWRTYUIOPASDFGHJKLZXCVBNMqwrtyuiopasdfghjklzxcvbnm"
+        "[];',./\\`~!@#$%^&*()_+-={}|:<>?"
+        "0123456789"
+        "\u0900-\u097F"  # already-decoded Devanagari (safe to shrink anyway)
+    )
+    # Also check for the telltale Kruti Dev character 'Q' in non-English context
+    has_no_spaces_pattern = bool(re.search(r'[A-Z]{4,}[^a-zA-Z]', sample))
+    return (legacy_chars / max(len(sample), 1)) > 0.6 or has_no_spaces_pattern
+
+
+def _chunk_text(text: str, max_chars: int = 12000) -> list[str]:
+    """
+    Split long documents into chunks that stay within token limits.
+
+    Default is 12 000 chars (≈3 000 tokens input).  This leaves ample room
+    for the corrected output even for legacy Devanagari text which expands
+    3–5× when GPT converts it to Unicode (12 000 × 5 = 60 000 output chars
+    ≈ 15 000 tokens — well within GPT-4o's 16 384 output token limit).
+    """
     if len(text) <= max_chars:
         return [text]
     chunks = []
@@ -314,16 +346,66 @@ def _chunk_text(text: str, max_chars: int = 30000) -> list[str]:
     while start < len(text):
         end = min(start + max_chars, len(text))
         if end < len(text):
+            # Prefer splitting at paragraph boundary
             newline = text.rfind("\n\n", start, end)
-            if newline > start:
+            if newline > start + max_chars // 4:
                 end = newline
+            else:
+                # Fall back to sentence boundary
+                sent = max(
+                    text.rfind(". ", start, end),
+                    text.rfind("। ", start, end),   # Devanagari danda
+                    text.rfind("\n",  start, end),
+                )
+                if sent > start + max_chars // 4:
+                    end = sent + 1
         chunks.append(text[start:end])
         start = end
     return chunks
 
 
+def _extract_corrected_text_from_partial(raw: str) -> Optional[str]:
+    """
+    Last-resort extractor: pull whatever has been written into
+    "corrected_text" even when the JSON string was cut off mid-stream.
+
+    Strategy: find the value that starts after `"corrected_text":` and
+    collect characters until we hit an unescaped closing quote that is
+    followed by a comma/newline/`}` (i.e. the real end of the value),
+    OR until the string ends (truncated — take what we have).
+    """
+    # Locate the key
+    key_match = re.search(r'"corrected_text"\s*:\s*"', raw)
+    if not key_match:
+        return None
+
+    pos = key_match.end()          # position right after the opening "
+    chars: list[str] = []
+    escape_next = False
+
+    while pos < len(raw):
+        ch = raw[pos]
+        if escape_next:
+            # Handle common JSON escape sequences
+            escape_map = {'n': '\n', 't': '\t', 'r': '\r',
+                          '"': '"',  '\\': '\\', '/': '/'}
+            chars.append(escape_map.get(ch, ch))
+            escape_next = False
+        elif ch == '\\':
+            escape_next = True
+        elif ch == '"':
+            # Closing quote — we're done
+            break
+        else:
+            chars.append(ch)
+        pos += 1
+
+    result = "".join(chars).strip()
+    return result if result else None
+
+
 # ─────────────────────────────────────────────────────────────────────────────
-# OpenAI call with retry
+# OpenAI call with retry — two-phase strategy for large/non-Latin chunks
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _call_openai_with_retry(
@@ -335,66 +417,119 @@ def _call_openai_with_retry(
     """
     Call the OpenAI API and parse the JSON response.
 
-    Key improvements over the original:
-    - Uses response_format={"type": "json_object"} when use_json_mode=True.
-      This forces GPT-4o to always return a valid JSON object — no markdown
-      fences, no preamble. The model requires the word "json" to appear
-      somewhere in the messages for this mode, which our system prompts satisfy.
-    - max_tokens bumped to 16000 to avoid truncation on longer chunks.
-    - Retries up to max_retries times on JSON parse failures.
-    - Raises RuntimeError (→ HTTP 500) after all retries are exhausted.
+    Improvements:
+    - response_format=json_object forces valid JSON (no fences/preamble).
+    - max_tokens scaled to chunk size; capped at GPT-4o's max (16 384).
+    - On parse failure the retry uses a stripped-down prompt that asks
+      ONLY for corrected_text (no detail arrays) to minimise output size.
+    - After all retries, attempts partial extraction of corrected_text
+      from the raw truncated response so the chunk is never lost.
     """
-    last_error = None
+    last_error: Exception = RuntimeError("unknown")
+    last_raw: str = ""
 
-    for attempt in range(1, max_retries + 2):  # +2 so range gives max_retries+1 attempts
+    # Estimate output tokens: for most text ~1× input size; for legacy
+    # Devanagari/non-Latin that GPT converts to Unicode, allow 4× expansion.
+    user_content = messages[-1].get("content", "") if messages else ""
+    input_chars = len(user_content)
+    is_non_latin = any(ord(c) > 0x024F for c in user_content[:500] if not c.isspace())
+    # Legacy Devanagari heuristic (ASCII-looking but encodes Hindi)
+    is_legacy_deva = _has_legacy_devanagari(user_content)
+    expansion = 4 if (is_non_latin or is_legacy_deva) else 1
+    max_out = min(16384, max(4096, (input_chars * expansion) // 4))
+
+    for attempt in range(1, max_retries + 2):
         try:
             kwargs: dict = {
                 "model": MODEL,
                 "messages": messages,
                 "temperature": 0.3,
-                "max_tokens": min(16384, max(4096, len(messages[-1]["content"]) // 2)),
+                "max_tokens": max_out,
             }
-
-            # json_object mode guarantees a parseable JSON response from GPT-4o.
-            # Falls back gracefully if the model doesn't support it.
             if use_json_mode:
                 kwargs["response_format"] = {"type": "json_object"}
 
             response = client.chat.completions.create(**kwargs)
             raw = response.choices[0].message.content or ""
+            last_raw = raw
+            finish_reason = (response.choices[0].finish_reason or "").lower()
             logger.info(
-                "OpenAI response received for %s (attempt %d), length=%d",
-                context, attempt, len(raw),
+                "OpenAI response for %s (attempt %d): len=%d finish=%s",
+                context, attempt, len(raw), finish_reason,
             )
+
+            # If finish_reason is "length" the response was cut off —
+            # try partial extraction before giving up.
+            if finish_reason == "length":
+                logger.warning(
+                    "Response truncated at max_tokens for %s — attempting partial extraction",
+                    context,
+                )
+                partial = _extract_corrected_text_from_partial(raw)
+                if partial:
+                    logger.warning(
+                        "Partial corrected_text extracted for %s (%d chars)",
+                        context, len(partial),
+                    )
+                    return {
+                        "corrected_text": partial,
+                        "grammar_fixes": 0,
+                        "punctuation_fixes": 0,
+                        "style_suggestions": 0,
+                        "corrections_summary": f"[Chunk too large; partial correction returned for {context}]",
+                        "grammar_details": [],
+                        "punctuation_details": [],
+                        "style_details": [],
+                    }
+                # If partial extraction also failed, bump max_tokens and retry
+                max_out = 16384
+                raise ValueError(f"Response truncated (finish_reason=length) for {context}")
+
             return _parse_json_response(raw, context)
 
         except ValueError as e:
             last_error = e
-            logger.warning(
-                "Attempt %d/%d failed for %s: %s",
-                attempt, max_retries + 1, context, e,
-            )
+            logger.warning("Attempt %d/%d failed for %s: %s", attempt, max_retries + 1, context, e)
             if attempt <= max_retries:
-                # Append a correction nudge and retry
-                messages = messages + [{
-                    "role": "user",
-                    "content": (
-                        "Your previous response was not valid JSON. "
-                        "Please respond with ONLY a raw JSON object, "
-                        "no markdown, no code fences, no extra text."
-                    ),
-                }]
+                # On retry: ask for ONLY corrected_text to reduce output size
+                stripped_system = (
+                    "You are a proofreader. Return ONLY this JSON with no other keys:\n"
+                    '{"corrected_text": "<the corrected text>"}\n'
+                    "IMPORTANT: Output ONLY the raw JSON object. No markdown. No extra text."
+                )
+                orig_user = messages[-1]["content"] if messages else ""
+                messages = [
+                    {"role": "system", "content": stripped_system},
+                    {"role": "user",   "content": orig_user},
+                ]
+                # Also bump expansion factor on retry
+                max_out = 16384
 
         except Exception as e:
             last_error = e
-            logger.error(
-                "OpenAI API call failed for %s (attempt %d): %s",
-                context, attempt, e,
-            )
+            logger.error("OpenAI API call failed for %s (attempt %d): %s", context, attempt, e)
             if attempt <= max_retries:
                 continue
 
-    # All retries exhausted — raise so the endpoint returns a proper 500
+    # All retries exhausted — try one final partial extraction from last raw
+    if last_raw:
+        partial = _extract_corrected_text_from_partial(last_raw)
+        if partial:
+            logger.error(
+                "All retries failed for %s — returning partial corrected_text (%d chars)",
+                context, len(partial),
+            )
+            return {
+                "corrected_text": partial,
+                "grammar_fixes": 0,
+                "punctuation_fixes": 0,
+                "style_suggestions": 0,
+                "corrections_summary": f"[Proofreading partially completed for {context} due to response length limits]",
+                "grammar_details": [],
+                "punctuation_details": [],
+                "style_details": [],
+            }
+
     raise RuntimeError(
         f"OpenAI did not return valid JSON after {max_retries + 1} attempts "
         f"for {context}: {last_error}"
@@ -407,6 +542,9 @@ def _call_openai_with_retry(
 
 def proofread_text(text: str) -> dict:
     """Run AI proofreading on text. Handles long documents by chunking."""
+    # Detect legacy Devanagari early so we can log it
+    if _has_legacy_devanagari(text):
+        logger.info("Legacy Devanagari / non-Unicode encoding detected — using smaller chunks")
     chunks = _chunk_text(text)
     logger.info("Proofreading %d chunk(s), total chars=%d", len(chunks), len(text))
 
