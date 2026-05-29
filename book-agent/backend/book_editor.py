@@ -179,7 +179,7 @@ def parse_book_structure(raw_text: str, filename: str = "") -> dict:
             ],
             max_tokens=100,
         )
-        raw = resp.choices[0].message.content.strip().replace("```json", "").replace("```", "").strip()
+        raw = (resp.choices[0].message.content or "").strip().replace("```json", "").replace("```", "").strip()
         s = raw.find("{"); e = raw.rfind("}") + 1
         if s != -1 and e > s:
             meta = json.loads(raw[s:e])
@@ -476,9 +476,17 @@ def _apply_edit_whole_book(
     """Edit small books in a single API call."""
     book_json = json.dumps(book_structure, ensure_ascii=False)
 
-    # Trim if still too large
+    # Trim if still too large — keep it valid by truncating per-chapter content
     if len(book_json) > 50000:
-        book_json = book_json[:50000] + '...(truncated)}'
+        trimmed = dict(book_structure)
+        trimmed_chapters = []
+        for ch in trimmed.get("chapters", []):
+            ch_copy = dict(ch)
+            if len(ch_copy.get("content", "")) > 3000:
+                ch_copy["content"] = ch_copy["content"][:3000] + "\n[...content trimmed for context...]"
+            trimmed_chapters.append(ch_copy)
+        trimmed["chapters"] = trimmed_chapters
+        book_json = json.dumps(trimmed, ensure_ascii=False)
 
     recent_history = conversation_history[-4:] if len(conversation_history) > 4 else conversation_history
     # Ensure every history message has a string 'content' (OpenAI rejects non-strings)
@@ -498,7 +506,7 @@ def _apply_edit_whole_book(
     resp = client.chat.completions.create(
         model=MODEL,
         messages=messages,
-        max_tokens=4096,
+        max_tokens=min(16384, max(4096, len(book_json) // 2)),
         temperature=0.7,
     )
     raw = resp.choices[0].message.content.strip()

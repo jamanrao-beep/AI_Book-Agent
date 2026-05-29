@@ -267,7 +267,7 @@ def generate_dalle_prompt(concept: dict, book_title: str,
         temperature=0.85,
         max_tokens=450,
     )
-    return resp.choices[0].message.content.strip()
+    return (resp.choices[0].message.content or "").strip()
 
 
 def generate_cover_image(concept: dict, book_title: str,

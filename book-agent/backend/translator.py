@@ -34,7 +34,6 @@ import re
 import uuid
 import zipfile
 import shutil
-import textwrap
 from typing import Callable, Optional
 
 # ── Third-party ───────────────────────────────────────────────────────────────
@@ -242,7 +241,7 @@ def _translate_chunk(
 
     resp = _client.chat.completions.create(
         model=_MODEL,
-        max_tokens=4096,
+        max_tokens=min(16384, max(2048, len(text) // 2)),
         temperature=0.3,
         messages=[
             {"role": "system", "content": sys_prompt},
@@ -292,9 +291,23 @@ def _translate_chapter(
         chapter["title"], target_language, source_language
     )
 
-    # Chunk & translate body
-    body    = chapter["body"]
-    chunks  = textwrap.wrap(body, _CHUNK_CHARS, break_long_words=False, replace_whitespace=False)
+    # Chunk & translate body using paragraph-aware splitting
+    # (textwrap.wrap collapses \n\n, destroying paragraph structure)
+    body = chapter["body"]
+    paragraphs = body.split("\n\n")
+    chunks: list[str] = []
+    current: list[str] = []
+    current_len = 0
+    for para in paragraphs:
+        para_len = len(para) + 2
+        if current_len + para_len > _CHUNK_CHARS and current:
+            chunks.append("\n\n".join(current))
+            current = []
+            current_len = 0
+        current.append(para)
+        current_len += para_len
+    if current:
+        chunks.append("\n\n".join(current))
     if not chunks:
         chunks = [body]
 

@@ -635,7 +635,7 @@ def _transcribe_single_batch(
                 )
 
             response = _api_call_with_retry(_call)
-            raw = response.choices[0].message.content.strip()
+            raw = (response.choices[0].message.content or "").strip()
 
             if n_sent == 1:
                 gpt_pages = [raw]
@@ -788,7 +788,7 @@ def structure_transcription(pages: list[dict], book_title: str = "") -> dict:
             messages=[{"role": "user", "content": f"What language is this text written in? Reply with just the language name.\n\n{sample_text[:500]}"}],
             max_tokens=20,
         )
-        detected_language = lang_resp.choices[0].message.content.strip()
+        detected_language = (lang_resp.choices[0].message.content or "").strip()
     except Exception as e:
         print(f"  ⚠️  Language detection failed. Error details: {e}\n{traceback.format_exc()}")
 
@@ -839,7 +839,7 @@ def structure_transcription(pages: list[dict], book_title: str = "") -> dict:
                 )
 
             response = _api_call_with_retry(_structure_call)
-            raw = response.choices[0].message.content.strip()
+            raw = (response.choices[0].message.content or "").strip()
             # Strip any accidental markdown fences
             raw = raw.replace("```json", "").replace("```", "").strip()
             s = raw.find("{")

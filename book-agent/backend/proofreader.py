@@ -172,13 +172,41 @@ def _parse_json_response(raw: str, context: str = "") -> dict:
         )
         try:
             fixed = json_str
-            # If the last char is a comma or colon, trim it
+            # Strip trailing incomplete token (comma, colon, or partial key)
             fixed = re.sub(r'[,:\s]+$', '', fixed)
-            # Count unclosed braces and brackets and close them
-            open_braces   = fixed.count("{") - fixed.count("}")
-            open_brackets = fixed.count("[") - fixed.count("]")
-            fixed += "]" * max(open_brackets, 0)
-            fixed += "}" * max(open_braces, 0)
+            # Use a state-machine walk to correctly count open structures
+            # and detect unclosed strings (simple bracket counting fails on
+            # strings that contain { } [ ] characters — e.g. Devanagari text)
+            in_string = False
+            escape_next = False
+            depth_brace = 0
+            depth_bracket = 0
+            for ch in fixed:
+                if escape_next:
+                    escape_next = False
+                    continue
+                if ch == '\\' and in_string:
+                    escape_next = True
+                    continue
+                if ch == '"':
+                    in_string = not in_string
+                    continue
+                if in_string:
+                    continue
+                if ch == '{':
+                    depth_brace += 1
+                elif ch == '}':
+                    depth_brace = max(0, depth_brace - 1)
+                elif ch == '[':
+                    depth_bracket += 1
+                elif ch == ']':
+                    depth_bracket = max(0, depth_bracket - 1)
+            suffix = ""
+            if in_string:
+                suffix += '"'   # close the open string first
+            suffix += "]" * depth_bracket
+            suffix += "}" * depth_brace
+            fixed += suffix
             return json.loads(fixed)
         except Exception:
             logger.error(
@@ -277,7 +305,7 @@ IMPORTANT: Output ONLY the raw JSON object. Do not wrap it in markdown. Do not a
 # Chunking helper
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _chunk_text(text: str, max_chars: int = 50000) -> list[str]:
+def _chunk_text(text: str, max_chars: int = 30000) -> list[str]:
     """Split long documents into chunks so we stay within token limits."""
     if len(text) <= max_chars:
         return [text]
@@ -324,7 +352,7 @@ def _call_openai_with_retry(
                 "model": MODEL,
                 "messages": messages,
                 "temperature": 0.3,
-                "max_tokens": 16000,  # raised from 4096 to avoid mid-JSON truncation
+                "max_tokens": min(16384, max(4096, len(messages[-1]["content"]) // 2)),
             }
 
             # json_object mode guarantees a parseable JSON response from GPT-4o.
