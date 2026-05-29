@@ -1192,6 +1192,14 @@ def _run_layout_job(
     margin_right_mm: Optional[float] = None,
     show_drop_cap: Optional[bool] = None,
     show_page_numbers: Optional[bool] = None,
+    # Footer overrides
+    footer_left_text: Optional[str] = None,
+    footer_right_pagenum: Optional[bool] = True,
+    # Advanced layout overrides
+    mirror_margins: Optional[bool] = None,
+    gutter_mm: Optional[float] = None,
+    paragraph_spacing_mm: Optional[float] = None,
+    indent_mm: Optional[float] = None,
 ) -> None:
     """Background thread worker for layout design."""
 
@@ -1222,6 +1230,12 @@ def _run_layout_job(
             margin_right_mm=margin_right_mm,
             show_drop_cap=show_drop_cap,
             show_page_numbers=show_page_numbers,
+            footer_left_text=footer_left_text,
+            footer_right_pagenum=footer_right_pagenum,
+            mirror_margins=mirror_margins,
+            gutter_mm=gutter_mm,
+            paragraph_spacing_mm=paragraph_spacing_mm,
+            indent_mm=indent_mm,
         )
         _layout_jobs[job_id].update(
             {
@@ -1249,8 +1263,8 @@ def _run_layout_job(
 @app.post("/design-layout")
 async def design_layout_endpoint(
     file: UploadFile = File(...),
-    page_width_mm: float = Form(default=210.0),   # BUG 7 FIX: A4 default — matches layout_designer.py
-    page_height_mm: float = Form(default=297.0),  # BUG 7 FIX: A4 default — matches layout_designer.py
+    page_width_mm: float = Form(default=210.0),
+    page_height_mm: float = Form(default=297.0),
     book_title: str = Form(default=""),
     design_instructions: str = Form(default=""),
     book_type: Optional[str] = Form(default=None),
@@ -1267,6 +1281,14 @@ async def design_layout_endpoint(
     margin_right_mm: Optional[str] = Form(default=None),
     show_drop_cap: Optional[str] = Form(default=None),
     show_page_numbers: Optional[str] = Form(default=None),
+    # Footer overrides
+    footer_left_text: Optional[str] = Form(default=None),       # custom bottom-left text
+    footer_right_pagenum: Optional[str] = Form(default="true"), # "true"/"false"
+    # Advanced layout overrides
+    mirror_margins: Optional[str] = Form(default=None),
+    gutter_mm: Optional[str] = Form(default=None),
+    paragraph_spacing_mm: Optional[str] = Form(default=None),
+    indent_mm: Optional[str] = Form(default=None),
 ):
     """
     Upload a PDF, DOCX, or ZIP book and apply an AI-generated internal layout.
@@ -1339,6 +1361,14 @@ async def design_layout_endpoint(
             margin_right_mm=_float_or_none(margin_right_mm),
             show_drop_cap=_bool_or_none(show_drop_cap),
             show_page_numbers=_bool_or_none(show_page_numbers),
+            # Footer
+            footer_left_text=footer_left_text.strip() if footer_left_text and footer_left_text.strip() else None,
+            footer_right_pagenum=_bool_or_none(footer_right_pagenum) if footer_right_pagenum else True,
+            # Advanced
+            mirror_margins=_bool_or_none(mirror_margins),
+            gutter_mm=_float_or_none(gutter_mm),
+            paragraph_spacing_mm=_float_or_none(paragraph_spacing_mm),
+            indent_mm=_float_or_none(indent_mm),
         ),
         daemon=True,
     )

@@ -939,10 +939,19 @@ def render_layout_pdf(
         show_pn        = concept["show_page_numbers"]
         chapter_prefix = concept.get("chapter_prefix", "Chapter")
 
+        # Footer config — always-on, book name bottom-left, page number bottom-right
+        footer_left  = concept.get("footer_left_text", header_text or book_title)
+        footer_right_is_pagenum = concept.get("footer_right_pagenum", True)
+        # If show_page_numbers is False, suppress both footer and running page number
+        _show_footer  = show_pn  # reuse the existing flag
+
         def _on_page(canvas, doc):
             canvas.saveState()
+            # ── Page background ──────────────────────────────────────────────────
             canvas.setFillColorRGB(bg_r, bg_g, bg_b)
             canvas.rect(0, 0, PW, PH, fill=1, stroke=0)
+
+            # ── Running header (page 2+, centred at top) ──────────────────────
             if header_text and doc.page > 1:
                 canvas.setFillColorRGB(ac_r, ac_g, ac_b)
                 canvas.setFont(body_font, 8)
@@ -950,10 +959,18 @@ def render_layout_pdf(
                 canvas.setStrokeColorRGB(ac_r, ac_g, ac_b, alpha=0.35)
                 canvas.setLineWidth(0.4)
                 canvas.line(ml, PH - mt * 0.65, PW - mr, PH - mt * 0.65)
-            if show_pn and doc.page > 1:
-                canvas.setFillColorRGB(ac_r, ac_g, ac_b)
-                canvas.setFont(body_font, 8)
-                canvas.drawCentredString(PW / 2, mb * 0.45, str(doc.page))
+
+            # ── Footer: ALL pages (including page 1 / chapter starts) ─────────
+            # Bottom-left: book title / custom text
+            # Bottom-right: page number
+            footer_y = mb * 0.45
+            canvas.setFont(body_font, 8)
+            canvas.setFillColorRGB(ac_r, ac_g, ac_b)
+            if footer_left:
+                canvas.drawString(ml, footer_y, footer_left)
+            if _show_footer and footer_right_is_pagenum:
+                canvas.drawRightString(PW - mr, footer_y, str(doc.page))
+
             canvas.restoreState()
 
         doc = SimpleDocTemplate(
@@ -1256,6 +1273,62 @@ def render_layout_docx(
         section.right_margin  = Cm(concept["margin_right_mm"]  / 10)
         section.top_margin    = Cm(concept["margin_top_mm"]    / 10)
         section.bottom_margin = Cm(concept["margin_bottom_mm"] / 10)
+        section.footer_distance = Cm(0.8)
+
+        # ── Footer: book name bottom-left, page number bottom-right ─────────────
+        show_pn_docx = concept.get("show_page_numbers", True)
+        footer_left_text = concept.get("header_text", book_title) or book_title
+        accent_hex = concept.get("accent_color", "#555555").lstrip("#")
+
+        if show_pn_docx:
+            from docx.oxml.ns import qn as _qn_footer   # pyrefly: ignore [missing-import]
+            from docx.oxml import OxmlElement as _OxmlEl # pyrefly: ignore [missing-import]
+
+            footer = section.footer
+            footer.is_linked_to_previous = False
+            fp = footer.paragraphs[0]
+
+            # Tab stops: right-aligned at page width minus margins (approx)
+            pPr = fp._p.get_or_add_pPr()
+            tabs_el = _OxmlEl("w:tabs")
+            tab = _OxmlEl("w:tab")
+            # Right-align tab at ~15000 twips (approx for most page widths)
+            tab.set(_qn_footer("w:val"),  "right")
+            tab.set(_qn_footer("w:pos"),  "9000")
+            tabs_el.append(tab)
+            pPr.append(tabs_el)
+
+            # Left run: book name
+            run_left = fp.add_run(footer_left_text)
+            run_left.font.name  = "Times New Roman"
+            run_left.font.size  = Pt(8)
+            try:
+                run_left.font.color.rgb = _hex_to_docx_rgb(concept.get("accent_color", "#555555"))
+            except Exception:
+                pass
+
+            # Tab to push next element to the right
+            fp.add_run("\t")
+
+            # Right run: PAGE NUMBER field using fldChar
+            run_pg = fp.add_run()
+            run_pg.font.name = "Times New Roman"
+            run_pg.font.size = Pt(8)
+            try:
+                run_pg.font.color.rgb = _hex_to_docx_rgb(concept.get("accent_color", "#555555"))
+            except Exception:
+                pass
+            fld_begin  = _OxmlEl("w:fldChar"); fld_begin.set(_qn_footer("w:fldCharType"),  "begin")
+            instr      = _OxmlEl("w:instrText"); instr.text = " PAGE "; instr.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+            fld_sep    = _OxmlEl("w:fldChar"); fld_sep.set(_qn_footer("w:fldCharType"),    "separate")
+            fld_text   = _OxmlEl("w:t");        fld_text.text = "1"
+            fld_end    = _OxmlEl("w:fldChar"); fld_end.set(_qn_footer("w:fldCharType"),    "end")
+            run_pg._r.append(fld_begin)
+            rpr = _OxmlEl("w:rPr"); run_pg._r.insert(0, rpr)  # noqa: keep order
+            run_pg._r.append(instr)
+            run_pg._r.append(fld_sep)
+            run_pg._r.append(fld_text)
+            run_pg._r.append(fld_end)
 
         # Detect whether this book has mixed Hindi + Latin content
         all_text_docx = book_title + " ".join(
@@ -1474,8 +1547,8 @@ def design_layout(
     file_path: str,
     filename: str,
     output_dir: str,
-    page_width_mm: float = 210.0,   # BUG 7 FIX: default A4 to match FastAPI endpoint
-    page_height_mm: float = 297.0,  # BUG 7 FIX: default A4 to match FastAPI endpoint
+    page_width_mm: float = 210.0,
+    page_height_mm: float = 297.0,
     book_title: str = "",
     design_instructions: str = "",
     book_type: Optional[str] = None,
@@ -1493,6 +1566,14 @@ def design_layout(
     margin_right_mm: Optional[float] = None,
     show_drop_cap: Optional[bool] = None,
     show_page_numbers: Optional[bool] = None,
+    # ── Footer overrides ────────────────────────────────────────────────────
+    footer_left_text: Optional[str] = None,    # custom bottom-left text (default: book title)
+    footer_right_pagenum: Optional[bool] = True, # show page number bottom-right
+    # ── Advanced layout overrides ───────────────────────────────────────────
+    mirror_margins: Optional[bool] = None,
+    gutter_mm: Optional[float] = None,
+    paragraph_spacing_mm: Optional[float] = None,
+    indent_mm: Optional[float] = None,
 ) -> dict:
     """
     Full pipeline — book-type aware:
@@ -1617,6 +1698,24 @@ def design_layout(
             concept["show_drop_cap"]      = show_drop_cap
         if show_page_numbers is not None:
             concept["show_page_numbers"]  = show_page_numbers
+
+        # ── Footer overrides ─────────────────────────────────────────────────────
+        # footer_left_text: None → use book title; "" → suppress; str → use as-is
+        concept["footer_left_text"]    = footer_left_text if footer_left_text is not None else (book_title or "")
+        concept["footer_right_pagenum"] = footer_right_pagenum if footer_right_pagenum is not None else True
+
+        # ── Advanced layout overrides ────────────────────────────────────────────
+        if mirror_margins is not None:
+            concept["mirror_margins"] = mirror_margins
+        if gutter_mm is not None:
+            concept["gutter_mm"]      = float(gutter_mm)
+            # Apply gutter to inner margin (left for odd pages; simplified: left margin)
+            gutter_pt = float(gutter_mm)
+            concept["margin_left_mm"] = float(concept.get("margin_left_mm", 22)) + gutter_pt
+        if paragraph_spacing_mm is not None:
+            concept["paragraph_spacing_mm"] = float(paragraph_spacing_mm)
+        if indent_mm is not None:
+            concept["first_para_indent_mm"] = float(indent_mm)
 
         concept["_book_type"]       = book_type or "auto"
         concept["_book_type_label"] = profile["_label"] if profile else "Auto (AI chosen)"
