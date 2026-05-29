@@ -2,7 +2,9 @@ import axios from "axios";
 
 const API = axios.create({
   baseURL: process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000",
-  timeout: 900000,
+  // Large Hindi books are split into many small chunks; each chunk can take
+  // ~30–60 s, and a 200-page book may have 20–30 chunks → allow up to 1 hour.
+  timeout: 3600000, // 1 hour (was 900 s / 15 min)
 });
 
 // ─────────────────────────────────────────────
@@ -55,6 +57,8 @@ export interface ProofreadResult {
   grammar_details: ErrorDetail[];
   punctuation_details: ErrorDetail[];
   style_details: ErrorDetail[];
+  /** Chunk numbers (1-based) that failed all 3 attempts and used original text */
+  skipped_chunks?: number[];
 }
 
 // ─────────────────────────────────────────────
@@ -139,8 +143,10 @@ export const proofreadDocument = (
   form.append("file", file);
   return API.post<ProofreadResult>("/proofread", form, {
     headers: { "Content-Type": "multipart/form-data" },
-    // No separate timeout here — inherits the 900s from the API instance,
-    // which is already generous enough for large AI proofreading jobs.
+    // Override to 1 hour: Hindi books with many small chunks can take a long
+    // time. The global instance timeout is also 1 hr but being explicit here
+    // makes the intent clear and guards against future global changes.
+    timeout: 3600000,
     onUploadProgress: onUploadProgress
       ? (e) => {
         if (e.total) {

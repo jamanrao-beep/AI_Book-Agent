@@ -321,23 +321,23 @@ def _has_legacy_devanagari(text: str) -> bool:
     legacy_chars = sum(
         1 for c in sample
         if c in "QWRTYUIOPASDFGHJKLZXCVBNMqwrtyuiopasdfghjklzxcvbnm"
-        "[];',./\\`~!@#$%^&*()_+-={}|:<>?"
-        "0123456789"
-        "\u0900-\u097F"  # already-decoded Devanagari (safe to shrink anyway)
+               "[];',./\\`~!@#$%^&*()_+-={}|:<>?"
+               "0123456789"
+        or (0x0900 <= ord(c) <= 0x097F)  # already-decoded Devanagari (safe to shrink anyway)
     )
     # Also check for the telltale Kruti Dev character 'Q' in non-English context
     has_no_spaces_pattern = bool(re.search(r'[A-Z]{4,}[^a-zA-Z]', sample))
     return (legacy_chars / max(len(sample), 1)) > 0.6 or has_no_spaces_pattern
 
 
-def _chunk_text(text: str, max_chars: int = 12000) -> list[str]:
+def _chunk_text(text: str, max_chars: int = 60000) -> list[str]:
     """
     Split long documents into chunks that stay within token limits.
 
-    Default is 12 000 chars (≈3 000 tokens input).  This leaves ample room
-    for the corrected output even for legacy Devanagari text which expands
-    3–5× when GPT converts it to Unicode (12 000 × 5 = 60 000 output chars
-    ≈ 15 000 tokens — well within GPT-4o's 16 384 output token limit).
+    For Latin text: 60 000 chars default (≈15 000 tokens input).
+    For Hindi/Devanagari: caller passes max_chars=8000 because legacy-encoded
+    Devanagari expands 3–5× in output, and smaller chunks complete faster and
+    are easier to retry individually without losing large sections of the book.
     """
     if len(text) <= max_chars:
         return [text]
@@ -428,15 +428,23 @@ def _call_openai_with_retry(
     last_error: Exception = RuntimeError("unknown")
     last_raw: str = ""
 
-    # Estimate output tokens: for most text ~1× input size; for legacy
-    # Devanagari/non-Latin that GPT converts to Unicode, allow 4× expansion.
+    # ── Token budget ──────────────────────────────────────────────────────────
+    # GPT-4o supports up to 128 000 output tokens.  We target 10× the old
+    # 16 384 cap, clamped to the model's hard ceiling.
+    # Rule of thumb: 1 token ≈ 3–4 chars for Latin, ~1.5 chars for Devanagari
+    # after GPT converts legacy encoding → Unicode (3–5× char expansion).
+    # We use chars / 3 as a conservative tokens estimate, multiply by the
+    # expansion factor, and add 20% headroom, then clamp to [8192, 128000].
+    MAX_OUTPUT_TOKENS = 128000  # GPT-4o hard ceiling (10× the old 16 384 cap)
     user_content = messages[-1].get("content", "") if messages else ""
     input_chars = len(user_content)
     is_non_latin = any(ord(c) > 0x024F for c in user_content[:500] if not c.isspace())
     # Legacy Devanagari heuristic (ASCII-looking but encodes Hindi)
     is_legacy_deva = _has_legacy_devanagari(user_content)
-    expansion = 4 if (is_non_latin or is_legacy_deva) else 1
-    max_out = min(16384, max(4096, (input_chars * expansion) // 4))
+    expansion = 5 if (is_non_latin or is_legacy_deva) else 2  # generous headroom
+    # estimated_output_tokens = (input_chars / 3) * expansion * 1.2 (20% buffer)
+    estimated = int((input_chars / 3) * expansion * 1.2)
+    max_out = max(8192, min(MAX_OUTPUT_TOKENS, estimated))
 
     for attempt in range(1, max_retries + 2):
         try:
@@ -458,13 +466,18 @@ def _call_openai_with_retry(
                 context, attempt, len(raw), finish_reason,
             )
 
-            # If finish_reason is "length" the response was cut off —
-            # try partial extraction before giving up.
+            # If finish_reason is "length" the response was cut off.
+            # Bump max_tokens to the ceiling and retry before resorting to
+            # partial extraction — this avoids silently returning incomplete text.
             if finish_reason == "length":
                 logger.warning(
-                    "Response truncated at max_tokens for %s — attempting partial extraction",
-                    context,
+                    "Response truncated at max_tokens for %s — bumping to %d and retrying",
+                    context, MAX_OUTPUT_TOKENS,
                 )
+                max_out = MAX_OUTPUT_TOKENS
+                if attempt <= max_retries:
+                    raise ValueError(f"Response truncated (finish_reason=length) for {context}")
+                # Final attempt also truncated — fall back to partial extraction
                 partial = _extract_corrected_text_from_partial(raw)
                 if partial:
                     logger.warning(
@@ -481,9 +494,7 @@ def _call_openai_with_retry(
                         "punctuation_details": [],
                         "style_details": [],
                     }
-                # If partial extraction also failed, bump max_tokens and retry
-                max_out = 16384
-                raise ValueError(f"Response truncated (finish_reason=length) for {context}")
+                raise ValueError(f"Response truncated even at max tokens for {context}")
 
             return _parse_json_response(raw, context)
 
@@ -502,8 +513,8 @@ def _call_openai_with_retry(
                     {"role": "system", "content": stripped_system},
                     {"role": "user",   "content": orig_user},
                 ]
-                # Also bump expansion factor on retry
-                max_out = 16384
+                # Also bump to ceiling on retry
+                max_out = MAX_OUTPUT_TOKENS
 
         except Exception as e:
             last_error = e
@@ -541,11 +552,20 @@ def _call_openai_with_retry(
 # ─────────────────────────────────────────────────────────────────────────────
 
 def proofread_text(text: str) -> dict:
-    """Run AI proofreading on text. Handles long documents by chunking."""
-    # Detect legacy Devanagari early so we can log it
-    if _has_legacy_devanagari(text):
-        logger.info("Legacy Devanagari / non-Unicode encoding detected — using smaller chunks")
-    chunks = _chunk_text(text)
+    """Run AI proofreading on text. Handles long documents by chunking.
+
+    Hindi / legacy-Devanagari documents are split into smaller chunks (8 000
+    chars) so each API call completes quickly and can be retried or skipped
+    individually without losing large sections of the book.
+    Latin documents use larger chunks (60 000 chars) for efficiency.
+    """
+    is_legacy_deva = _has_legacy_devanagari(text)
+    if is_legacy_deva:
+        logger.info("Legacy Devanagari / non-Unicode encoding detected — using smaller chunks (8 000 chars)")
+        chunk_size = 8000
+    else:
+        chunk_size = 60000
+    chunks = _chunk_text(text, max_chars=chunk_size)
     logger.info("Proofreading %d chunk(s), total chars=%d", len(chunks), len(text))
 
     all_corrected = []
@@ -556,6 +576,7 @@ def proofread_text(text: str) -> dict:
     all_grammar_details: list = []
     all_punctuation_details: list = []
     all_style_details: list = []
+    skipped_chunks: list[int] = []   # 1-based indices of chunks that failed all 3 attempts
 
     for i, chunk in enumerate(chunks):
         context = f"chunk {i+1}/{len(chunks)}"
@@ -565,20 +586,44 @@ def proofread_text(text: str) -> dict:
             {"role": "user", "content": prompt},
         ]
 
-        data = _call_openai_with_retry(messages, context)
+        # ── 3 independent attempts; on total failure keep original text ──────
+        succeeded = False
+        for attempt_no in range(1, 4):   # attempts 1, 2, 3
+            try:
+                data = _call_openai_with_retry(messages, context, max_retries=2)
+                all_corrected.append(data.get("corrected_text", chunk))
+                total_grammar += int(data.get("grammar_fixes", 0))
+                total_punct   += int(data.get("punctuation_fixes", 0))
+                total_style   += int(data.get("style_suggestions", 0))
+                summaries.append(data.get("corrections_summary", ""))
+                all_grammar_details.extend(data.get("grammar_details", []))
+                all_punctuation_details.extend(data.get("punctuation_details", []))
+                all_style_details.extend(data.get("style_details", []))
+                succeeded = True
+                break
+            except Exception as e:
+                logger.warning(
+                    "Top-level attempt %d/3 failed for %s: %s%s",
+                    attempt_no, context, e,
+                    " — retrying…" if attempt_no < 3 else " — skipping chunk, keeping original text.",
+                )
 
-        all_corrected.append(data.get("corrected_text", chunk))
-        total_grammar += int(data.get("grammar_fixes", 0))
-        total_punct   += int(data.get("punctuation_fixes", 0))
-        total_style   += int(data.get("style_suggestions", 0))
-        summaries.append(data.get("corrections_summary", ""))
-        all_grammar_details.extend(data.get("grammar_details", []))
-        all_punctuation_details.extend(data.get("punctuation_details", []))
-        all_style_details.extend(data.get("style_details", []))
+        if not succeeded:
+            # All 3 outer attempts failed — include the raw original so the
+            # document is complete; flag it in the summary.
+            all_corrected.append(chunk)
+            skipped_chunks.append(i + 1)
+            logger.error("Chunk %d/%d permanently skipped — original text preserved.", i + 1, len(chunks))
 
     combined_summary = " ".join(s for s in summaries if s)
-    if len(summaries) > 1:
-        combined_summary = f"Document processed in {len(summaries)} parts. " + combined_summary
+    if len(chunks) > 1:
+        combined_summary = f"Document processed in {len(chunks)} parts. " + combined_summary
+    if skipped_chunks:
+        skipped_str = ", ".join(str(c) for c in skipped_chunks)
+        combined_summary += (
+            f" NOTE: {len(skipped_chunks)} chunk(s) could not be proofread after 3 attempts "
+            f"(chunk(s) {skipped_str}) — original text preserved for those sections."
+        )
 
     return {
         "corrected_text": "\n\n".join(all_corrected),
