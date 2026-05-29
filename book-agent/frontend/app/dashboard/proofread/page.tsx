@@ -44,6 +44,7 @@ export default function ProofreadPage() {
   const [dragging, setDragging] = useState(false);
   const [loading, setLoading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [result, setResult] = useState<ProofResult | null>(null);
   const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState<TabType>("summary");
@@ -102,12 +103,20 @@ export default function ProofreadPage() {
     if (!file) return;
     setLoading(true);
     setUploadProgress(0);
+    setElapsedSeconds(0);
     setError("");
     // Reset selections to all-on for each new upload
     setApplyGrammar(true);
     setApplyPunctuation(true);
     setApplyStyle(true);
     setPdfError("");
+
+    // Tick elapsed time every second while loading
+    const timerRef = { id: 0 };
+    timerRef.id = window.setInterval(() => {
+      setElapsedSeconds((s) => s + 1);
+    }, 1000);
+
     try {
       const res = await proofreadDocument(file, (pct) => setUploadProgress(pct));
       setResult(res.data);
@@ -134,7 +143,9 @@ export default function ProofreadPage() {
           const code = axiosErr.code ?? "";
           if (code === "ECONNABORTED" || axiosErr.message?.includes("timeout")) {
             message =
-              "Request timed out. The document may be too large for a single request — try a smaller file, or split large documents into parts.";
+              "The request timed out waiting for the server — but the backend may still be processing. " +
+              "If you see a result missing some sections, this is why. " +
+              "To fix permanently, increase the axios timeout in @/lib/api.ts (set timeout: 30 * 60 * 1000 for 30 min).";
           } else {
             message =
               "No response from server. Check that the backend is running and that there is no CORS or proxy issue. See browser console for details.";
@@ -147,6 +158,7 @@ export default function ProofreadPage() {
       }
       setError(message);
     } finally {
+      clearInterval(timerRef.id);
       setLoading(false);
       setUploadProgress(0);
     }
@@ -252,7 +264,12 @@ export default function ProofreadPage() {
   const loadingLabel = (() => {
     if (!loading) return "";
     if (uploadProgress < 100) return `Uploading… ${uploadProgress}%`;
-    return "Analysing document — this may take a minute…";
+    const mins = Math.floor(elapsedSeconds / 60);
+    const secs = elapsedSeconds % 60;
+    const elapsed = mins > 0
+      ? `${mins}m ${secs}s`
+      : `${secs}s`;
+    return `Analysing document… ${elapsed} elapsed. Large files can take 10–20 min — please keep this tab open.`;
   })();
 
   return (
@@ -541,7 +558,7 @@ export default function ProofreadPage() {
                   textAlign: "center",
                 }}
               >
-                Upload complete — AI is now analysing your document. Large files may take a minute or two.
+                Upload complete — AI is now analysing your document chunk by chunk. Large Hindi/Devanagari files may take 10–20 minutes. Do not close this tab.
               </p>
             )}
           </div>

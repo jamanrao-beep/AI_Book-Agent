@@ -435,7 +435,7 @@ def _call_openai_with_retry(
     # after GPT converts legacy encoding → Unicode (3–5× char expansion).
     # We use chars / 3 as a conservative tokens estimate, multiply by the
     # expansion factor, and add 20% headroom, then clamp to [8192, 128000].
-    MAX_OUTPUT_TOKENS = 128000  # GPT-4o hard ceiling (10× the old 16 384 cap)
+    MAX_OUTPUT_TOKENS = 16384  # gpt-4o hard ceiling for completion tokens
     user_content = messages[-1].get("content", "") if messages else ""
     input_chars = len(user_content)
     is_non_latin = any(ord(c) > 0x024F for c in user_content[:500] if not c.isspace())
@@ -467,16 +467,22 @@ def _call_openai_with_retry(
             )
 
             # If finish_reason is "length" the response was cut off.
-            # Bump max_tokens to the ceiling and retry before resorting to
-            # partial extraction — this avoids silently returning incomplete text.
+            # Bump max_tokens to the ceiling and retry — but only if we're not
+            # already at the ceiling (bumping past 16384 causes a 400 error).
             if finish_reason == "length":
-                logger.warning(
-                    "Response truncated at max_tokens for %s — bumping to %d and retrying",
-                    context, MAX_OUTPUT_TOKENS,
-                )
-                max_out = MAX_OUTPUT_TOKENS
-                if attempt <= max_retries:
-                    raise ValueError(f"Response truncated (finish_reason=length) for {context}")
+                if max_out < MAX_OUTPUT_TOKENS:
+                    logger.warning(
+                        "Response truncated at max_tokens for %s — bumping to %d and retrying",
+                        context, MAX_OUTPUT_TOKENS,
+                    )
+                    max_out = MAX_OUTPUT_TOKENS
+                    if attempt <= max_retries:
+                        raise ValueError(f"Response truncated (finish_reason=length) for {context}")
+                else:
+                    logger.warning(
+                        "Response truncated even at ceiling (%d) for %s — extracting partial text",
+                        MAX_OUTPUT_TOKENS, context,
+                    )
                 # Final attempt also truncated — fall back to partial extraction
                 partial = _extract_corrected_text_from_partial(raw)
                 if partial:
