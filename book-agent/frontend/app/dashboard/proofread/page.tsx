@@ -71,8 +71,16 @@ export default function ProofreadPage() {
   const handleFile = (f: File) => {
     const allowed = [
       "text/plain",
+      "application/pdf",
       "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
       "application/msword",
+      "text/markdown",
+      "text/x-markdown",
+      "application/rtf",
+      "text/rtf",
+      "application/zip",
+      "application/x-zip-compressed",
+      "application/x-zip",
     ];
     if (
       !allowed.includes(f.type) &&
