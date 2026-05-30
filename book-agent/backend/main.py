@@ -52,10 +52,9 @@ app = FastAPI(
 # ─────────────────────────────────────────────────────────────────────────────
 
 ALLOWED_ORIGINS = [
-    "https://ai-book-agent-23.vercel.app",            # production frontend (Vercel)
-    "https://aibook-agent-production.up.railway.app", # production backend origin (Railway)
-    "http://localhost:3000",                           # local dev
-    "http://localhost:3001",                           # alternate local dev port
+    "https://ai-book-agent-23.vercel.app",  # production frontend
+    "http://localhost:3000",                 # local dev
+    "http://localhost:3001",                 # alternate local dev port
 ]
 
 app.add_middleware(
@@ -63,7 +62,7 @@ app.add_middleware(
     allow_origins=ALLOWED_ORIGINS,
     allow_credentials=False,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
-    allow_headers=["Content-Type", "Authorization", "Accept", "Origin", "X-Requested-With"],
+    allow_headers=["*"],
     expose_headers=["*"],
     max_age=3600,  # cache preflight for 1 hour
 )
@@ -92,13 +91,11 @@ async def preflight_handler(rest_of_path: str, request: Request):
             headers={
                 "Access-Control-Allow-Origin": origin,
                 "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, PATCH",
-                "Access-Control-Allow-Headers": "Content-Type, Authorization, Accept, Origin, X-Requested-With",
+                "Access-Control-Allow-Headers": "*",
                 "Access-Control-Max-Age": "3600",
-                "Vary": "Origin",
             },
         )
-    # Unknown origin — reject preflight
-    return JSONResponse(content={"detail": "CORS origin not allowed"}, status_code=403)
+    return JSONResponse(content={}, status_code=200)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Global exception handler — turns unhandled crashes into readable JSON 500s
@@ -294,6 +291,120 @@ def list_books():
 # ─────────────────────────────────────────────────────────────────────────────
 
 ALLOWED_PROOFREAD_EXTENSIONS = {".txt", ".docx", ".pdf", ".md", ".rtf", ".zip"}
+
+
+def _run_proofread_job(job_id: str, tmp_path: str, filename: str, ext: str) -> None:
+    """
+    Background thread: extract text, proofread, save output.
+    Updates _proofread_jobs[job_id] with stage/result/error.
+    The tmp upload file is deleted here after extraction.
+    """
+    try:
+        _proofread_jobs[job_id]["stage"] = "extracting"
+        original_text = extract_text(tmp_path, filename)
+        if not original_text.strip():
+            _proofread_jobs[job_id].update({"stage": "error", "error": "Document appears to be empty or is an image-based PDF with no text layer."})
+            return
+
+        _proofread_jobs[job_id]["stage"] = "proofreading"
+        result = proofread_text(original_text)
+
+        out_ext = ext if ext in {".docx", ".pdf"} else ".txt"
+        corrected_filename = f"corrected_{job_id}{out_ext}"
+        corrected_path = os.path.join(OUTPUT_DIR, corrected_filename)
+        title = os.path.splitext(filename)[0]
+
+        if ext == ".docx":
+            save_corrected_docx(result["corrected_text"], corrected_path, original_title=title)
+        elif ext == ".pdf":
+            save_corrected_pdf(result["corrected_text"], corrected_path, original_title=title)
+        else:
+            save_corrected_txt(result["corrected_text"], corrected_path)
+
+        _proofread_jobs[job_id].update({
+            "stage": "done",
+            "original_filename": filename,
+            "original_text": original_text,
+            "original_title": title,
+            "corrected_path": corrected_path,
+            "ext": out_ext,
+            "original_ext": ext,
+            "result": {
+                "job_id": job_id,
+                "original_filename": filename,
+                "corrected_text": result["corrected_text"],
+                "grammar_fixes": result["grammar_fixes"],
+                "punctuation_fixes": result["punctuation_fixes"],
+                "style_suggestions": result["style_suggestions"],
+                "corrections_summary": result["corrections_summary"],
+                "grammar_details": result.get("grammar_details", []),
+                "punctuation_details": result.get("punctuation_details", []),
+                "style_details": result.get("style_details", []),
+                "download_url": f"/proofread/{job_id}/download",
+            },
+        })
+
+    except Exception as exc:
+        logger.error("Background proofread failed for '%s': %s\n%s", filename, exc, traceback.format_exc())
+        _proofread_jobs[job_id].update({"stage": "error", "error": str(exc)})
+    finally:
+        if os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+
+
+@app.post("/proofread/upload")
+async def proofread_upload(file: UploadFile = File(...)):
+    """
+    Upload-only endpoint for large files.
+    Streams the file to disk, returns job_id immediately.
+    Processing runs in background. Poll /proofread/{job_id}/status.
+    """
+    filename = file.filename or "document.txt"
+    ext = os.path.splitext(filename)[1].lower()
+    logger.info("Proofread/upload: filename=%s size=%s", filename, file.size or "unknown")
+
+    if ext not in ALLOWED_PROOFREAD_EXTENSIONS:
+        raise HTTPException(400, f"Unsupported file type '{ext}'. Upload .txt, .docx, .pdf, .md, .rtf, or .zip")
+
+    job_id = uuid.uuid4().hex
+    tmp_path = os.path.join(OUTPUT_DIR, f"upload_{job_id}{ext}")
+
+    try:
+        byte_count = await _stream_upload_to_disk(file, tmp_path)
+        logger.info("Upload complete: %d bytes -> %s", byte_count, tmp_path)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(500, f"Upload failed: {exc}") from exc
+
+    _proofread_jobs[job_id] = {"stage": "queued", "original_filename": filename}
+
+    threading.Thread(
+        target=_run_proofread_job,
+        args=(job_id, tmp_path, filename, ext),
+        daemon=True,
+    ).start()
+
+    return {"job_id": job_id, "status": "started"}
+
+
+@app.get("/proofread/{job_id}/status")
+def proofread_status(job_id: str):
+    """Poll for background proofread progress. stage: queued|extracting|proofreading|done|error"""
+    job = _proofread_jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, "Proofread job not found.")
+    stage = job.get("stage", "unknown")
+    resp: dict = {"job_id": job_id, "stage": stage}
+    if stage == "done":
+        resp["result"] = job["result"]
+    elif stage == "error":
+        resp["error"] = job.get("error", "Unknown error")
+    return resp
+
 
 
 @app.post("/proofread")

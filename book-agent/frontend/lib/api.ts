@@ -131,29 +131,68 @@ export const downloadDOCX = (id: number) =>
 // ─────────────────────────────────────────────
 
 /**
- * Upload a .txt, .docx, .pdf, .md, .rtf, or .zip file for AI proofreading.
- * @param file - The file to proofread
- * @param onUploadProgress - Optional callback receiving upload percentage (0–100)
+ * Upload a file for proofreading using the two-step approach:
+ * 1. POST /proofread/upload  — streams file to server, returns job_id immediately
+ * 2. Poll GET /proofread/{job_id}/status every 3 s until stage == "done" | "error"
+ *
+ * This avoids Railway's 100-second proxy timeout killing large uploads before
+ * FastAPI finishes processing them. The upload itself completes quickly;
+ * the AI work runs in a background thread on the server.
  */
 export const proofreadDocument = (
   file: File,
   onUploadProgress?: (pct: number) => void,
-) => {
+): Promise<{ data: ProofreadResult }> => {
   const form = new FormData();
   form.append("file", file);
-  return API.post<ProofreadResult>("/proofread", form, {
-    headers: { "Content-Type": "multipart/form-data" },
-    // Override to 1 hour: Hindi books with many small chunks can take a long
-    // time. The global instance timeout is also 1 hr but being explicit here
-    // makes the intent clear and guards against future global changes.
-    timeout: 3600000,
-    onUploadProgress: onUploadProgress
-      ? (e) => {
-        if (e.total) {
-          onUploadProgress(Math.round((e.loaded * 100) / e.total));
+
+  // Step 1: upload file, get job_id back immediately
+  const uploadPromise = API.post<{ job_id: string; status: string }>(
+    "/proofread/upload",
+    form,
+    {
+      // No Content-Type header — axios sets multipart/form-data + boundary automatically
+      timeout: 3600000,
+      onUploadProgress: onUploadProgress
+        ? (e) => {
+          if (e.total) {
+            onUploadProgress(Math.round((e.loaded * 100) / e.total));
+          }
         }
-      }
-      : undefined,
+        : undefined,
+    },
+  );
+
+  // Step 2: poll /proofread/{job_id}/status until done or error
+  return uploadPromise.then(({ data }) => {
+    const jobId = data.job_id;
+    return new Promise<{ data: ProofreadResult }>((resolve, reject) => {
+      // Signal 100% upload so the UI switches to "Analysing…"
+      onUploadProgress?.(100);
+
+      const poll = () => {
+        API.get<{
+          job_id: string;
+          stage: string;
+          result?: ProofreadResult;
+          error?: string;
+        }>(`/proofread/${jobId}/status`)
+          .then(({ data: status }) => {
+            if (status.stage === "done" && status.result) {
+              resolve({ data: status.result });
+            } else if (status.stage === "error") {
+              reject(new Error(status.error ?? "Proofreading failed on the server."));
+            } else {
+              // Still processing — poll again in 3 seconds
+              setTimeout(poll, 3000);
+            }
+          })
+          .catch(reject);
+      };
+
+      // First poll after 2 s (small files finish fast)
+      setTimeout(poll, 2000);
+    });
   });
 };
 
@@ -187,7 +226,7 @@ export const designCover = (
   form.append("description", description);
   form.append("design_style", designStyle);
   return API.post<CoverResult>("/design-cover", form, {
-    headers: { "Content-Type": "multipart/form-data" },
+    // No Content-Type header — axios sets multipart/form-data with boundary automatically
     timeout: 120000,
   });
 };
@@ -245,7 +284,7 @@ export const designLayout = (
   form.append("page_height_mm", pageHeightMm.toString());
 
   return API.post<LayoutResult>("/design-layout", form, {
-    headers: { "Content-Type": "multipart/form-data" },
+    // No Content-Type header — axios sets multipart/form-data with boundary automatically
     timeout: 120000,
     onUploadProgress: onUploadProgress
       ? (e) => {
