@@ -998,10 +998,13 @@ def render_layout_pdf(
         chapter_prefix = concept.get("chapter_prefix", "Chapter")
         _section_breaks = concept.get("section_breaks", False)
 
-        # Footer config — always-on, book name bottom-left, page number bottom-right
-        footer_left  = concept.get("footer_left_text") or book_title
+        # Footer config — always-on, 3 slots: left / middle / right
+        footer_left   = concept.get("footer_left_text") or ""
+        footer_middle = concept.get("footer_middle_text") or ""
         footer_right_is_pagenum = concept.get("footer_right_pagenum", True)
-        _show_footer  = show_pn
+        # _show_footer: still gates everything off when show_page_numbers is False AND
+        # neither a custom left nor middle text is set (pure "no footer" case).
+        _show_footer  = show_pn or bool(footer_left) or bool(footer_middle)
 
         def _roman(n: int) -> str:
             """Convert positive integer to lowercase roman numeral."""
@@ -1033,15 +1036,21 @@ def render_layout_pdf(
                 canvas.line(_ml, PH - mt * 0.65, PW - _mr, PH - mt * 0.65)
 
             # ── Footer: ALL pages ─────────────────────────────────────────────
-            footer_y = mb * 0.45
-            canvas.setFont(body_font, 8)
-            canvas.setFillColorRGB(ac_r, ac_g, ac_b)
-            if footer_left:
-                canvas.drawString(_ml, footer_y, footer_left)
-            if _show_footer and footer_right_is_pagenum:
-                real_page = doc.page + _pn_start - 1
-                pn_str = _roman(real_page) if _pn_roman else str(real_page)
-                canvas.drawRightString(PW - _mr, footer_y, pn_str)
+            if _show_footer:
+                footer_y = mb * 0.45
+                canvas.setFont(body_font, 8)
+                canvas.setFillColorRGB(ac_r, ac_g, ac_b)
+                # Left slot
+                if footer_left:
+                    canvas.drawString(_ml, footer_y, footer_left)
+                # Middle slot (centred)
+                if footer_middle:
+                    canvas.drawCentredString(PW / 2, footer_y, footer_middle)
+                # Right slot: page number (when enabled) or custom text
+                if footer_right_is_pagenum and show_pn:
+                    real_page = doc.page + _pn_start - 1
+                    pn_str = _roman(real_page) if _pn_roman else str(real_page)
+                    canvas.drawRightString(PW - _mr, footer_y, pn_str)
 
             canvas.restoreState()
 
@@ -1662,11 +1671,14 @@ def render_layout_docx(
             else:
                 pgNumType.set(qn("w:fmt"), "decimal")
 
-        # ── Footer: book name bottom-left, page number bottom-right ─────────────
-        show_pn_docx = concept.get("show_page_numbers", True)
-        footer_left_text_d = concept.get("footer_left_text") or book_title
+        # ── Footer: 3-slot (left / centre / right) ──────────────────────────────
+        show_pn_docx         = concept.get("show_page_numbers", True)
+        footer_left_text_d   = concept.get("footer_left_text") or ""
+        footer_middle_text_d = concept.get("footer_middle_text") or ""
+        footer_right_pn_d    = concept.get("footer_right_pagenum", True)
+        _render_footer = show_pn_docx or bool(footer_left_text_d) or bool(footer_middle_text_d)
 
-        if show_pn_docx:
+        if _render_footer:
             from docx.oxml.ns import qn as _qn_footer   # pyrefly: ignore [missing-import]
             from docx.oxml import OxmlElement as _OxmlEl # pyrefly: ignore [missing-import]
 
@@ -1674,49 +1686,57 @@ def render_layout_docx(
             footer.is_linked_to_previous = False
             fp = footer.paragraphs[0]
 
-            # Tab stops: right-aligned at page width minus margins (approx)
+            # Tab stops: centre at page midpoint (~4500 twips) + right-align (~9000 twips)
             pPr = fp._p.get_or_add_pPr()
             tabs_el = _OxmlEl("w:tabs")
-            tab = _OxmlEl("w:tab")
-            # Right-align tab at ~15000 twips (approx for most page widths)
-            tab.set(_qn_footer("w:val"),  "right")
-            tab.set(_qn_footer("w:pos"),  "9000")
-            tabs_el.append(tab)
+            tab_ctr = _OxmlEl("w:tab")
+            tab_ctr.set(_qn_footer("w:val"), "center")
+            tab_ctr.set(_qn_footer("w:pos"), "4500")
+            tabs_el.append(tab_ctr)
+            tab_rt = _OxmlEl("w:tab")
+            tab_rt.set(_qn_footer("w:val"),  "right")
+            tab_rt.set(_qn_footer("w:pos"),  "9000")
+            tabs_el.append(tab_rt)
             pPr.append(tabs_el)
 
-            # Left run: book name
-            run_left = fp.add_run(footer_left_text_d)
-            run_left.font.name  = "Times New Roman"
-            run_left.font.size  = Pt(8)
-            try:
-                run_left.font.color.rgb = _hex_to_docx_rgb(concept.get("accent_color", "#555555"))
-            except Exception:
-                pass
+            def _footer_run(text: str) -> None:
+                r = fp.add_run(text)
+                r.font.name = "Times New Roman"
+                r.font.size = Pt(8)
+                try:
+                    r.font.color.rgb = _hex_to_docx_rgb(concept.get("accent_color", "#555555"))
+                except Exception:
+                    pass
 
-            # Tab to push next element to the right
+            # Left slot
+            _footer_run(footer_left_text_d)
+            # Centre slot
             fp.add_run("\t")
-
-            # Right run: PAGE NUMBER field using fldChar
-            run_pg = fp.add_run()
-            run_pg.font.name = "Times New Roman"
-            run_pg.font.size = Pt(8)
-            try:
-                run_pg.font.color.rgb = _hex_to_docx_rgb(concept.get("accent_color", "#555555"))
-            except Exception:
-                pass
-            fld_begin  = _OxmlEl("w:fldChar"); fld_begin.set(_qn_footer("w:fldCharType"),  "begin")
-            instr      = _OxmlEl("w:instrText")
-            instr.text = " PAGE \\* lowerRoman " if _pn_roman_d else " PAGE "
-            instr.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
-            fld_sep    = _OxmlEl("w:fldChar"); fld_sep.set(_qn_footer("w:fldCharType"),    "separate")
-            fld_text   = _OxmlEl("w:t");        fld_text.text = "1"
-            fld_end    = _OxmlEl("w:fldChar"); fld_end.set(_qn_footer("w:fldCharType"),    "end")
-            run_pg._r.append(fld_begin)
-            rpr = _OxmlEl("w:rPr"); run_pg._r.insert(0, rpr)  # noqa: keep order
-            run_pg._r.append(instr)
-            run_pg._r.append(fld_sep)
-            run_pg._r.append(fld_text)
-            run_pg._r.append(fld_end)
+            if footer_middle_text_d:
+                _footer_run(footer_middle_text_d)
+            # Right slot: page number field
+            fp.add_run("\t")
+            if footer_right_pn_d and show_pn_docx:
+                run_pg = fp.add_run()
+                run_pg.font.name = "Times New Roman"
+                run_pg.font.size = Pt(8)
+                try:
+                    run_pg.font.color.rgb = _hex_to_docx_rgb(concept.get("accent_color", "#555555"))
+                except Exception:
+                    pass
+                fld_begin  = _OxmlEl("w:fldChar"); fld_begin.set(_qn_footer("w:fldCharType"),  "begin")
+                instr      = _OxmlEl("w:instrText")
+                instr.text = " PAGE \\* lowerRoman " if _pn_roman_d else " PAGE "
+                instr.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+                fld_sep    = _OxmlEl("w:fldChar"); fld_sep.set(_qn_footer("w:fldCharType"),    "separate")
+                fld_text   = _OxmlEl("w:t");        fld_text.text = "1"
+                fld_end    = _OxmlEl("w:fldChar"); fld_end.set(_qn_footer("w:fldCharType"),    "end")
+                run_pg._r.append(fld_begin)
+                rpr = _OxmlEl("w:rPr"); run_pg._r.insert(0, rpr)
+                run_pg._r.append(instr)
+                run_pg._r.append(fld_sep)
+                run_pg._r.append(fld_text)
+                run_pg._r.append(fld_end)
 
         # Detect whether this book has mixed Hindi + Latin content
         all_text_docx = book_title + " ".join(
@@ -2139,6 +2159,7 @@ def design_layout(
     show_page_numbers: Optional[bool] = None,
     # ── Footer overrides ────────────────────────────────────────────────────
     footer_left_text: Optional[str] = None,
+    footer_middle_text: Optional[str] = None,
     footer_right_pagenum: Optional[bool] = True,
     # ── Advanced layout overrides ───────────────────────────────────────────
     mirror_margins: Optional[bool] = None,
@@ -2281,7 +2302,8 @@ def design_layout(
             concept["show_page_numbers"]  = show_page_numbers
 
         # ── Footer overrides ─────────────────────────────────────────────────────
-        concept["footer_left_text"]    = footer_left_text if footer_left_text is not None else (book_title or "")
+        concept["footer_left_text"]     = footer_left_text if footer_left_text is not None else (book_title or "")
+        concept["footer_middle_text"]   = footer_middle_text if footer_middle_text is not None else ""
         concept["footer_right_pagenum"] = footer_right_pagenum if footer_right_pagenum is not None else True
 
         # ── Advanced layout overrides ────────────────────────────────────────────

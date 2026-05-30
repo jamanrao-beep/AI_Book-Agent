@@ -83,9 +83,19 @@ from fastapi.responses import JSONResponse
 
 @app.options("/{rest_of_path:path}")
 async def preflight_handler(rest_of_path: str, request: Request):
-    """Handle all CORS preflight OPTIONS requests."""
+    origin = request.headers.get("origin", "")
+    if origin in ALLOWED_ORIGINS:
+        return JSONResponse(
+            content={},
+            status_code=200,
+            headers={
+                "Access-Control-Allow-Origin": origin,
+                "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, PATCH",
+                "Access-Control-Allow-Headers": "*",
+                "Access-Control-Max-Age": "3600",
+            },
+        )
     return JSONResponse(content={}, status_code=200)
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Global exception handler — turns unhandled crashes into readable JSON 500s
