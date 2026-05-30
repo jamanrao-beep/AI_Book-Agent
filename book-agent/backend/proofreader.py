@@ -51,7 +51,14 @@ def extract_text_from_pdf(path: str) -> str:
             t = page.extract_text()
             if t:
                 text.append(t)
-    return "\n".join(text)
+    result = "\n".join(text)
+    if not result.strip():
+        raise ValueError(
+            "This PDF appears to be scanned or image-based — no text layer was found. "
+            "Please upload a text-based PDF, a DOCX, or a TXT file instead. "
+            "If you have a scanned PDF, run it through OCR first."
+        )
+    return result
 
 
 def extract_text_from_rtf(path: str) -> str:
@@ -429,12 +436,11 @@ def _call_openai_with_retry(
     last_raw: str = ""
 
     # ── Token budget ──────────────────────────────────────────────────────────
-    # GPT-4o supports up to 128 000 output tokens.  We target 10× the old
-    # 16 384 cap, clamped to the model's hard ceiling.
+    # GPT-4o supports up to 16 384 completion tokens (hard ceiling).
     # Rule of thumb: 1 token ≈ 3–4 chars for Latin, ~1.5 chars for Devanagari
     # after GPT converts legacy encoding → Unicode (3–5× char expansion).
-    # We use chars / 3 as a conservative tokens estimate, multiply by the
-    # expansion factor, and add 20% headroom, then clamp to [8192, 128000].
+    # We use chars / 3 as a conservative token estimate, multiply by the
+    # expansion factor, and add 20% headroom, then clamp to [8192, 16384].
     MAX_OUTPUT_TOKENS = 16384  # gpt-4o hard ceiling for completion tokens
     user_content = messages[-1].get("content", "") if messages else ""
     input_chars = len(user_content)

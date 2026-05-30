@@ -297,7 +297,7 @@ ALLOWED_PROOFREAD_EXTENSIONS = {".txt", ".docx", ".pdf", ".md", ".rtf", ".zip"}
 async def proofread_document(file: UploadFile = File(...)):
     filename = file.filename or "document.txt"
     ext = os.path.splitext(filename)[1].lower()
-    logger.info("Proofread request: filename=%s size_hint=%s", filename, file.size)
+    logger.info("Proofread request: filename=%s size_hint=%s", filename, file.size or "unknown")
 
     if ext not in ALLOWED_PROOFREAD_EXTENSIONS:
         raise HTTPException(400, f"Unsupported file type '{ext}'. Upload .txt, .docx, .pdf, .md, .rtf, or .zip")
@@ -320,13 +320,18 @@ async def proofread_document(file: UploadFile = File(...)):
         )
 
         job_id = uuid.uuid4().hex
-        corrected_filename = f"corrected_{job_id}{ext}"
+        # For PDF we produce a real PDF; for zip/rtf/md we produce plain text
+        out_ext = ext if ext in {".docx", ".pdf"} else ".txt"
+        corrected_filename = f"corrected_{job_id}{out_ext}"
         corrected_path = os.path.join(OUTPUT_DIR, corrected_filename)
 
+        title = os.path.splitext(filename)[0]
         if ext == ".docx":
-            title = os.path.splitext(filename)[0]
             save_corrected_docx(result["corrected_text"], corrected_path, original_title=title)
+        elif ext == ".pdf":
+            save_corrected_pdf(result["corrected_text"], corrected_path, original_title=title)
         else:
+            # .txt, .md, .rtf, .zip — save as UTF-8 plain text
             save_corrected_txt(result["corrected_text"], corrected_path)
 
         _proofread_jobs[job_id] = {
@@ -334,7 +339,8 @@ async def proofread_document(file: UploadFile = File(...)):
             "original_text": original_text,
             "original_title": os.path.splitext(filename)[0],
             "corrected_path": corrected_path,
-            "ext": ext,
+            "ext": out_ext,   # actual output extension (.pdf for pdf, .txt for zip/rtf/md)
+            "original_ext": ext,
         }
 
         return {
@@ -380,8 +386,10 @@ def download_proofread(job_id: str):
 
     if ext == ".docx":
         media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    elif ext == ".pdf":
+        media_type = "application/pdf"
     else:
-        media_type = "text/plain"
+        media_type = "text/plain; charset=utf-8"
 
     return FileResponse(path, media_type=media_type, filename=download_name)
 
@@ -1396,7 +1404,7 @@ async def design_layout_endpoint(
     if ext not in LAYOUT_ALLOWED_EXTS:
         raise HTTPException(
             400,
-            f"Unsupported file type '{ext}'. Upload a .pdf, .docx, or .zip file.",
+            f"Unsupported file type '{ext}'. Upload a .pdf, .docx, .zip, .txt, or .md file.",
         )
 
     # Clamp page dimensions to sensible range (50 mm – 600 mm)
