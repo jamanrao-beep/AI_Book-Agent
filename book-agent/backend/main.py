@@ -52,9 +52,10 @@ app = FastAPI(
 # ─────────────────────────────────────────────────────────────────────────────
 
 ALLOWED_ORIGINS = [
-    "https://ai-book-agent-23.vercel.app",  # production frontend
-    "http://localhost:3000",                 # local dev
-    "http://localhost:3001",                 # alternate local dev port
+    "https://ai-book-agent-23.vercel.app",            # production frontend (Vercel)
+    "https://aibook-agent-production.up.railway.app", # production backend origin (Railway)
+    "http://localhost:3000",                           # local dev
+    "http://localhost:3001",                           # alternate local dev port
 ]
 
 app.add_middleware(
@@ -62,7 +63,7 @@ app.add_middleware(
     allow_origins=ALLOWED_ORIGINS,
     allow_credentials=False,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
-    allow_headers=["*"],
+    allow_headers=["Content-Type", "Authorization", "Accept", "Origin", "X-Requested-With"],
     expose_headers=["*"],
     max_age=3600,  # cache preflight for 1 hour
 )
@@ -91,11 +92,13 @@ async def preflight_handler(rest_of_path: str, request: Request):
             headers={
                 "Access-Control-Allow-Origin": origin,
                 "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, PATCH",
-                "Access-Control-Allow-Headers": "*",
+                "Access-Control-Allow-Headers": "Content-Type, Authorization, Accept, Origin, X-Requested-With",
                 "Access-Control-Max-Age": "3600",
+                "Vary": "Origin",
             },
         )
-    return JSONResponse(content={}, status_code=200)
+    # Unknown origin — reject preflight
+    return JSONResponse(content={"detail": "CORS origin not allowed"}, status_code=403)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Global exception handler — turns unhandled crashes into readable JSON 500s
@@ -297,7 +300,7 @@ ALLOWED_PROOFREAD_EXTENSIONS = {".txt", ".docx", ".pdf", ".md", ".rtf", ".zip"}
 async def proofread_document(file: UploadFile = File(...)):
     filename = file.filename or "document.txt"
     ext = os.path.splitext(filename)[1].lower()
-    logger.info("Proofread request: filename=%s size_hint=%s", filename, file.size or "unknown")
+    logger.info("Proofread request: filename=%s size_hint=%s", filename, file.size)
 
     if ext not in ALLOWED_PROOFREAD_EXTENSIONS:
         raise HTTPException(400, f"Unsupported file type '{ext}'. Upload .txt, .docx, .pdf, .md, .rtf, or .zip")
@@ -320,18 +323,13 @@ async def proofread_document(file: UploadFile = File(...)):
         )
 
         job_id = uuid.uuid4().hex
-        # For PDF we produce a real PDF; for zip/rtf/md we produce plain text
-        out_ext = ext if ext in {".docx", ".pdf"} else ".txt"
-        corrected_filename = f"corrected_{job_id}{out_ext}"
+        corrected_filename = f"corrected_{job_id}{ext}"
         corrected_path = os.path.join(OUTPUT_DIR, corrected_filename)
 
-        title = os.path.splitext(filename)[0]
         if ext == ".docx":
+            title = os.path.splitext(filename)[0]
             save_corrected_docx(result["corrected_text"], corrected_path, original_title=title)
-        elif ext == ".pdf":
-            save_corrected_pdf(result["corrected_text"], corrected_path, original_title=title)
         else:
-            # .txt, .md, .rtf, .zip — save as UTF-8 plain text
             save_corrected_txt(result["corrected_text"], corrected_path)
 
         _proofread_jobs[job_id] = {
@@ -339,8 +337,7 @@ async def proofread_document(file: UploadFile = File(...)):
             "original_text": original_text,
             "original_title": os.path.splitext(filename)[0],
             "corrected_path": corrected_path,
-            "ext": out_ext,   # actual output extension (.pdf for pdf, .txt for zip/rtf/md)
-            "original_ext": ext,
+            "ext": ext,
         }
 
         return {
@@ -386,10 +383,8 @@ def download_proofread(job_id: str):
 
     if ext == ".docx":
         media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-    elif ext == ".pdf":
-        media_type = "application/pdf"
     else:
-        media_type = "text/plain; charset=utf-8"
+        media_type = "text/plain"
 
     return FileResponse(path, media_type=media_type, filename=download_name)
 
@@ -1404,7 +1399,7 @@ async def design_layout_endpoint(
     if ext not in LAYOUT_ALLOWED_EXTS:
         raise HTTPException(
             400,
-            f"Unsupported file type '{ext}'. Upload a .pdf, .docx, .zip, .txt, or .md file.",
+            f"Unsupported file type '{ext}'. Upload a .pdf, .docx, or .zip file.",
         )
 
     # Clamp page dimensions to sensible range (50 mm – 600 mm)
