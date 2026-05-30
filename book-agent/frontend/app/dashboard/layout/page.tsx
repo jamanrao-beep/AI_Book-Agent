@@ -6,7 +6,7 @@ import {
     FileText, Archive, BookMarked, ChevronDown, ChevronUp, Ruler, Paintbrush,
     MessageSquare, Type, AlignJustify, Wand2, BookOpen, Settings2, Info,
     Globe, Printer, BookCopy, ListOrdered, ChevronRight, Layers, FileOutput,
-    SlidersHorizontal, PenTool, LayoutPanelLeft, RefreshCw, Star, Save,
+    PenTool, RefreshCw, Save,
 } from "lucide-react";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -25,9 +25,9 @@ function toMm(val: number, unit: DimUnit): number {
     return val;
 }
 function fromMm(val: number, unit: DimUnit): number {
-    if (unit === "mm") return val;
-    if (unit === "inch") return parseFloat((val / 25.4).toFixed(4));
-    if (unit === "pt") return parseFloat((val * 2.83465).toFixed(2));
+    if (unit === "mm") return Math.round(val * 10) / 10;
+    if (unit === "inch") return parseFloat((val / 25.4).toFixed(2));
+    if (unit === "pt") return parseFloat((val * 2.83465).toFixed(1));
     return val;
 }
 function parseDimToMm(raw: string, unit: DimUnit): string {
@@ -231,6 +231,7 @@ interface LayoutConcept {
     heading_design?: string;
     section_breaks?: boolean;
     footer_left_text?: string;
+    footer_middle_text?: string;
     footer_right_pagenum?: boolean;
     front_matter?: string[];
     back_matter?: string[];
@@ -294,7 +295,7 @@ function CollapsibleSection({ title, icon, children, defaultOpen = false }: { ti
     );
 }
 
-function MatterCheckbox({ items, selected, onChange }: { items: { key: string; label: string }[]; selected: string[]; onChange: (v: string[]) => void; label: string }) {
+function MatterCheckbox({ items, selected, onChange }: { items: { key: string; label: string }[]; selected: string[]; onChange: (v: string[]) => void }) {
     return (
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
             {items.map((item) => {
@@ -534,9 +535,6 @@ export default function LayoutDesignerPage() {
     const [error, setError] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
 
-    // ── Advanced panels ───────────────────────────────────────────────────────
-    const [showTypoPanel, setShowTypoPanel] = useState(false);
-
     // ── Derived ───────────────────────────────────────────────────────────────
     const bookType = BOOK_TYPES.find((t) => t.key === bookTypeKey);
     const template = VISUAL_TEMPLATES.find((t) => t.key === templateKey);
@@ -648,21 +646,21 @@ export default function LayoutDesignerPage() {
     }
 
     // ── Drag & Drop ───────────────────────────────────────────────────────────
+    const validateAndSetFile = useCallback((f: File) => {
+        const ext = f.name.split(".").pop()?.toLowerCase() ?? "";
+        if (!["pdf", "docx", "zip", "txt", "md", "rtf"].includes(ext)) { setError("Only PDF, DOCX, ZIP, TXT, MD, or RTF files are supported."); return; }
+        if (f.size > 150 * 1024 * 1024) { setError("File is too large. Maximum 150 MB."); return; }
+        setFile(f);
+        setError(null);
+        if (!bookTitle) setBookTitle(f.name.replace(/\.(pdf|docx|zip|txt|md|rtf)$/i, "").replace(/[_-]/g, " "));
+    }, [bookTitle]);
+
     const onDrop = useCallback((e: React.DragEvent) => {
         e.preventDefault();
         setDragging(false);
         const f = e.dataTransfer.files[0];
         if (f) validateAndSetFile(f);
-    }, []);
-
-    function validateAndSetFile(f: File) {
-        const ext = f.name.split(".").pop()?.toLowerCase() ?? "";
-        if (!["pdf", "docx", "zip"].includes(ext)) { setError("Only PDF, DOCX, or ZIP files are supported."); return; }
-        if (f.size > 150 * 1024 * 1024) { setError("File is too large. Maximum 150 MB."); return; }
-        setFile(f);
-        setError(null);
-        if (!bookTitle) setBookTitle(f.name.replace(/\.(pdf|docx|zip)$/i, "").replace(/[_-]/g, " "));
-    }
+    }, [validateAndSetFile]);
 
     // ── Poll ──────────────────────────────────────────────────────────────────
     function startPolling(jid: string) {
@@ -679,7 +677,10 @@ export default function LayoutDesignerPage() {
                     clearInterval(pollRef.current!); pollRef.current = null;
                     setError(data.message || "Layout generation failed."); setLoading(false);
                 }
-            } catch { /* transient network error */ }
+            } catch (err) {
+                // Transient network error — continue polling; log for diagnostics
+                console.warn("Poll error (will retry):", err);
+            }
         }, 1800);
     }
 
@@ -774,6 +775,21 @@ export default function LayoutDesignerPage() {
         }
     }
 
+    // ── Keyboard shortcut: Ctrl+Enter / Cmd+Enter to submit ──────────────────
+    // handleSubmitRef keeps the keydown handler pointing at the latest handleSubmit
+    // without re-registering the event listener on every render.
+    const handleSubmitRef = useRef<() => void>(() => { });
+    useEffect(() => { handleSubmitRef.current = () => void handleSubmit(); });
+    useEffect(() => {
+        const handler = (e: KeyboardEvent) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === "Enter" && file && !loading && !result) {
+                handleSubmitRef.current();
+            }
+        };
+        window.addEventListener("keydown", handler);
+        return () => window.removeEventListener("keydown", handler);
+    }, [file, loading, result]);
+
     // ── Save template ─────────────────────────────────────────────────────────
     function saveTemplate() {
         if (!templateName.trim()) return;
@@ -837,6 +853,10 @@ export default function LayoutDesignerPage() {
         setFooterCustomLeft(""); setFooterCustomMiddle(""); setFooterCustomRight("");
         setCustomLineSpacing(""); setCustomBodyFont(""); setCustomChapterFont("");
         setCustomChapterStart(""); setCustomHeadingDesign(""); setCustomPageNumberStyle("");
+        // Reset unit, preset, and wizard state
+        setDimUnit("mm"); setPresetIndex(0); setCustomW(210); setCustomH(297);
+        setFontPrefKey("traditional"); setSpacingKey("balanced");
+        setLanguage("english"); setPrintPlatform("kdp");
     }
 
     const STAGE_LABELS: Record<string, string> = { queued: "Queued", extracting: "Extracting text…", parsing: "Detecting chapters…", designing: "AI designing layout…", rendering: "Typesetting PDF…", rendering_docx: "Generating DOCX…", done: "Done!", error: "Error" };
@@ -1028,18 +1048,18 @@ export default function LayoutDesignerPage() {
                                     <>
                                         <Upload size={28} color="#475569" style={{ marginBottom: "12px" }} />
                                         <div style={{ fontSize: "15px", fontWeight: "700", color: "#94a3b8", marginBottom: "6px" }}>Drop your manuscript here</div>
-                                        <div style={{ fontSize: "12px", color: "#475569" }}>PDF, DOCX, or ZIP · up to 150 MB</div>
+                                        <div style={{ fontSize: "12px", color: "#475569" }}>PDF, DOCX, ZIP, TXT, MD or RTF · up to 150 MB</div>
                                     </>
                                 )}
                             </div>
-                            <input ref={fileInputRef} type="file" accept=".pdf,.docx,.zip" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) validateAndSetFile(f); }} />
+                            <input ref={fileInputRef} type="file" accept=".pdf,.docx,.zip,.txt,.md,.rtf" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) validateAndSetFile(f); }} />
                         </section>
 
                         {/* ── Book Title & Language ── */}
                         <section style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
                             <div>
                                 <label style={labelStyle}>BOOK TITLE</label>
-                                <input value={bookTitle} onChange={(e) => setBookTitle(e.target.value)} placeholder="Enter your book title…" style={inputStyle} onFocus={focusBorder} onBlur={blurBorder} />
+                                <input value={bookTitle} onChange={(e) => setBookTitle(e.target.value)} onBlur={(e) => { setBookTitle(e.target.value.trim()); blurBorder(e); }} placeholder="Enter your book title…" style={inputStyle} onFocus={focusBorder} />
                             </div>
                             <div>
                                 <label style={labelStyle}>LANGUAGE</label>
@@ -1472,13 +1492,13 @@ export default function LayoutDesignerPage() {
                                 {/* Front Matter Controls */}
                                 <CollapsibleSection title="Front Matter" icon={<BookCopy size={14} color="#f59e0b" />} defaultOpen={true}>
                                     <p style={{ fontSize: "12px", color: "#64748b" }}>Select pages to include at the beginning of your book. AI will generate content where needed.</p>
-                                    <MatterCheckbox items={FRONT_MATTER_ITEMS} selected={frontMatter} onChange={setFrontMatter} label="Include in Front Matter" />
+                                    <MatterCheckbox items={FRONT_MATTER_ITEMS} selected={frontMatter} onChange={setFrontMatter} />
                                 </CollapsibleSection>
 
                                 {/* Back Matter Controls */}
                                 <CollapsibleSection title="Back Matter" icon={<ListOrdered size={14} color="#f59e0b" />}>
                                     <p style={{ fontSize: "12px", color: "#64748b" }}>Select pages to include at the end of your book.</p>
-                                    <MatterCheckbox items={BACK_MATTER_ITEMS} selected={backMatter} onChange={setBackMatter} label="Include in Back Matter" />
+                                    <MatterCheckbox items={BACK_MATTER_ITEMS} selected={backMatter} onChange={setBackMatter} />
                                 </CollapsibleSection>
 
                                 {/* Template Management */}
@@ -1549,7 +1569,7 @@ export default function LayoutDesignerPage() {
                         )}
 
                         {/* ── Main Submit Button ── */}
-                        <button onClick={handleSubmit} disabled={!file} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "10px", background: file ? "linear-gradient(135deg, #f59e0b, #d97706)" : "rgba(245,158,11,0.2)", color: file ? "#0c0f1a" : "#64748b", border: "none", borderRadius: "14px", padding: "18px 32px", fontSize: "17px", fontWeight: "800", cursor: file ? "pointer" : "not-allowed", transition: "opacity 0.2s", width: "100%", boxShadow: file ? "0 8px 32px rgba(245,158,11,0.3)" : "none" }}
+                        <button onClick={handleSubmit} disabled={!file || loading} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "10px", background: (file && !loading) ? "linear-gradient(135deg, #f59e0b, #d97706)" : "rgba(245,158,11,0.2)", color: (file && !loading) ? "#0c0f1a" : "#64748b", border: "none", borderRadius: "14px", padding: "18px 32px", fontSize: "17px", fontWeight: "800", cursor: (file && !loading) ? "pointer" : "not-allowed", transition: "opacity 0.2s", width: "100%", boxShadow: (file && !loading) ? "0 8px 32px rgba(245,158,11,0.3)" : "none" }}
                             onMouseOver={(e) => { if (file) (e.currentTarget as HTMLButtonElement).style.opacity = "0.88"; }}
                             onMouseOut={(e) => { (e.currentTarget as HTMLButtonElement).style.opacity = "1"; }}>
                             <Wand2 size={19} />
@@ -1577,6 +1597,7 @@ export default function LayoutDesignerPage() {
                         <p style={{ textAlign: "center", fontSize: "12px", color: "#334155" }}>
                             Powered by GPT-4o · Typeset with ReportLab · Footer: book name (left) · custom (centre) · page number (right) · all pages
                         </p>
+                        <p style={{ textAlign: "center", fontSize: "11px", color: "#1e293b", marginTop: "-8px" }}>Tip: Press <kbd style={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "4px", padding: "1px 5px", fontFamily: "monospace", fontSize: "10px" }}>Ctrl+Enter</kbd> to submit</p>
                     </div>
                 )}
             </main>
