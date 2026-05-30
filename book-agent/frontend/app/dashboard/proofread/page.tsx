@@ -56,6 +56,8 @@ export default function ProofreadPage() {
   const [applyStyle, setApplyStyle] = useState(true);
   const [pdfGenerating, setPdfGenerating] = useState(false);
   const [pdfError, setPdfError] = useState("");
+  const [docxGenerating, setDocxGenerating] = useState(false);
+  const [docxError, setDocxError] = useState("");
 
   const toggleError = (key: string) => {
     setExpandedErrors((prev) => {
@@ -203,27 +205,52 @@ export default function ProofreadPage() {
     }
   };
 
-  const TABS: { id: TabType; label: string; count?: number; color: string }[] = result
+  const handleGenerateDocx = async () => {
+    if (!result) return;
+    if (!applyGrammar && !applyPunctuation && !applyStyle) {
+      setDocxError("Please select at least one correction type.");
+      return;
+    }
+    setDocxGenerating(true);
+    setDocxError("");
+    try {
+      const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+      const res = await fetch(`${API_BASE}/proofread/${result.job_id}/generate-docx`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          apply_grammar: applyGrammar,
+          apply_punctuation: applyPunctuation,
+          apply_style: applyStyle,
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.detail ?? `Server error ${res.status}`);
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `corrected_${result.original_filename.replace(/\.[^.]+$/, "")}.docx`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err: unknown) {
+      setDocxError(err instanceof Error ? err.message : "DOCX generation failed.");
+    } finally {
+      setDocxGenerating(false);
+    }
+  };
+
+
+  const TABS: { id: TabType; label: string; color: string; count?: number }[] = result
     ? [
       { id: "summary", label: "AI Summary", color: "#e2e8f0" },
-      {
-        id: "grammar",
-        label: "Grammar",
-        count: result.grammar_fixes,
-        color: "#6366f1",
-      },
-      {
-        id: "punctuation",
-        label: "Punctuation",
-        count: result.punctuation_fixes,
-        color: "#f59e0b",
-      },
-      {
-        id: "style",
-        label: "Style",
-        count: result.style_suggestions,
-        color: "#10b981",
-      },
+      { id: "grammar", label: "Grammar", count: result.grammar_fixes, color: "#6366f1" },
+      { id: "punctuation", label: "Punctuation", count: result.punctuation_fixes, color: "#f59e0b" },
+      { id: "style", label: "Style", count: result.style_suggestions, color: "#10b981" },
       { id: "corrected", label: "Corrected Text", color: "#94a3b8" },
     ]
     : [];
@@ -726,53 +753,114 @@ export default function ProofreadPage() {
                     padding: "10px 14px",
                     color: "#f87171",
                     fontSize: "12px",
-                    marginBottom: "14px",
+                    marginBottom: "10px",
                   }}
                 >
                   {pdfError}
                 </div>
               )}
 
-              {/* Generate PDF button */}
-              <button
-                onClick={handleGeneratePdf}
-                disabled={pdfGenerating || (!applyGrammar && !applyPunctuation && !applyStyle)}
-                style={{
-                  width: "100%",
-                  background:
-                    pdfGenerating || (!applyGrammar && !applyPunctuation && !applyStyle)
-                      ? "rgba(99,102,241,0.3)"
-                      : "linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)",
-                  color: "white",
-                  border: "none",
-                  borderRadius: "10px",
-                  padding: "12px 20px",
-                  fontSize: "13px",
-                  fontWeight: "700",
-                  cursor:
-                    pdfGenerating || (!applyGrammar && !applyPunctuation && !applyStyle)
-                      ? "not-allowed"
-                      : "pointer",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: "8px",
-                  transition: "background 0.2s",
-                  letterSpacing: "0.01em",
-                }}
-              >
-                {pdfGenerating ? (
-                  <>
-                    <Loader size={15} style={{ animation: "spin 1s linear infinite" }} />
-                    Generating PDF…
-                  </>
-                ) : (
-                  <>
-                    <Download size={15} />
-                    Download Selective PDF
-                  </>
-                )}
-              </button>
+              {/* DOCX error */}
+              {docxError && (
+                <div
+                  style={{
+                    background: "rgba(239,68,68,0.1)",
+                    border: "1px solid rgba(239,68,68,0.2)",
+                    borderRadius: "8px",
+                    padding: "10px 14px",
+                    color: "#f87171",
+                    fontSize: "12px",
+                    marginBottom: "10px",
+                  }}
+                >
+                  {docxError}
+                </div>
+              )}
+
+              {/* Download buttons — side by side */}
+              <div style={{ display: "flex", gap: "10px" }}>
+                {/* Download Selective PDF */}
+                <button
+                  onClick={handleGeneratePdf}
+                  disabled={pdfGenerating || (!applyGrammar && !applyPunctuation && !applyStyle)}
+                  style={{
+                    flex: 1,
+                    background:
+                      pdfGenerating || (!applyGrammar && !applyPunctuation && !applyStyle)
+                        ? "rgba(99,102,241,0.3)"
+                        : "linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)",
+                    color: "white",
+                    border: "none",
+                    borderRadius: "10px",
+                    padding: "12px 16px",
+                    fontSize: "13px",
+                    fontWeight: "700",
+                    cursor:
+                      pdfGenerating || (!applyGrammar && !applyPunctuation && !applyStyle)
+                        ? "not-allowed"
+                        : "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: "8px",
+                    transition: "background 0.2s",
+                    letterSpacing: "0.01em",
+                  }}
+                >
+                  {pdfGenerating ? (
+                    <>
+                      <Loader size={15} style={{ animation: "spin 1s linear infinite" }} />
+                      Generating…
+                    </>
+                  ) : (
+                    <>
+                      <Download size={15} />
+                      Download PDF
+                    </>
+                  )}
+                </button>
+
+                {/* Download Selective DOCX */}
+                <button
+                  onClick={handleGenerateDocx}
+                  disabled={docxGenerating || (!applyGrammar && !applyPunctuation && !applyStyle)}
+                  style={{
+                    flex: 1,
+                    background:
+                      docxGenerating || (!applyGrammar && !applyPunctuation && !applyStyle)
+                        ? "rgba(16,185,129,0.3)"
+                        : "linear-gradient(135deg, #10b981 0%, #059669 100%)",
+                    color: "white",
+                    border: "none",
+                    borderRadius: "10px",
+                    padding: "12px 16px",
+                    fontSize: "13px",
+                    fontWeight: "700",
+                    cursor:
+                      docxGenerating || (!applyGrammar && !applyPunctuation && !applyStyle)
+                        ? "not-allowed"
+                        : "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: "8px",
+                    transition: "background 0.2s",
+                    letterSpacing: "0.01em",
+                  }}
+                >
+                  {docxGenerating ? (
+                    <>
+                      <Loader size={15} style={{ animation: "spin 1s linear infinite" }} />
+                      Generating…
+                    </>
+                  ) : (
+                    <>
+                      <Download size={15} />
+                      Download DOCX
+                    </>
+                  )}
+                </button>
+              </div>
 
               {/* Helper note */}
               {!applyGrammar && !applyPunctuation && !applyStyle && (

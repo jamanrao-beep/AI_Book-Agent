@@ -385,6 +385,11 @@ class SelectivePDFRequest(BaseModel):
     apply_punctuation: bool = True
     apply_style: bool = True
 
+class SelectiveDOCXRequest(BaseModel):
+    apply_grammar: bool = True
+    apply_punctuation: bool = True
+    apply_style: bool = True
+
 
 @app.post("/proofread/{job_id}/generate-pdf")
 def generate_selective_pdf(job_id: str, req: SelectivePDFRequest):
@@ -438,6 +443,51 @@ def generate_selective_pdf(job_id: str, req: SelectivePDFRequest):
         filename=f"corrected_{original_title}.pdf",
     )
 
+@app.post("/proofread/{job_id}/generate-docx")
+def generate_selective_docx(job_id: str, req: SelectiveDOCXRequest):
+    """
+    Re-run proofreading on the original uploaded text using only the correction
+    types the user selected (grammar / punctuation / style), then return a DOCX.
+    """
+    job = _proofread_jobs.get(job_id)
+    if not job:
+        raise HTTPException(
+            404,
+            "Proofreading job not found. It may have expired — re-upload to proofread again.",
+        )
+ 
+    if not req.apply_grammar and not req.apply_punctuation and not req.apply_style:
+        raise HTTPException(400, "Please select at least one correction type.")
+ 
+    original_text = job.get("original_text", "")
+    if not original_text.strip():
+        raise HTTPException(400, "Original document text is no longer available.")
+ 
+    original_title = job.get("original_title", "Corrected Document")
+ 
+    # Apply only the selected correction types
+    selective_text = apply_selective_corrections(
+        original_text,
+        apply_grammar=req.apply_grammar,
+        apply_punctuation=req.apply_punctuation,
+        apply_style=req.apply_style,
+    )
+ 
+    # Generate a fresh DOCX
+    docx_filename = f"selective_{job_id}.docx"
+    docx_path = os.path.join(OUTPUT_DIR, docx_filename)
+ 
+    save_corrected_docx(
+        selective_text,
+        docx_path,
+        original_title=original_title,
+    )
+ 
+    return FileResponse(
+        docx_path,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        filename=f"corrected_{original_title}.docx",
+    )
 
 # ─────────────────────────────────────────────────────────────────────────────
 
