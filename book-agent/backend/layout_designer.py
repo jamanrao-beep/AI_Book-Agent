@@ -1,5 +1,5 @@
 """
-layout_designer.py  ·  v2.5 (Strict Dimensions, TOC Bypass & Intro Capture)
+layout_designer.py  ·  v2.6 (Anthropic Claude, Strict Dimensions, TOC Bypass & Intro Capture)
 AI-powered internal book layout designer — with full book-type awareness
 and proper Unicode (Devanagari, Hindi, multi-script) support.
 
@@ -7,7 +7,7 @@ Pipeline:
   1. Extract raw text from PDF / DOCX / ZIP
   2. Detect chapter boundaries (supports Hindi/Devanagari अध्याय headings)
   3. Build book-type defaults (novel, academic, religious, poetry, children, business)
-  4. Ask GPT-4o to produce a complete typographic layout concept (JSON),
+  4. Ask Claude to produce a complete typographic layout concept (JSON),
      seeded with type-aware defaults and any user overrides
   5. Apply hard user overrides on top of the AI concept  (user always wins)
   6. Render PDF  (ReportLab + registered Unicode/Noto fonts)
@@ -35,16 +35,16 @@ from typing import Callable, Optional
 # pyrefly: ignore [missing-import]
 from dotenv import load_dotenv
 # pyrefly: ignore [missing-import]
-from openai import OpenAI
+import anthropic
 
 load_dotenv()
-_api_key = os.getenv("OPENAI_API_KEY")
+_api_key = os.getenv("ANTHROPIC_API_KEY")
 if not _api_key:
     raise RuntimeError(
-        "OPENAI_API_KEY is not set. Add it to your .env file or environment variables."
+        "ANTHROPIC_API_KEY is not set. Add it to your .env file or environment variables."
     )
-client = OpenAI(api_key=_api_key)
-MODEL = "gpt-4o"
+client = anthropic.Anthropic(api_key=_api_key)
+MODEL = "claude-sonnet-4-20250514"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -208,6 +208,9 @@ def _ensure_unicode_fonts() -> None:
         except Exception as e:
             print(f"  ⚠️   _ensure_unicode_fonts failed: {e}\n{traceback.format_exc()}")
         finally:
+            # Mark as attempted regardless of outcome so we don't retry on every
+            # call. If _REGISTERED_FONTS is empty, text rendering will fall back
+            # to Latin-only fonts and a warning was already printed above.
             _FONTS_REGISTERED = True
 
 
@@ -754,7 +757,7 @@ _LAYOUT_SYSTEM_BASE = """You are a world-class book typographer and interior lay
 
 Given a book title, its type/genre, a sample of the text, page dimensions, and optional design instructions, you create a complete, production-quality typographic layout specification.
 
-You MUST respond ONLY with valid JSON — no markdown, no code fences, no commentary, nothing else.
+You MUST respond ONLY with valid JSON — no markdown, no code fences, no preamble, no commentary, nothing else. Your entire response must be parseable by json.loads().
 
 The JSON must contain exactly these keys:
 {
@@ -815,7 +818,7 @@ def generate_layout_concept(
     profile_defaults: Optional[dict] = None,
 ) -> dict:
     """
-    Call GPT-4o to produce a layout concept.
+    Call Claude to produce a layout concept.
     profile_defaults (if supplied) are injected into the user message so the
     AI knows what field values are already 'strongly suggested'.
     """
@@ -844,16 +847,15 @@ def generate_layout_concept(
     user_msg += f"\nSample text (first 3,000 chars):\n{sample}"
 
     try:
-        response = client.chat.completions.create(
+        response = client.messages.create(
             model=MODEL,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user",   "content": user_msg},
-            ],
-            temperature=0.7,
             max_tokens=1500,
+            system=system_prompt,
+            messages=[
+                {"role": "user", "content": user_msg},
+            ],
         )
-        raw = response.choices[0].message.content.strip()
+        raw = response.content[0].text.strip()
         raw = raw.replace("```json", "").replace("```", "").strip()
         s = raw.find("{")
         e = raw.rfind("}") + 1
@@ -1561,11 +1563,10 @@ def render_layout_pdf(
                     next_tpl = "Even" if page_counter[0] % 2 == 0 else "Odd"
                     mirrored_story.append(NextPageTemplate(next_tpl))
                 mirrored_story.append(item)
-            mirror_doc = BaseDocTemplate(...)    
+            # mirror_doc was already created and had templates added above (line ~1070-1075)
             mirror_doc.build(mirrored_story)
-            mirror_doc.addPageTemplates([pt_odd, pt_even])
         else:
-            simple_doc = SimpleDocTemplate(...)
+            # simple_doc was already created above (line ~1077-1082)
             simple_doc.build(story, onFirstPage=_on_page, onLaterPages=_on_page)
         return output_path
     except Exception as e:
@@ -2104,6 +2105,7 @@ def render_layout_docx(
                      body_fn, body_size, color=concept["text_color"],
                      align=WD_ALIGN_PARAGRAPH.LEFT, line_space=ls)
             doc.add_page_break()
+        doc.save(output_path)  # BUG FIX: was missing — DOCX was never written to disk
         return output_path
     except Exception as e:
         print(f"  ⚠️  render_layout_docx failed: {e}\n{traceback.format_exc()}")
@@ -2162,7 +2164,7 @@ def design_layout(
       2. Detect chapters (supports Hindi/Devanagari)
       3. Look up book-type profile (smart genre defaults)
       4. Build override hints (user values + profile)
-      5. Ask GPT-4o for a layout concept (seeded with profile)
+      5. Ask Claude to produce a layout concept (seeded with profile)
       6. Apply hard user overrides (user always wins)
       7. Render PDF (ReportLab + Unicode fonts)
       8. Render DOCX (python-docx)
