@@ -695,24 +695,54 @@ def save_corrected_docx(corrected_text: str, output_path: str, original_title: s
     from docx.shared import Pt
     # pyrefly: ignore [missing-import]
     from docx.enum.text import WD_ALIGN_PARAGRAPH
+    # pyrefly: ignore [missing-import]
+    from docx.oxml.ns import qn
+    # pyrefly: ignore [missing-import]
+    from docx.oxml import OxmlElement
+
+    # Detect Hindi/Devanagari content
+    has_devanagari = any(0x0900 <= ord(c) <= 0x097F for c in corrected_text if not c.isspace())
+
+    # Font choice: Noto Sans Devanagari renders Hindi correctly in Word/LibreOffice.
+    # Calibri has no Devanagari glyphs — Hindi would show as boxes.
+    body_font_name = "Noto Sans Devanagari" if has_devanagari else "Calibri"
+
+    def _set_run_unicode_font(run, font_name: str) -> None:
+        """Set ascii, hAnsi, cs (complex-script), and eastAsia font slots so
+        Word uses the correct font for every script in the run."""
+        run.font.name = font_name
+        rPr = run._r.get_or_add_rPr()
+        rFonts = rPr.find(qn("w:rFonts"))
+        if rFonts is None:
+            rFonts = OxmlElement("w:rFonts")
+            rPr.insert(0, rFonts)
+        for attr in ("w:ascii", "w:hAnsi", "w:cs", "w:eastAsia"):
+            rFonts.set(qn(attr), font_name)
 
     doc = Document()
 
     style = doc.styles["Normal"]
-    style.font.name = "Calibri"
+    style.font.name = body_font_name
     style.font.size = Pt(11)
 
     title_para = doc.add_heading(original_title, level=1)
     title_para.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    # Apply Unicode font to heading runs too
+    for run in title_para.runs:
+        _set_run_unicode_font(run, body_font_name)
 
-    doc.add_paragraph("Proofread and corrected by Editorial AI").italic = True
+    sub = doc.add_paragraph("Proofread and corrected by Editorial AI")
+    sub.runs[0].italic = True if sub.runs else False
     doc.add_paragraph()
 
     for para_text in corrected_text.split("\n"):
         para_text = para_text.strip()
         if para_text:
-            p = doc.add_paragraph(para_text)
+            p = doc.add_paragraph()
             p.paragraph_format.space_after = Pt(6)
+            run = p.add_run(para_text)
+            run.font.size = Pt(11)
+            _set_run_unicode_font(run, body_font_name)
 
     doc.save(output_path)
     return output_path
@@ -749,37 +779,74 @@ def save_corrected_pdf(
     from reportlab.pdfbase.ttfonts import TTFont
 
     # ── Register Unicode fonts (idempotent) ───────────────────────────────────
-    _UNICODE_FONTS = {
-        "NotoSans":            "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
-        "NotoSans-Bold":       "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
-        "NotoSansDevanagari":  "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf",
-        "FreeSerif":           "/usr/share/fonts/truetype/freefont/FreeSerif.ttf",
-        "FreeSans":            "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
-        "DejaVuSans":          "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "DejaVuSans-Bold":     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-    }
-    registered_unicode_font = None
-    for fname, fpath in _UNICODE_FONTS.items():
-        if os.path.exists(fpath):
-            try:
-                pdfmetrics.registerFont(TTFont(fname, fpath))
-                if registered_unicode_font is None:
-                    registered_unicode_font = fname
-            except Exception:
-                pass
+    # Each entry is (reportlab_name, [candidate_paths_in_priority_order])
+    # Multiple paths handle different distros (Ubuntu, Debian, Alpine, Docker).
+    _FONT_CANDIDATES = [
+        # Devanagari-capable fonts — checked FIRST so Hindi text gets a proper font
+        ("NotoSansDevanagari", [
+            "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf",
+            "/usr/share/fonts/noto/NotoSansDevanagari-Regular.ttf",
+            "/usr/share/fonts/opentype/noto/NotoSansDevanagari-Regular.ttf",
+        ]),
+        ("NotoSansDevanagari-Bold", [
+            "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Bold.ttf",
+            "/usr/share/fonts/noto/NotoSansDevanagari-Bold.ttf",
+            "/usr/share/fonts/opentype/noto/NotoSansDevanagari-Bold.ttf",
+        ]),
+        ("NotoSerifDevanagari", [
+            "/usr/share/fonts/truetype/noto/NotoSerifDevanagari-Regular.ttf",
+            "/usr/share/fonts/noto/NotoSerifDevanagari-Regular.ttf",
+        ]),
+        # General Unicode fallbacks for Latin + other scripts
+        ("NotoSans", [
+            "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+            "/usr/share/fonts/noto/NotoSans-Regular.ttf",
+        ]),
+        ("NotoSans-Bold", [
+            "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
+            "/usr/share/fonts/noto/NotoSans-Bold.ttf",
+        ]),
+        ("FreeSerif", ["/usr/share/fonts/truetype/freefont/FreeSerif.ttf"]),
+        ("FreeSans",  ["/usr/share/fonts/truetype/freefont/FreeSans.ttf"]),
+        ("DejaVuSans", ["/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"]),
+        ("DejaVuSans-Bold", ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"]),
+    ]
+    _registered_pdf_fonts: set = set()
+    for fname, paths in _FONT_CANDIDATES:
+        for fpath in paths:
+            if os.path.exists(fpath):
+                try:
+                    pdfmetrics.registerFont(TTFont(fname, fpath))
+                    _registered_pdf_fonts.add(fname)
+                except Exception:
+                    pass
+                break  # found a valid path for this font name — stop checking alternatives
 
-    # Detect if text contains non-Latin characters
-    has_non_latin = any(ord(c) > 0x024F for c in corrected_text if not c.isspace())
+    # Detect if text contains Devanagari (Hindi) or other non-Latin characters
+    has_devanagari = any(0x0900 <= ord(c) <= 0x097F for c in corrected_text if not c.isspace())
+    has_non_latin  = has_devanagari or any(ord(c) > 0x024F for c in corrected_text if not c.isspace())
 
-    # Choose fonts: use Unicode-capable font if non-Latin detected
-    if has_non_latin and registered_unicode_font:
-        body_font      = registered_unicode_font
-        bold_font      = registered_unicode_font + "-Bold" if (registered_unicode_font + "-Bold") in _UNICODE_FONTS else registered_unicode_font
-        # Verify bold variant was registered
-        try:
-            pdfmetrics.getFont(bold_font)
-        except Exception:
-            bold_font = body_font
+    # Choose fonts: Devanagari font takes priority for Hindi text;
+    # fall back through registered fonts; last resort is Helvetica (Latin only).
+    if has_devanagari:
+        # Pick the first registered Devanagari-capable font
+        for candidate in ("NotoSansDevanagari", "NotoSerifDevanagari", "FreeSerif"):
+            if candidate in _registered_pdf_fonts:
+                body_font = candidate
+                break
+        else:
+            body_font = "Helvetica"  # no Devanagari font available — boxes likely
+        bold_candidate = body_font + "-Bold"
+        bold_font = bold_candidate if bold_candidate in _registered_pdf_fonts else body_font
+    elif has_non_latin:
+        for candidate in ("NotoSans", "FreeSerif", "FreeSans", "DejaVuSans"):
+            if candidate in _registered_pdf_fonts:
+                body_font = candidate
+                break
+        else:
+            body_font = "Helvetica"
+        bold_candidate = body_font + "-Bold"
+        bold_font = bold_candidate if bold_candidate in _registered_pdf_fonts else body_font
     else:
         body_font = "Helvetica"
         bold_font = "Helvetica-Bold"
@@ -803,7 +870,7 @@ def save_corrected_pdf(
         textColor=colors.HexColor("#0f172a"),
         spaceAfter=4,
         fontName=bold_font,
-        wordWrap="CJK" if has_non_latin else "LTR",
+        wordWrap="LTR",
     )
     subtitle_style = ParagraphStyle(
         "DocSubtitle",
@@ -830,7 +897,7 @@ def save_corrected_pdf(
         spaceAfter=8,
         spaceBefore=0,
         alignment=TA_JUSTIFY,
-        wordWrap="CJK" if has_non_latin else "LTR",
+        wordWrap="LTR",
     )
 
     applied = []
