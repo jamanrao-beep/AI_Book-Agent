@@ -565,7 +565,7 @@ def _render_fixed_front_pages(
     Only book_title and author_name change between books.
     Everything else is fixed publisher boilerplate.
     """
-    from reportlab.lib.units import mm, pt
+    from reportlab.lib.units import mm
     from reportlab.lib.colors import black, Color
     from PIL import Image as _PilImage  # pyrefly: ignore [missing-import]
 
