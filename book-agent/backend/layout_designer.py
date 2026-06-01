@@ -1066,15 +1066,15 @@ The JSON must contain exactly these keys:
   "chapter_title_color":   "<hex for chapter heading text>",
   "accent_color":          "<hex for rules, ornaments, running header, page-number color>",
   "body_font":             "<one of: Helvetica | Times-Roman | Courier | Helvetica-Oblique | Times-Italic>",
-  "body_font_size":        <number 9–14 — appropriate for the book type>,
-  "line_spacing":          <number 1.2–2.0 — the leading multiplier>,
+  "body_font_size":        <number 10–14 — appropriate for the book type; prefer 11–13 for comfortable reading>,
+  "line_spacing":          <number 1.4–2.0 — the leading multiplier; prefer 1.5–1.7 for readability>,
   "first_para_indent_mm":  <number 0–10 — first-line indent; use 0 for poetry/children>,
   "margin_top_mm":         <number 15–45>,
   "margin_bottom_mm":      <number 15–45>,
   "margin_left_mm":        <number 15–45>,
   "margin_right_mm":       <number 15–45>,
   "chapter_font":          "<same allowable set as body_font>",
-  "chapter_font_size":     <number 16–36>,
+  "chapter_font_size":     <number 20–36 — chapter headings will be rendered bold automatically; prefer 24–30 for strong hierarchy>,
   "chapter_prefix":        "<e.g. 'Chapter' or 'Part' or '' to omit>",
   "show_drop_cap":         <true|false>,
   "ornament":              "<a short unicode ornament, e.g. '—◆—' or '✦  ✦  ✦' or '❧' or '' to skip>",
@@ -1083,9 +1083,9 @@ The JSON must contain exactly these keys:
 }
 
 Typography rules you must follow:
-- NEVER choose a body_font_size below 9 or above 14.
-- NEVER choose a chapter_font_size below 16 or above 36.
-- NEVER choose line_spacing below 1.2 or above 2.0.
+- NEVER choose a body_font_size below 10 or above 14. Prefer 11–13 for comfortable, well-spaced reading.
+- NEVER choose a chapter_font_size below 20 or above 36. Prefer 24–30 for strong visual hierarchy.
+- NEVER choose line_spacing below 1.4 or above 2.0. Prefer 1.5–1.7 for generous, readable leading.
 - All colour pairs must have sufficient contrast for print (WCAG AA on paper).
 - For cream/ivory backgrounds, always use dark brown or near-black text, never grey.
 - For dark backgrounds, always use near-white or light text.
@@ -1259,10 +1259,12 @@ def render_layout_pdf(
         leading        = body_size * concept["line_spacing"]
         indent_pt      = concept["first_para_indent_mm"] * mm
         chapter_size   = concept["chapter_font_size"]
-        # paragraph_spacing_mm: if set by user, use it directly; else derive from leading
+        # paragraph_spacing_mm: if set by user, use it directly; else derive from body font size
+        # Use font-size-based spacing (not leading-based) for tighter, more professional results.
+        # Standard book typography: inter-paragraph gap ≈ 0.5–0.8× body font size.
         _para_sp_mm    = concept.get("paragraph_spacing_mm")
-        para_space_after  = float(_para_sp_mm) * mm if _para_sp_mm else leading * 0.45
-        para_space_before = float(_para_sp_mm) * mm * 0.35 if _para_sp_mm else leading * 0.15
+        para_space_after  = float(_para_sp_mm) * mm if _para_sp_mm else body_size * 0.55   # ~half-line gap between paragraphs
+        para_space_before = float(_para_sp_mm) * mm * 0.25 if _para_sp_mm else body_size * 0.10  # minimal before
         # color_mode: bw forces monochrome palette
         _color_mode    = concept.get("color_mode", "")
         if _color_mode == "bw":
@@ -1421,6 +1423,14 @@ def render_layout_pdf(
 
         # Resolve chapter font name, applying italic for italic_elegant
         _ch_font_for_style = chapter_font
+        # Always use a bold variant for chapter headings — gives strong visual hierarchy
+        _BOLD_MAP = {
+            "Times-Roman":  "Times-Bold",
+            "Helvetica":    "Helvetica-Bold",
+            "Courier":      "Courier-Bold",
+        }
+        if _hd not in ("italic_elegant",):
+            _ch_font_for_style = _BOLD_MAP.get(chapter_font, chapter_font)
         if _ch_italic:
             # Map to italic variant if available
             _ITALIC_MAP = {
@@ -1441,16 +1451,17 @@ def render_layout_pdf(
             fontName=_ch_font_for_style, fontSize=_ch_size_for_style,
             leading=_ch_size_for_style * 1.25,
             textColor=Color(ch_r, ch_g, ch_b),
-            spaceAfter=_ch_size_for_style * 0.55, spaceBefore=_ch_size_for_style * 0.35,
+            spaceAfter=_ch_size_for_style * 0.55,   # clean gap below heading (~half heading size)
+            spaceBefore=_ch_size_for_style * 0.80,  # gap above heading
             alignment=_ch_align,
             letterSpacing=_ch_smallcaps_letter_spacing,
         )
         prefix_style = ParagraphStyle(
             "ChapterPrefix",
-            fontName=body_font, fontSize=body_size * 0.82,
-            leading=body_size * 1.2,
+            fontName=body_font, fontSize=body_size * 0.80,
+            leading=body_size * 1.1,
             textColor=Color(ac_r, ac_g, ac_b),
-            spaceBefore=0, spaceAfter=3, alignment=_ch_align, letterSpacing=1.8,
+            spaceBefore=leading * 1.5, spaceAfter=2, alignment=_ch_align, letterSpacing=1.8,
         )
         body_style = ParagraphStyle(
             "Body",
@@ -1464,10 +1475,10 @@ def render_layout_pdf(
         )
         orn_style = ParagraphStyle(
             "Ornament",
-            fontName=body_font, fontSize=body_size + 2,
-            leading=(body_size + 2) * 1.5,
+            fontName=body_font, fontSize=body_size + 1,
+            leading=(body_size + 1) * 1.4,
             textColor=Color(ac_r, ac_g, ac_b),
-            alignment=TA_CENTER, spaceBefore=10, spaceAfter=10,
+            alignment=TA_CENTER, spaceBefore=4, spaceAfter=6,
         )
 
         # ── Dual-font run builder for mixed Devanagari + Latin text ─────────────
@@ -1753,25 +1764,25 @@ def render_layout_pdf(
             # Post-heading decoration per design
             if _hd == "allcaps_rule":
                 from reportlab.platypus import HRFlowable  # pyrefly: ignore [missing-import]
-                story.append(HRFlowable(width="100%", thickness=1.2, color=Color(ac_r, ac_g, ac_b), spaceAfter=6))
+                story.append(HRFlowable(width="100%", thickness=1.2, color=Color(ac_r, ac_g, ac_b), spaceAfter=10))
             elif _hd == "left_bold_clean":
                 from reportlab.platypus import HRFlowable  # pyrefly: ignore [missing-import]
-                story.append(HRFlowable(width="40%", thickness=0.8, color=Color(ac_r, ac_g, ac_b), spaceAfter=6, hAlign="LEFT"))
+                story.append(HRFlowable(width="40%", thickness=0.8, color=Color(ac_r, ac_g, ac_b), spaceAfter=10, hAlign="LEFT"))
             elif _hd == "numbered":
                 from reportlab.platypus import HRFlowable  # pyrefly: ignore [missing-import]
-                story.append(HRFlowable(width="15%", thickness=2, color=Color(ac_r, ac_g, ac_b), spaceAfter=8, hAlign="LEFT"))
+                story.append(HRFlowable(width="15%", thickness=2, color=Color(ac_r, ac_g, ac_b), spaceAfter=12, hAlign="LEFT"))
             elif _hd == "smallcaps_ornament":
                 # Extra ornament line directly under the small-caps title
                 if ornament:
                     safe_orn2 = ornament.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
                     story.append(Paragraph(safe_orn2, orn_style))
 
-            story.append(Spacer(1, 4))
+            story.append(Spacer(1, leading * 0.3))  # small breathing room after heading decorations
 
             if ornament:
                 safe_orn = ornament.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
                 story.append(Paragraph(safe_orn, orn_style))
-                story.append(Spacer(1, 6))
+                story.append(Spacer(1, leading * 0.3))
 
             raw_body = chapter.get("body", "").strip()
             # Detect explicit section dividers (---, ***, ~~~, ###) in source
@@ -1835,6 +1846,14 @@ def render_layout_pdf(
                             all_para_items.append(Paragraph(drop_html, body_style))
                         else:
                             all_para_items.append(Paragraph(safe, body_style))
+                    elif p_idx == 0:
+                        # No drop cap on chapter opener: suppress first-line indent (standard book convention)
+                        no_indent_style = ParagraphStyle(
+                            "BodyNoIndent",
+                            parent=body_style,
+                            firstLineIndent=0,
+                        )
+                        all_para_items.append(Paragraph(safe, no_indent_style))
                     else:
                         all_para_items.append(Paragraph(safe, body_style))
 
@@ -2335,7 +2354,7 @@ def render_layout_docx(
 
             if prefix and not already_has_chapter and not is_intro and not _ch_numbered_d:
                 add_para(f"{prefix.upper()} {real_chapter_num}".strip(), body_fn, body_size * 0.82,
-                         color=concept["accent_color"], space_before=6, space_after=2, align=_ch_align_d)
+                         color=concept["accent_color"], space_before=_ch_size_d * 0.9, space_after=3, align=_ch_align_d)
 
             # Apply heading design transforms
             if _ch_numbered_d and not already_has_chapter and not is_intro:
@@ -2347,7 +2366,10 @@ def render_layout_docx(
 
             add_para(_ch_title_text, ch_fn, _ch_size_d, bold=True,
                      italic=ch_italic or _ch_italic_d,
-                     color=concept["chapter_title_color"], space_after=8, align=_ch_align_d)
+                     color=concept["chapter_title_color"],
+                     space_before=_ch_size_d * 0.80 if not prefix else 0,
+                     space_after=_ch_size_d * 0.55,
+                     align=_ch_align_d)
 
             # Post-heading decoration per design
             if _hd_d == "allcaps_rule":
@@ -2369,9 +2391,10 @@ def render_layout_docx(
                 # Extra ornament pass already handled above via general ornament block
                 pass
 
-            # Paragraph spacing: use explicit mm if set, else derive from line spacing
-            _para_sp_after  = round(float(_para_sp_mm_d) * 2.835, 1) if _para_sp_mm_d else round(body_size * ls * 0.45, 1)
-            _para_sp_before = round(float(_para_sp_mm_d) * 2.835 * 0.35, 1) if _para_sp_mm_d else round(body_size * ls * 0.10, 1)
+            # Paragraph spacing: use explicit mm if set, else derive from body font size (not leading)
+            # Standard book typography: inter-paragraph gap ≈ 0.5–0.6× body font size
+            _para_sp_after  = round(float(_para_sp_mm_d) * 2.835, 1) if _para_sp_mm_d else round(body_size * 0.55, 1)
+            _para_sp_before = round(float(_para_sp_mm_d) * 2.835 * 0.25, 1) if _para_sp_mm_d else round(body_size * 0.10, 1)
 
             raw_body = chapter.get("body", "").strip()
             # Split on explicit section dividers when section_breaks enabled
