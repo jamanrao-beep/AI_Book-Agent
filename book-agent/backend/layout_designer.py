@@ -1236,6 +1236,13 @@ def render_layout_pdf(
             c.get("title", "") + " " + c.get("body", "") for c in chapters
         )
         has_unicode = _has_non_latin(all_text)
+        # BUG FIX 4: detect RTL scripts (Arabic U+0600–U+06FF, Hebrew U+0590–U+05FF)
+        # so word-wrap direction can be set correctly per script.
+        has_rtl_script = any(
+            (0x0590 <= ord(ch) <= 0x05FF) or (0x0600 <= ord(ch) <= 0x06FF)
+            for ch in all_text if not ch.isspace()
+        )
+        _word_wrap = "RTL" if has_rtl_script else "LTR"
 
         # ── Resolve actual font names (Unicode-capable if needed) ─────────────────
         raw_body_font    = concept["body_font"]
@@ -1471,7 +1478,7 @@ def render_layout_pdf(
             alignment=TA_JUSTIFY,
             spaceAfter=para_space_after,
             spaceBefore=para_space_before,
-            wordWrap="LTR",
+            wordWrap=_word_wrap,
         )
         orn_style = ParagraphStyle(
             "Ornament",

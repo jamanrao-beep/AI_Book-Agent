@@ -11,8 +11,6 @@ import json
 import logging
 import zipfile
 from pathlib import Path
-# pyrefly: ignore [missing-import]
-import pdfplumber
 from typing import Optional
 # pyrefly: ignore [missing-import]
 from openai import OpenAI
@@ -36,10 +34,62 @@ def extract_text_from_txt(path: str) -> str:
 
 
 def extract_text_from_docx(path: str) -> str:
+    """
+    Extract text from a .docx file while preserving structure:
+    - Headings are prefixed with Markdown-style # markers (level 1–6)
+    - Bold runs are wrapped in **...**
+    - Blank paragraphs are kept as empty lines so spacing is retained
+    - A blank line is inserted after each heading for visual separation
+    """
     # pyrefly: ignore [missing-import]
     from docx import Document
     doc = Document(path)
-    return "\n".join(p.text for p in doc.paragraphs if p.text.strip())
+    lines = []
+    for p in doc.paragraphs:
+        style_name = (p.style.name or "").lower()
+
+        # ── Determine heading level ──────────────────────────────────────────
+        heading_level = 0
+        if style_name.startswith("heading"):
+            # "Heading 1" → level 1, "Heading 2" → level 2, etc.
+            parts = style_name.split()
+            try:
+                heading_level = int(parts[-1])
+            except (ValueError, IndexError):
+                heading_level = 1
+
+        # ── Build the paragraph text, wrapping bold runs in ** ** ────────────
+        raw_text = p.text  # plain text fallback
+        if heading_level == 0:
+            # Reconstruct run-by-run to capture bold formatting
+            parts_list = []
+            for run in p.runs:
+                t = run.text
+                if not t:
+                    continue
+                if run.bold:
+                    parts_list.append(f"**{t}**")
+                else:
+                    parts_list.append(t)
+            if parts_list:
+                raw_text = "".join(parts_list)
+            else:
+                raw_text = p.text
+
+        # ── Empty paragraph → blank line (preserves spacing) ────────────────
+        if not raw_text.strip():
+            lines.append("")
+            continue
+
+        # ── Format headings with # prefix ───────────────────────────────────
+        if heading_level > 0:
+            prefix = "#" * min(heading_level, 6)
+            lines.append(f"{prefix} {raw_text.strip()}")
+            lines.append("")   # blank line after heading
+        else:
+            lines.append(raw_text)
+
+    return "\n".join(lines)
 
 
 def extract_text_from_pdf(path: str) -> str:
@@ -235,6 +285,12 @@ SYSTEM_PROMPT = """You are an expert editor and proofreader. When given a docume
 2. Correct punctuation (commas, semicolons, apostrophes, quotation marks, etc.)
 3. Improve style and readability: simplify overly complex sentences, improve flow, remove redundancy
 4. Preserve the author's voice and meaning
+5. CRITICAL — preserve ALL formatting markers EXACTLY as they appear in the input:
+   - Headings: lines beginning with # / ## / ### etc. must remain headings at the same level
+   - Bold text: **word** markers must be kept around the same words (corrected in place)
+   - Blank lines between paragraphs and after headings must be preserved
+   - Do NOT collapse multiple paragraphs into one; keep the same number of paragraph breaks
+   - Do NOT add or remove blank lines — reproduce the same whitespace structure
 
 Respond with ONLY valid JSON (no markdown, no code fences, no preamble). Structure:
 {
@@ -284,6 +340,8 @@ def _build_selective_system_prompt(apply_grammar: bool, apply_punctuation: bool,
         tasks.append("Improve style and readability: simplify overly complex sentences, improve flow, remove redundancy")
 
     task_list = "\n".join(f"{i+1}. {t}" for i, t in enumerate(tasks))
+    voice_step = len(tasks) + 1
+    fmt_step   = len(tasks) + 2
 
     skipped = []
     if not apply_grammar:
@@ -299,7 +357,13 @@ def _build_selective_system_prompt(apply_grammar: bool, apply_punctuation: bool,
 
     return f"""You are an expert editor and proofreader. When given a document, you:
 {task_list}
-4. Preserve the author's voice and meaning{skip_note}
+{voice_step}. Preserve the author's voice and meaning{skip_note}
+{fmt_step}. CRITICAL — preserve ALL formatting markers EXACTLY as they appear in the input:
+   - Headings: lines beginning with # / ## / ### etc. must remain headings at the same level
+   - Bold text: **word** markers must be kept around the same words (corrected in place)
+   - Blank lines between paragraphs and after headings must be preserved
+   - Do NOT collapse multiple paragraphs into one; keep the same number of paragraph breaks
+   - Do NOT add or remove blank lines — reproduce the same whitespace structure
 
 Respond with ONLY valid JSON (no markdown, no code fences, no preamble). Structure:
 {{
@@ -638,7 +702,7 @@ def proofread_text(text: str) -> dict:
         )
 
     return {
-        "corrected_text": "\n\n".join(all_corrected),
+        "corrected_text": "\n".join(all_corrected),
         "grammar_fixes": total_grammar,
         "punctuation_fixes": total_punct,
         "style_suggestions": total_style,
@@ -687,14 +751,57 @@ def apply_selective_corrections(
             )
             all_corrected.append(chunk)
 
-    return "\n\n".join(all_corrected)
+    return "\n".join(all_corrected)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Save corrected file helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Module-level font registry so fonts are discovered and registered only once
+# across multiple calls to save_corrected_pdf (idempotent, avoids re-scanning
+# the filesystem on every call).
+_FONT_CANDIDATES = [
+    # Devanagari-capable fonts — checked FIRST so Hindi text gets a proper font
+    ("NotoSansDevanagari", [
+        "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf",
+        "/usr/share/fonts/noto/NotoSansDevanagari-Regular.ttf",
+        "/usr/share/fonts/opentype/noto/NotoSansDevanagari-Regular.ttf",
+    ]),
+    ("NotoSansDevanagari-Bold", [
+        "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Bold.ttf",
+        "/usr/share/fonts/noto/NotoSansDevanagari-Bold.ttf",
+        "/usr/share/fonts/opentype/noto/NotoSansDevanagari-Bold.ttf",
+    ]),
+    ("NotoSerifDevanagari", [
+        "/usr/share/fonts/truetype/noto/NotoSerifDevanagari-Regular.ttf",
+        "/usr/share/fonts/noto/NotoSerifDevanagari-Regular.ttf",
+    ]),
+    # General Unicode fallbacks for Latin + other scripts
+    ("NotoSans", [
+        "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+        "/usr/share/fonts/noto/NotoSans-Regular.ttf",
+    ]),
+    ("NotoSans-Bold", [
+        "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
+        "/usr/share/fonts/noto/NotoSans-Bold.ttf",
+    ]),
+    ("FreeSerif", ["/usr/share/fonts/truetype/freefont/FreeSerif.ttf"]),
+    ("FreeSans",  ["/usr/share/fonts/truetype/freefont/FreeSans.ttf"]),
+    ("DejaVuSans", ["/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"]),
+    ("DejaVuSans-Bold", ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"]),
+]
+_registered_pdf_fonts: set = set()
+
+
 def save_corrected_docx(corrected_text: str, output_path: str, original_title: str = "Corrected Document"):
+    """
+    Write corrected_text to a .docx file, restoring formatting that was
+    encoded as Markdown markers during extraction:
+    - Lines starting with # / ## / ### → Heading 1 / 2 / 3 styles
+    - **...** within a run → bold
+    - Blank lines → empty paragraphs (preserve spacing)
+    """
     # pyrefly: ignore [missing-import]
     from docx import Document
     # pyrefly: ignore [missing-import]
@@ -708,14 +815,9 @@ def save_corrected_docx(corrected_text: str, output_path: str, original_title: s
 
     # Detect Hindi/Devanagari content
     has_devanagari = any(0x0900 <= ord(c) <= 0x097F for c in corrected_text if not c.isspace())
-
-    # Font choice: Noto Sans Devanagari renders Hindi correctly in Word/LibreOffice.
-    # Calibri has no Devanagari glyphs — Hindi would show as boxes.
     body_font_name = "Noto Sans Devanagari" if has_devanagari else "Calibri"
 
     def _set_run_unicode_font(run, font_name: str) -> None:
-        """Set ascii, hAnsi, cs (complex-script), and eastAsia font slots so
-        Word uses the correct font for every script in the run."""
         run.font.name = font_name
         rPr = run._r.get_or_add_rPr()
         rFonts = rPr.find(qn("w:rFonts"))
@@ -725,6 +827,20 @@ def save_corrected_docx(corrected_text: str, output_path: str, original_title: s
         for attr in ("w:ascii", "w:hAnsi", "w:cs", "w:eastAsia"):
             rFonts.set(qn(attr), font_name)
 
+    def _add_runs_with_bold(paragraph, text: str, font_name: str, font_size_pt: int = 11):
+        """
+        Parse **...**  markers in `text` and add runs with bold=True/False.
+        """
+        # Split on ** delimiters; odd-indexed segments are bold
+        segments = re.split(r'\*\*', text)
+        for idx, segment in enumerate(segments):
+            if not segment:
+                continue
+            run = paragraph.add_run(segment)
+            run.bold = (idx % 2 == 1)
+            run.font.size = Pt(font_size_pt)
+            _set_run_unicode_font(run, font_name)
+
     doc = Document()
 
     style = doc.styles["Normal"]
@@ -733,22 +849,41 @@ def save_corrected_docx(corrected_text: str, output_path: str, original_title: s
 
     title_para = doc.add_heading(original_title, level=1)
     title_para.alignment = WD_ALIGN_PARAGRAPH.LEFT
-    # Apply Unicode font to heading runs too
     for run in title_para.runs:
         _set_run_unicode_font(run, body_font_name)
 
     sub = doc.add_paragraph("Proofread and corrected by Editorial AI")
-    sub.runs[0].italic = True if sub.runs else False
+    if sub.runs:
+        sub.runs[0].italic = True
     doc.add_paragraph()
 
+    heading_re = re.compile(r'^(#{1,6})\s+(.*)')
+
     for para_text in corrected_text.split("\n"):
-        para_text = para_text.strip()
-        if para_text:
-            p = doc.add_paragraph()
-            p.paragraph_format.space_after = Pt(6)
-            run = p.add_run(para_text)
-            run.font.size = Pt(11)
-            _set_run_unicode_font(run, body_font_name)
+        # ── Blank line → empty paragraph (preserves spacing) ────────────────
+        if not para_text.strip():
+            ep = doc.add_paragraph()
+            ep.paragraph_format.space_after = Pt(0)
+            continue
+
+        # ── Heading line ─────────────────────────────────────────────────────
+        m = heading_re.match(para_text)
+        if m:
+            level = min(len(m.group(1)), 6)
+            heading_text = m.group(2).strip()
+            h = doc.add_heading("", level=level)
+            # BUG FIX 3: process **...** markers inside heading text so bold
+            # spans render as bold runs rather than literal asterisks.
+            _add_runs_with_bold(h, heading_text, body_font_name)
+            # Override font on any runs that doc.add_heading() may have added
+            for run in h.runs:
+                _set_run_unicode_font(run, body_font_name)
+            continue
+
+        # ── Normal paragraph (may contain **bold** spans) ────────────────────
+        p = doc.add_paragraph()
+        p.paragraph_format.space_after = Pt(6)
+        _add_runs_with_bold(p, para_text, body_font_name)
 
     doc.save(output_path)
     return output_path
@@ -776,8 +911,8 @@ def save_corrected_pdf(
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.units import mm
     from reportlab.lib import colors
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_JUSTIFY
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.enums import TA_JUSTIFY
     from reportlab.platypus import (
         SimpleDocTemplate, Paragraph, Spacer, HRFlowable,
     )
@@ -785,40 +920,13 @@ def save_corrected_pdf(
     from reportlab.pdfbase.ttfonts import TTFont
 
     # ── Register Unicode fonts (idempotent) ───────────────────────────────────
-    # Each entry is (reportlab_name, [candidate_paths_in_priority_order])
-    # Multiple paths handle different distros (Ubuntu, Debian, Alpine, Docker).
-    _FONT_CANDIDATES = [
-        # Devanagari-capable fonts — checked FIRST so Hindi text gets a proper font
-        ("NotoSansDevanagari", [
-            "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf",
-            "/usr/share/fonts/noto/NotoSansDevanagari-Regular.ttf",
-            "/usr/share/fonts/opentype/noto/NotoSansDevanagari-Regular.ttf",
-        ]),
-        ("NotoSansDevanagari-Bold", [
-            "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Bold.ttf",
-            "/usr/share/fonts/noto/NotoSansDevanagari-Bold.ttf",
-            "/usr/share/fonts/opentype/noto/NotoSansDevanagari-Bold.ttf",
-        ]),
-        ("NotoSerifDevanagari", [
-            "/usr/share/fonts/truetype/noto/NotoSerifDevanagari-Regular.ttf",
-            "/usr/share/fonts/noto/NotoSerifDevanagari-Regular.ttf",
-        ]),
-        # General Unicode fallbacks for Latin + other scripts
-        ("NotoSans", [
-            "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
-            "/usr/share/fonts/noto/NotoSans-Regular.ttf",
-        ]),
-        ("NotoSans-Bold", [
-            "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
-            "/usr/share/fonts/noto/NotoSans-Bold.ttf",
-        ]),
-        ("FreeSerif", ["/usr/share/fonts/truetype/freefont/FreeSerif.ttf"]),
-        ("FreeSans",  ["/usr/share/fonts/truetype/freefont/FreeSans.ttf"]),
-        ("DejaVuSans", ["/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"]),
-        ("DejaVuSans-Bold", ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"]),
-    ]
-    _registered_pdf_fonts: set = set()
+    # _FONT_CANDIDATES and _registered_pdf_fonts are module-level so fonts are
+    # discovered and registered only once across multiple calls (avoids
+    # re-scanning the filesystem on every PDF export).
+    global _registered_pdf_fonts
     for fname, paths in _FONT_CANDIDATES:
+        if fname in _registered_pdf_fonts:
+            continue  # already registered — skip filesystem scan
         for fpath in paths:
             if os.path.exists(fpath):
                 try:
@@ -831,6 +939,14 @@ def save_corrected_pdf(
     # Detect if text contains Devanagari (Hindi) or other non-Latin characters
     has_devanagari = any(0x0900 <= ord(c) <= 0x097F for c in corrected_text if not c.isspace())
     has_non_latin  = has_devanagari or any(ord(c) > 0x024F for c in corrected_text if not c.isspace())
+    # BUG FIX 4: derive word-wrap direction from script.
+    # Arabic (U+0600–U+06FF) and Hebrew (U+0590–U+05FF) are RTL;
+    # Devanagari and all other scripts remain LTR.
+    has_rtl = any(
+        (0x0590 <= ord(c) <= 0x05FF) or (0x0600 <= ord(c) <= 0x06FF)
+        for c in corrected_text if not c.isspace()
+    )
+    _word_wrap = "RTL" if has_rtl else "LTR"
 
     # Choose fonts: Devanagari font takes priority for Hindi text;
     # fall back through registered fonts; last resort is Helvetica (Latin only).
@@ -857,7 +973,6 @@ def save_corrected_pdf(
         body_font = "Helvetica"
         bold_font = "Helvetica-Bold"
 
-    PAGE_W, PAGE_H = A4
     MARGIN = 22 * mm
 
     doc = SimpleDocTemplate(
@@ -876,7 +991,7 @@ def save_corrected_pdf(
         textColor=colors.HexColor("#0f172a"),
         spaceAfter=4,
         fontName=bold_font,
-        wordWrap="LTR",
+        wordWrap=_word_wrap,
     )
     subtitle_style = ParagraphStyle(
         "DocSubtitle",
@@ -903,8 +1018,21 @@ def save_corrected_pdf(
         spaceAfter=8,
         spaceBefore=0,
         alignment=TA_JUSTIFY,
-        wordWrap="LTR",
+        wordWrap=_word_wrap,
     )
+
+    # Heading styles (H1–H3) to mirror docx heading levels
+    heading_styles = {
+        1: ParagraphStyle("H1", fontSize=18, leading=24, fontName=bold_font,
+                          textColor=colors.HexColor("#0f172a"), spaceBefore=14, spaceAfter=6),
+        2: ParagraphStyle("H2", fontSize=15, leading=20, fontName=bold_font,
+                          textColor=colors.HexColor("#1e293b"), spaceBefore=10, spaceAfter=4),
+        3: ParagraphStyle("H3", fontSize=13, leading=18, fontName=bold_font,
+                          textColor=colors.HexColor("#334155"), spaceBefore=8, spaceAfter=4),
+    }
+    # H4–H6 fall back to H3 sizing
+    for lvl in (4, 5, 6):
+        heading_styles[lvl] = heading_styles[3]
 
     applied = []
     if apply_grammar:      applied.append("Grammar")
@@ -912,8 +1040,20 @@ def save_corrected_pdf(
     if apply_style:        applied.append("Style")
     applied_str = " · ".join(applied) if applied else "No corrections"
 
+    heading_re = re.compile(r'^(#{1,6})\s+(.*)')
+
+    def _safe_html(text: str) -> str:
+        return (text
+                .replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;"))
+
+    def _apply_bold_tags(text: str) -> str:
+        """Convert **...** to <b>...</b> for ReportLab."""
+        return re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
+
     story = []
-    safe_title = original_title.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    safe_title = _safe_html(original_title)
     story.append(Paragraph(safe_title, title_style))
     story.append(Paragraph("Proofread and corrected by Editorial AI", subtitle_style))
     story.append(Spacer(1, 4))
@@ -922,17 +1062,24 @@ def save_corrected_pdf(
     story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor("#e2e8f0"), spaceAfter=14))
 
     for para_text in corrected_text.split("\n"):
-        para_text = para_text.strip()
-        if para_text:
-            safe = (
-                para_text
-                .replace("&", "&amp;")
-                .replace("<", "&lt;")
-                .replace(">", "&gt;")
-            )
-            story.append(Paragraph(safe, body_style))
-        else:
+        # ── Blank line → small spacer ────────────────────────────────────────
+        if not para_text.strip():
             story.append(Spacer(1, 6))
+            continue
+
+        # ── Heading line ─────────────────────────────────────────────────────
+        m = heading_re.match(para_text)
+        if m:
+            level = min(len(m.group(1)), 6)
+            # BUG FIX 2: apply bold tags AFTER html-escaping so **...** in
+            # headings renders as <b>...</b> rather than literal asterisks.
+            heading_text = _apply_bold_tags(_safe_html(m.group(2).strip()))
+            story.append(Paragraph(heading_text, heading_styles[level]))
+            continue
+
+        # ── Normal paragraph (with optional **bold** spans) ──────────────────
+        safe = _apply_bold_tags(_safe_html(para_text))
+        story.append(Paragraph(safe, body_style))
 
     doc.build(story)
     return output_path
