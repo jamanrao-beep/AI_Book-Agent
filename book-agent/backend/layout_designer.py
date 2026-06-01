@@ -1815,25 +1815,88 @@ def render_layout_pdf(
                 if not paragraphs and sec_idx == 0:
                     paragraphs = ["[No content]"]
 
-                for p_idx, para_text in enumerate(paragraphs):
-                    # FIX: Smart Line Break & Bullet Handling
-                    lines = para_text.split('\n')
-                    cleaned_lines = []
-                    for line in lines:
-                        line = line.strip()
-                        if not line: continue
-                        # If it's a bullet point, force a hard break
-                        if line.startswith(('•', '-', '*')) or re.match(r'^\d+\.', line):
-                            cleaned_lines.append('<br/>' + line.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
-                        else:
-                            # Otherwise, join physical PDF lines with a space
-                            safe_line = line.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-                            if cleaned_lines and not cleaned_lines[-1].startswith('<br/>'):
-                                cleaned_lines[-1] += " " + safe_line
-                            else:
-                                cleaned_lines.append(safe_line)
+                # ── Bullet/numbered-list detection ────────────────────────────
+                # Matches: •  -  *  1.  1)  (1)  1 .  i.  ii)  a.  a)
+                _BULLET_RE = re.compile(
+                    r'^(?:[•\-\*]'                        # symbol bullets
+                    r'|(?:\(?\s*\d+\s*[\.\)])'           # 1. 1) (1) 1 .
+                    r'|(?:\(?\s*[a-zA-Z]\s*[\.\)])'      # a. a) A. A)
+                    r'|(?:\(?\s*[ivxlcdmIVXLCDM]+\s*[\.\)])'  # i. iv) etc.
+                    r')\s+'
+                )
 
-                    safe = "".join(cleaned_lines)
+                # ── Inline sub-heading detection ──────────────────────────────
+                # A line is treated as a sub-heading when it is short (< 80 chars),
+                # does NOT end with sentence-terminating punctuation, and is the
+                # only physical line in its paragraph block (standalone).
+                def _is_subheading(line: str, is_only_line: bool) -> bool:
+                    s = line.strip()
+                    if not s or len(s) > 80:
+                        return False
+                    if not is_only_line:
+                        return False
+                    # Must not end with sentence punctuation
+                    if s[-1] in '.!?,;:':
+                        return False
+                    # Boost confidence: all-caps, title-case, or wrapped in **
+                    if (s.startswith('**') and s.endswith('**')) or s.isupper() or s.istitle():
+                        return True
+                    return False
+
+                bullet_style = ParagraphStyle(
+                    "Bullet",
+                    parent=body_style,
+                    firstLineIndent=0,
+                    leftIndent=body_size * 1.5,
+                    spaceBefore=para_space_before * 0.5,
+                    spaceAfter=para_space_after * 0.5,
+                    alignment=TA_LEFT if True else TA_JUSTIFY,  # bullets always left-aligned
+                )
+                subhead_style = ParagraphStyle(
+                    "SubHeading",
+                    parent=body_style,
+                    fontName=_BOLD_MAP.get(body_font, body_font),
+                    firstLineIndent=0,
+                    spaceBefore=leading * 0.6,
+                    spaceAfter=leading * 0.2,
+                    alignment=TA_LEFT,
+                )
+
+                for p_idx, para_text in enumerate(paragraphs):
+                    lines = para_text.split('\n')
+                    # Classify each physical line
+                    physical_lines = [ln.strip() for ln in lines if ln.strip()]
+                    is_only = len(physical_lines) == 1
+
+                    # Check if entire paragraph is a list block
+                    all_bullets = physical_lines and all(
+                        _BULLET_RE.match(ln) for ln in physical_lines
+                    )
+
+                    if all_bullets or any(_BULLET_RE.match(ln) for ln in physical_lines):
+                        # Emit each line as its own Paragraph (bullet or body)
+                        for ln in physical_lines:
+                            safe_ln = ln.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                            if has_unicode:
+                                safe_ln = _mixed_font_html(safe_ln, body_font)
+                            if _BULLET_RE.match(ln):
+                                all_para_items.append(Paragraph(safe_ln, bullet_style))
+                            else:
+                                all_para_items.append(Paragraph(safe_ln, body_style))
+                        continue
+
+                    # Sub-heading: single short non-sentence line
+                    if _is_subheading(para_text.strip(), is_only):
+                        raw_sh = para_text.strip().strip('*')
+                        safe_sh = raw_sh.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                        if has_unicode:
+                            safe_sh = _mixed_font_html(safe_sh, _BOLD_MAP.get(body_font, body_font))
+                        all_para_items.append(Paragraph(f'<b>{safe_sh}</b>', subhead_style))
+                        continue
+
+                    # Normal paragraph: join physical lines with a space (soft-wrap)
+                    joined = " ".join(physical_lines)
+                    safe = joined.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
                     # Apply dual-font markup for mixed Hindi + Latin text
                     if has_unicode:
@@ -1841,11 +1904,11 @@ def render_layout_pdf(
 
                     # Drop cap logic
                     if p_idx == 0 and show_drop and not is_intro and len(para_text) > 1:
-                        first_char = para_text[0]   # original codepoint
+                        first_char = para_text.strip()[0]   # original codepoint
                         # Only do drop cap if first char is a basic Latin letter
                         if first_char.isalpha() and ord(first_char) < 0x0250:
                             first_esc = first_char.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-                            rest_orig = safe[len(first_char):]  # slice by original char width (1), not escaped
+                            rest_orig = safe[len(first_esc):]
                             drop_html = (
                                 f'<font name="{_ch_font_for_style}" size="{int(body_size * 2.8)}">'
                                 f"{first_esc}</font>{rest_orig}"
@@ -2422,28 +2485,77 @@ def render_layout_docx(
                 if not paragraphs and sec_idx_d == 0:
                     paragraphs = ["[No content]"]
 
-                for para_text in paragraphs:
-                    lines = para_text.split('\n')
-                    cleaned_lines = []
-                    for line in lines:
-                        line = line.strip()
-                        if not line: continue
-                        if line.startswith(('•', '-', '*')) or re.match(r'^\d+\.', line):
-                            cleaned_lines.append(line)
-                        else:
-                            if cleaned_lines:
-                                cleaned_lines[-1] += " " + line
-                            else:
-                                cleaned_lines.append(line)
+                # Bullet/numbered-list pattern (mirrors the PDF renderer)
+                _BULLET_RE_D = re.compile(
+                    r'^(?:[•\-\*]'
+                    r'|(?:\(?\s*\d+\s*[\.\)])'
+                    r'|(?:\(?\s*[a-zA-Z]\s*[\.\)])'
+                    r'|(?:\(?\s*[ivxlcdmIVXLCDM]+\s*[\.\)])'
+                    r')\s+'
+                )
 
-                    for sub_line in cleaned_lines:
-                        align = WD_ALIGN_PARAGRAPH.LEFT if sub_line.startswith(('•', '-', '*')) else WD_ALIGN_PARAGRAPH.JUSTIFY
-                        add_para(sub_line, body_fn, body_size, italic=body_italic,
+                def _is_subheading_d(line: str, is_only: bool) -> bool:
+                    s = line.strip()
+                    if not s or len(s) > 80 or not is_only:
+                        return False
+                    if s[-1] in '.!?,;:':
+                        return False
+                    return (s.startswith('**') and s.endswith('**')) or s.isupper() or s.istitle()
+
+                def _add_bullet_para(text: str) -> None:
+                    """Add a bullet/numbered line with left indent."""
+                    p_b = doc.add_paragraph()
+                    p_b.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                    pf_b = p_b.paragraph_format
+                    pf_b.left_indent   = Pt(body_size * 1.5)
+                    pf_b.first_line_indent = Pt(0)
+                    pf_b.space_before  = Pt(_para_sp_before * 0.5)
+                    pf_b.space_after   = Pt(_para_sp_after  * 0.5)
+                    pf_b.line_spacing  = Pt(body_size * ls)
+                    run_b = p_b.add_run(text)
+                    _set_run_font(run_b, body_fn, body_size, False, body_italic, concept["text_color"])
+
+                for para_text in paragraphs:
+                    physical_lines = [ln.strip() for ln in para_text.split('\n') if ln.strip()]
+                    if not physical_lines:
+                        continue
+                    is_only = len(physical_lines) == 1
+
+                    has_any_bullet = any(_BULLET_RE_D.match(ln) for ln in physical_lines)
+
+                    if has_any_bullet:
+                        # Emit each line separately: bullets get indent, others get body
+                        for ln in physical_lines:
+                            if _BULLET_RE_D.match(ln):
+                                _add_bullet_para(ln)
+                            else:
+                                add_para(ln, body_fn, body_size, italic=body_italic,
+                                         color=concept["text_color"],
+                                         align=WD_ALIGN_PARAGRAPH.JUSTIFY,
+                                         space_after=_para_sp_after,
+                                         space_before=_para_sp_before,
+                                         line_space=ls)
+                        continue
+
+                    # Sub-heading
+                    if _is_subheading_d(para_text.strip(), is_only):
+                        clean_sh = para_text.strip().strip('*')
+                        add_para(clean_sh, body_fn, body_size, bold=True,
                                  color=concept["text_color"],
-                                 align=align,
-                                 space_after=_para_sp_after,
-                                 space_before=_para_sp_before,
+                                 align=WD_ALIGN_PARAGRAPH.LEFT,
+                                 space_before=round(body_size * 0.6, 1),
+                                 space_after=round(body_size * 0.2, 1),
                                  line_space=ls)
+                        continue
+
+                    # Normal paragraph: join soft-wrapped lines
+                    joined = " ".join(physical_lines)
+                    add_para(joined, body_fn, body_size, italic=body_italic,
+                             color=concept["text_color"],
+                             align=WD_ALIGN_PARAGRAPH.JUSTIFY,
+                             space_after=_para_sp_after,
+                             space_before=_para_sp_before,
+                             line_space=ls)
 
             doc.add_page_break()
             _docx_page_counter[0] += 1

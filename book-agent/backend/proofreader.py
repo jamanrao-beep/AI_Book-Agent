@@ -1061,6 +1061,28 @@ def save_corrected_pdf(
     story.append(Spacer(1, 6))
     story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor("#e2e8f0"), spaceAfter=14))
 
+    # Bullet/numbered-list pattern — matches •, -, *, 1. 1) (1) a. a) i. iv) etc.
+    _BULLET_RE_PR = re.compile(
+        r'^(?:[•\-\*]'
+        r'|(?:\(?\s*\d+\s*[\.\)])'
+        r'|(?:\(?\s*[a-zA-Z]\s*[\.\)])'
+        r'|(?:\(?\s*[ivxlcdmIVXLCDM]+\s*[\.\)])'
+        r')\s+'
+    )
+
+    bullet_style = ParagraphStyle(
+        "DocBullet",
+        fontSize=11,
+        leading=18,
+        textColor=colors.HexColor("#1e293b"),
+        fontName=body_font,
+        spaceAfter=4,
+        spaceBefore=0,
+        leftIndent=22,
+        firstLineIndent=0,
+        wordWrap=_word_wrap,
+    )
+
     for para_text in corrected_text.split("\n"):
         # ── Blank line → small spacer ────────────────────────────────────────
         if not para_text.strip():
@@ -1071,10 +1093,14 @@ def save_corrected_pdf(
         m = heading_re.match(para_text)
         if m:
             level = min(len(m.group(1)), 6)
-            # BUG FIX 2: apply bold tags AFTER html-escaping so **...** in
-            # headings renders as <b>...</b> rather than literal asterisks.
             heading_text = _apply_bold_tags(_safe_html(m.group(2).strip()))
             story.append(Paragraph(heading_text, heading_styles[level]))
+            continue
+
+        # ── Bullet / numbered item ───────────────────────────────────────────
+        if _BULLET_RE_PR.match(para_text.strip()):
+            safe = _apply_bold_tags(_safe_html(para_text.strip()))
+            story.append(Paragraph(safe, bullet_style))
             continue
 
         # ── Normal paragraph (with optional **bold** spans) ──────────────────
