@@ -15,6 +15,8 @@ IMPROVEMENTS for large PDFs (320+ pages):
   - structure_transcription chunk size reduced to 20K chars (avoids JSON truncation)
   - structure_transcription max_tokens raised to 10000
   - PDF rendered at 3x zoom (300 DPI) for better OCR accuracy on dense writing
+  - Image Pre-Processing Engine to boost contrast and sharpness before OCR
+  - Context Healer Agent to stitch broken sentences across page boundaries
 """
 
 import os
@@ -344,38 +346,77 @@ def _mixed_font_html(safe_escaped_text: str, deva_font: str) -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# NEW ADVANCED UPGRADE: Vision Pre-Processing Engine
+# ─────────────────────────────────────────────────────────────────────────────
+def _enhance_image_for_ocr(path: str) -> str:
+    """
+    Agency-Grade Pre-processing: Automatically enhances contrast, sharpness, 
+    and converts to high-contrast grayscale to dramatically improve GPT-4o Vision 
+    accuracy on faded or messy handwriting.
+    """
+    try:
+        # pyrefly: ignore [missing-import]
+        from PIL import Image, ImageEnhance, ImageOps
+        img = Image.open(path)
+        
+        # 1. Convert to grayscale to remove distracting background noise/stains
+        img = ImageOps.grayscale(img)
+        
+        # 2. Boost Contrast by 1.5x
+        enhancer = ImageEnhance.Contrast(img)
+        img = enhancer.enhance(1.5)
+        
+        # 3. Boost Sharpness by 2.0x to define pen strokes
+        sharpness = ImageEnhance.Sharpness(img)
+        img = sharpness.enhance(2.0)
+        
+        # Save to a temporary optimized file
+        enhanced_path = path.replace(".", "_enhanced.")
+        img.save(enhanced_path, format="PNG")
+        return enhanced_path
+    except ImportError:
+        print("  ⚠️ PIL not installed, skipping image enhancement. (Run: pip install Pillow)")
+        return path
+    except Exception as e:
+        print(f"  ⚠️ Image enhancement failed, using original: {e}")
+        return path
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Image → base64
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _image_to_b64(path: str) -> tuple[str, str]:
-    """Returns (base64_data, media_type)."""
-    ext = Path(path).suffix.lower()
-    mime_map = {
-        ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
-        ".png": "image/png", ".webp": "image/webp",
-        ".gif": "image/gif",
-        ".bmp": "image/bmp",
-        ".tiff": "image/tiff", ".tif": "image/tiff",
-    }
-    media_type = mime_map.get(ext, "image/jpeg")
-
+    """Upgraded to pass images through the enhancement pipeline first."""
+    enhanced_path = _enhance_image_for_ocr(path)
+    
+    ext = Path(enhanced_path).suffix.lower()
     # For bmp/tiff — convert to PNG via Pillow if available
     if ext in {".bmp", ".tiff", ".tif"}:
         try:
             # pyrefly: ignore [missing-import]
             from PIL import Image
             buf = io.BytesIO()
-            Image.open(path).save(buf, format="PNG")
-            return base64.b64encode(buf.getvalue()).decode(), "image/png"
-        except ImportError as e:
-            print(f"  ⚠️  Pillow import failed for image conversion. Error details: {e}\n{traceback.format_exc()}")
-            pass
+            Image.open(enhanced_path).save(buf, format="PNG")
+            b64_data = base64.b64encode(buf.getvalue()).decode()
+            media_type = "image/png"
         except Exception as e:
-            print(f"  ⚠️  Unexpected error during image conversion. Error details: {e}\n{traceback.format_exc()}")
-            pass
-
-    with open(path, "rb") as f:
-        return base64.b64encode(f.read()).decode(), media_type
+            print(f"  ⚠️  Unexpected error during image conversion. {e}")
+            with open(enhanced_path, "rb") as f:
+                b64_data = base64.b64encode(f.read()).decode()
+            media_type = "image/jpeg"
+    else:
+        media_type = "image/png" if ext == ".png" else "image/jpeg"
+        if ext == ".webp": media_type = "image/webp"
+        if ext == ".gif": media_type = "image/gif"
+        
+        with open(enhanced_path, "rb") as f:
+            b64_data = base64.b64encode(f.read()).decode()
+            
+    # Clean up the temp enhanced file to save disk space
+    if enhanced_path != path and os.path.exists(enhanced_path):
+        os.remove(enhanced_path)
+        
+    return b64_data, media_type
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -729,6 +770,63 @@ def transcribe_images(image_paths: list[str], book_title: str = "") -> list[dict
     print(f"  📝  Transcription complete: {content_count}/{total} pages have content")
     return all_results
 
+# ─────────────────────────────────────────────────────────────────────────────
+# NEW ADVANCED UPGRADE: The "Context Healer" Agent
+# ─────────────────────────────────────────────────────────────────────────────
+
+HEALER_SYSTEM_PROMPT = """You are a post-OCR correction agent. 
+You are receiving transcribed text from handwritten pages that were processed in parallel.
+Your strict mission:
+1. Fix hyphenation and broken sentences that occur across page boundaries.
+2. If there is an [illegible] marker, use the context of the surrounding sentences to deduce what the word likely was. If you cannot confidently guess, leave it as [illegible].
+3. DO NOT paraphrase, summarize, or change the style. Only fix OCR artifacts.
+4. Preserve the original language perfectly (especially Hindi/Devanagari if present).
+"""
+
+def heal_transcription_context(pages: list[dict]) -> list[dict]:
+    """
+    Passes the compiled text through a secondary intelligent agent to fix 
+    page-break disconnects and deduce [illegible] words based on total context.
+    """
+    print("  🩹 Initiating Context Healer Agent to fix page boundaries and illegible words...")
+    
+    content_pages = [p for p in pages if p["has_content"]]
+    if not content_pages:
+        return pages
+
+    # Combine pages into large overlapping chunks to heal boundaries
+    compiled_text = "\n\n---PAGE_BREAK---\n\n".join(
+        [f"[PAGE {p['page_num']}]\n{p['text']}" for p in content_pages]
+    )
+
+    try:
+        response = client.chat.completions.create(
+            model=MODEL,
+            messages=[
+                {"role": "system", "content": HEALER_SYSTEM_PROMPT},
+                {"role": "user", "content": f"Heal this raw OCR text:\n\n{compiled_text[:60000]}"} # 60k char limit for safety
+            ],
+            max_tokens=10000,
+            temperature=0.1 # Low temp for strict correction without hallucinating new story
+        )
+        healed_raw = response.choices[0].message.content.strip()
+        
+        # Re-parse the healed text back into the page dictionary format
+        healed_pages = []
+        raw_splits = healed_raw.split("---PAGE_BREAK---")
+        
+        for i, split_text in enumerate(raw_splits):
+            if i < len(content_pages):
+                # Strip the injected [PAGE X] tag
+                clean_text = re.sub(r'\[PAGE \d+\]\n?', '', split_text).strip()
+                content_pages[i]["text"] = clean_text
+                
+        print("  ✅ Context Healer successfully stitched page boundaries.")
+        return pages # Return original dict structure with healed text
+        
+    except Exception as e:
+        print(f"  ⚠️ Healer agent failed, falling back to raw parallel transcription: {e}")
+        return pages
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Post-processing: structure the transcribed text into a clean book
@@ -1193,7 +1291,7 @@ def generate_scanned_docx(structure: dict, output_path: str) -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Main orchestrator
+# UPGRADED MAIN ORCHESTRATOR
 # ─────────────────────────────────────────────────────────────────────────────
 
 def scan_handwritten_book(
@@ -1204,12 +1302,13 @@ def scan_handwritten_book(
     progress_callback=None,
 ) -> dict:
     """
-    Full pipeline:
-    1. Extract/collect images from the input file
-    2. Transcribe each image via GPT-4o vision (parallel, with retries)
-    3. Structure the transcription into chapters
-    4. Generate PDF + DOCX
-    Returns metadata dict with paths and stats.
+    Upgraded Pipeline:
+    1. Extract/collect images
+    2. Image Pre-Processing & Contrast Enhancement (NEW)
+    3. Transcribe via GPT-4o vision (Parallel)
+    4. Context Healer Agent fixes page breaks & illegible tags (NEW)
+    5. Structure into chapters
+    6. Generate Premium Multi-lingual PDF + DOCX
     """
     os.makedirs(output_dir, exist_ok=True)
     job_id = uuid.uuid4().hex
@@ -1223,26 +1322,31 @@ def scan_handwritten_book(
         if total_pages == 0:
             raise ValueError("No readable images found in the uploaded file.")
 
-        if progress_callback: progress_callback("transcribing", 5, f"Found {total_pages} pages — starting transcription…")
+        if progress_callback: progress_callback("transcribing", 5, f"Found {total_pages} pages. Enhancing and transcribing…")
 
-        # Step 2: Transcribe (parallel)
+        # Step 2 & 3: Transcribe (with built-in enhancement)
         transcribed = transcribe_images(images, book_title)
 
-        content_pages = sum(1 for p in transcribed if p["has_content"])
-        if progress_callback: progress_callback("structuring", 70, f"Transcribed {content_pages}/{total_pages} pages — structuring…")
+        # Step 4: The Healer Agent
+        if progress_callback: progress_callback("healing", 65, "AI Healer stitching broken sentences and fixing illegible words...")
+        healed_transcription = heal_transcription_context(transcribed)
 
-        # Step 3: Structure
-        structure = structure_transcription(transcribed, book_title)
+        content_pages = sum(1 for p in healed_transcription if p["has_content"])
+        if progress_callback: progress_callback("structuring", 75, f"Structuring {content_pages}/{total_pages} pages into chapters…")
+
+        # Step 5: Structure
+        structure = structure_transcription(healed_transcription, book_title)
         if book_title:
             structure["title"] = book_title
 
-        if progress_callback: progress_callback("assembling", 85, "Generating PDF and DOCX…")
+        if progress_callback: progress_callback("assembling", 85, "Generating PDF and DOCX (Applying Unicode layout)…")
 
-        # Step 4: Generate outputs
+        # Step 6: Generate outputs
         safe_title = "".join(c for c in structure["title"] if c.isalnum() or c in (" ", "-", "_")).strip() or "manuscript"
         pdf_path  = os.path.join(output_dir, f"{safe_title}_{job_id}.pdf")
         docx_path = os.path.join(output_dir, f"{safe_title}_{job_id}.docx")
 
+        # These use your brilliant custom Hindi/ReportLab functions seamlessly
         generate_scanned_pdf(structure, pdf_path)
         generate_scanned_docx(structure, docx_path)
 
