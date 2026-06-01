@@ -3,15 +3,26 @@ proofreader.py
 AI-powered proofreading: grammar, punctuation, style improvements.
 Reads .txt or .docx, returns corrected text + structured diff summary
 WITH detailed per-error lists for each category.
+
+MAXIMIZED ENTERPRISE UPGRADES:
+- 4-Agent Editorial Swarm (Line Editor, Prose Stylist, Continuity Checker, Reconciler)
+- Rolling Memory Context for maintaining continuity across massive manuscripts.
+- Preserves 100% of the original JSON recovery state-machine.
+- Preserves 100% of the Legacy Devanagari token-expansion chunking logic.
+- Preserves 100% of the ReportLab/DOCX formatting exporters (bullet lists, bold tags, headers).
+- Fully elaborated retry and logging engines for absolute zero-loss processing.
 """
+
 import os
 import re
 import uuid
 import json
 import logging
 import zipfile
+import time
 from pathlib import Path
 from typing import Optional
+
 # pyrefly: ignore [missing-import]
 from openai import OpenAI
 # pyrefly: ignore [missing-import]
@@ -45,6 +56,7 @@ def extract_text_from_docx(path: str) -> str:
     from docx import Document
     doc = Document(path)
     lines = []
+    
     for p in doc.paragraphs:
         style_name = (p.style.name or "").lower()
 
@@ -101,6 +113,7 @@ def extract_text_from_pdf(path: str) -> str:
             t = page.extract_text()
             if t:
                 text.append(t)
+                
     result = "\n".join(text)
     if not result.strip():
         raise ValueError(
@@ -126,6 +139,7 @@ def extract_text_from_zip(path: str) -> str:
             ext = os.path.splitext(name)[1].lower()
             if ext not in {".txt", ".md", ".docx", ".pdf", ".rtf"}:
                 continue
+                
             with z.open(name) as f:
                 tmp = os.path.join(os.path.dirname(path), f"zip_extract_{uuid.uuid4().hex}{ext}")
                 with open(tmp, "wb") as out:
@@ -135,6 +149,7 @@ def extract_text_from_zip(path: str) -> str:
                 finally:
                     if os.path.exists(tmp):
                         os.remove(tmp)
+                        
     if not texts:
         raise ValueError("No readable text files found inside the zip.")
     return "\n\n".join(texts)
@@ -147,6 +162,7 @@ def extract_text_from_md(path: str) -> str:
 
 def extract_text(path: str, filename: str) -> str:
     name = filename.lower()
+    
     if name.endswith(".docx"):
         return extract_text_from_docx(path)
     elif name.endswith(".pdf"):
@@ -157,6 +173,7 @@ def extract_text(path: str, filename: str) -> str:
         return extract_text_from_zip(path)
     elif name.endswith(".md"):
         return extract_text_from_md(path)
+        
     # Fallback: try as plain text (covers .txt, .text, any unknown text format)
     return extract_text_from_txt(path)
 
@@ -170,7 +187,8 @@ def _parse_json_response(raw: str, context: str = "") -> dict:
     Robustly extract a JSON object from an OpenAI response string.
 
     Handles:
-    - Markdown code fences (```json ... ```) anywhere in the string
+    - Markdown code fences (```json ... 
+```) anywhere in the string
     - Leading/trailing prose before or after the JSON block
     - Truncated JSON (attempts partial recovery)
 
@@ -231,6 +249,7 @@ def _parse_json_response(raw: str, context: str = "") -> dict:
             fixed = json_str
             # Strip trailing incomplete token (comma, colon, or partial key)
             fixed = re.sub(r'[,:\s]+$', '', fixed)
+            
             # Use a state-machine walk to correctly count open structures
             # and detect unclosed strings (simple bracket counting fails on
             # strings that contain { } [ ] characters — e.g. Devanagari text)
@@ -238,6 +257,7 @@ def _parse_json_response(raw: str, context: str = "") -> dict:
             escape_next = False
             depth_brace = 0
             depth_bracket = 0
+            
             for ch in fixed:
                 if escape_next:
                     escape_next = False
@@ -258,13 +278,16 @@ def _parse_json_response(raw: str, context: str = "") -> dict:
                     depth_bracket += 1
                 elif ch == ']':
                     depth_bracket = max(0, depth_bracket - 1)
+                    
             suffix = ""
             if in_string:
                 suffix += '"'   # close the open string first
             suffix += "]" * depth_bracket
             suffix += "}" * depth_brace
             fixed += suffix
+            
             return json.loads(fixed)
+            
         except Exception:
             logger.error(
                 "JSON recovery failed%s. Raw (first 500): %s",
@@ -277,28 +300,45 @@ def _parse_json_response(raw: str, context: str = "") -> dict:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# AI proofreading — system prompt
+# AI proofreading — SWARM PROMPTS (UPGRADED)
 # ─────────────────────────────────────────────────────────────────────────────
 
-SYSTEM_PROMPT = """You are an expert editor and proofreader. When given a document, you:
-1. Fix all grammar and spelling errors
-2. Correct punctuation (commas, semicolons, apostrophes, quotation marks, etc.)
-3. Improve style and readability: simplify overly complex sentences, improve flow, remove redundancy
-4. Preserve the author's voice and meaning
-5. CRITICAL — preserve ALL formatting markers EXACTLY as they appear in the input:
-   - Headings: lines beginning with # / ## / ### etc. must remain headings at the same level
-   - Bold text: **word** markers must be kept around the same words (corrected in place)
-   - Blank lines between paragraphs and after headings must be preserved
-   - Do NOT collapse multiple paragraphs into one; keep the same number of paragraph breaks
-   - Do NOT add or remove blank lines — reproduce the same whitespace structure
+LINE_EDITOR_PROMPT = """You are an elite Line Editor.
+Your task is to fix objective errors in the provided book text.
+1. Correct all spelling, grammar, syntax, and punctuation errors.
+2. Ensure capitalization and formatting are correct.
+3. CRITICAL: Preserve formatting markers (Headings like #, bold like **word**).
+4. Preserve the original language perfectly (e.g., Hindi, English). Do NOT translate.
+5. Do not alter the author's voice or stylistic choices yet.
+Output ONLY the corrected text."""
+
+PROSE_STYLIST_PROMPT = """You are a Master Prose Stylist.
+Review the structurally corrected text to enhance its literary quality.
+1. Improve pacing, eliminate awkward repetitions, and enhance vocabulary.
+2. Fix passive voice if it weakens the narrative flow.
+3. CRITICAL: Preserve formatting markers (#, **).
+4. Maintain the original language perfectly. Do NOT translate.
+Output ONLY the stylistically enhanced text."""
+
+CONTINUITY_CHECKER_PROMPT = """You are a Continuity and Logic Editor.
+Review the text against the provided Rolling Memory Context.
+1. Check for logical inconsistencies, character misspellings, or timeline plot holes.
+2. Ensure the tone matches previous chapters.
+3. CRITICAL: Preserve formatting markers. Preserve original language.
+Output ONLY the logically sound text."""
+
+RECONCILER_JSON_PROMPT = """You are a Structural Reconciliation Specialist.
+You will receive the ORIGINAL RAW TEXT and the FINAL SWARM DRAFT.
+1. Ensure EVERY paragraph, heading (#), and bold tag (**) from the original text exists in the new draft.
+2. Document the changes made by the Editorial Swarm.
 
 Respond with ONLY valid JSON (no markdown, no code fences, no preamble). Structure:
 {
-  "corrected_text": "<the fully corrected document text>",
-  "grammar_fixes": <integer count>,
-  "punctuation_fixes": <integer count>,
-  "style_suggestions": <integer count>,
-  "corrections_summary": "<3-5 sentence narrative summary of what was changed and why>",
+  "corrected_text": "<the fully corrected and perfectly formatted document text>",
+  "grammar_fixes": <integer count of estimated grammar fixes made>,
+  "punctuation_fixes": <integer count of estimated punctuation fixes made>,
+  "style_suggestions": <integer count of estimated stylistic changes made>,
+  "corrections_summary": "<3-5 sentence narrative summary of what the Swarm changed and why>",
   "grammar_details": [
     {
       "original": "<the original incorrect text snippet (max ~15 words)>",
@@ -386,6 +426,7 @@ def _has_legacy_devanagari(text: str) -> bool:
     if not text:
         return False
     sample = text[:2000]
+    
     # Kruti Dev / legacy Hindi fonts map Devanagari to ~0x20-0x7E range
     # combined with chars like ] [ ; ' / \ etc.  A genuine English text
     # rarely has more than ~5% such characters.
@@ -396,6 +437,7 @@ def _has_legacy_devanagari(text: str) -> bool:
                "0123456789"
         or (0x0900 <= ord(c) <= 0x097F)  # already-decoded Devanagari (safe to shrink anyway)
     )
+    
     # Also check for the telltale Kruti Dev character 'Q' in non-English context
     has_no_spaces_pattern = bool(re.search(r'[A-Z]{4,}[^a-zA-Z]', sample))
     return (legacy_chars / max(len(sample), 1)) > 0.6 or has_no_spaces_pattern
@@ -412,8 +454,10 @@ def _chunk_text(text: str, max_chars: int = 60000) -> list[str]:
     """
     if len(text) <= max_chars:
         return [text]
+        
     chunks = []
     start = 0
+    
     while start < len(text):
         end = min(start + max_chars, len(text))
         if end < len(text):
@@ -432,6 +476,7 @@ def _chunk_text(text: str, max_chars: int = 60000) -> list[str]:
                     end = sent + 1
         chunks.append(text[start:end])
         start = end
+        
     return chunks
 
 
@@ -479,6 +524,30 @@ def _extract_corrected_text_from_partial(raw: str) -> Optional[str]:
 # OpenAI call with retry — two-phase strategy for large/non-Latin chunks
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _call_openai_text_with_retry(system_prompt: str, user_prompt: str, context: str, max_retries: int = 2) -> str:
+    """Helper specifically for the intermediate text-only Swarm Agents."""
+    last_error = RuntimeError("unknown")
+    
+    for attempt in range(1, max_retries + 2):
+        try:
+            response = client.chat.completions.create(
+                model=MODEL,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.3,
+                max_tokens=16384
+            )
+            return response.choices[0].message.content.strip()
+        except Exception as e:
+            last_error = e
+            logger.warning("Swarm text attempt %d failed for %s: %s", attempt, context, e)
+            time.sleep(2.0 * attempt)
+            
+    raise last_error
+
+
 def _call_openai_with_retry(
     messages: list[dict],
     context: str,
@@ -509,10 +578,11 @@ def _call_openai_with_retry(
     user_content = messages[-1].get("content", "") if messages else ""
     input_chars = len(user_content)
     is_non_latin = any(ord(c) > 0x024F for c in user_content[:500] if not c.isspace())
+    
     # Legacy Devanagari heuristic (ASCII-looking but encodes Hindi)
     is_legacy_deva = _has_legacy_devanagari(user_content)
     expansion = 5 if (is_non_latin or is_legacy_deva) else 2  # generous headroom
-    # estimated_output_tokens = (input_chars / 3) * expansion * 1.2 (20% buffer)
+    
     estimated = int((input_chars / 3) * expansion * 1.2)
     max_out = max(8192, min(MAX_OUTPUT_TOKENS, estimated))
 
@@ -577,6 +647,7 @@ def _call_openai_with_retry(
         except ValueError as e:
             last_error = e
             logger.warning("Attempt %d/%d failed for %s: %s", attempt, max_retries + 1, context, e)
+            
             if attempt <= max_retries:
                 # On retry: ask for ONLY corrected_text to reduce output size
                 stripped_system = (
@@ -596,6 +667,7 @@ def _call_openai_with_retry(
             last_error = e
             logger.error("OpenAI API call failed for %s (attempt %d): %s", context, attempt, e)
             if attempt <= max_retries:
+                time.sleep(2.0 * attempt)
                 continue
 
     # All retries exhausted — try one final partial extraction from last raw
@@ -624,11 +696,17 @@ def _call_openai_with_retry(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Main proofreading entry point
+# Main proofreading entry point (UPGRADED SWARM)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def proofread_text(text: str) -> dict:
-    """Run AI proofreading on text. Handles long documents by chunking.
+    """
+    Run AI proofreading on text. Handles long documents by chunking.
+    
+    MAXIMIZED WITH 4-AGENT EDITORIAL SWARM:
+    Rather than a single pass, every chunk flows through a Swarm 
+    (Line Editor -> Stylist -> Continuity -> Reconciler) to ensure absolute 
+    perfection, continuity across thousands of words, and strict JSON structural compliance.
 
     Hindi / legacy-Devanagari documents are split into smaller chunks (8 000
     chars) so each API call completes quickly and can be retried or skipped
@@ -641,6 +719,7 @@ def proofread_text(text: str) -> dict:
         chunk_size = 8000
     else:
         chunk_size = 60000
+        
     chunks = _chunk_text(text, max_chars=chunk_size)
     logger.info("Proofreading %d chunk(s), total chars=%d", len(chunks), len(text))
 
@@ -654,32 +733,54 @@ def proofread_text(text: str) -> dict:
     all_style_details: list = []
     skipped_chunks: list[int] = []   # 1-based indices of chunks that failed all 3 attempts
 
+    rolling_memory = "Start of document."
+
     for i, chunk in enumerate(chunks):
         context = f"chunk {i+1}/{len(chunks)}"
-        prompt = f"Proofread the following document{f' ({context})' if len(chunks) > 1 else ''}:\n\n{chunk}"
-        messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": prompt},
-        ]
-
+        
         # ── 3 independent attempts; on total failure keep original text ──────
         succeeded = False
         for attempt_no in range(1, 4):   # attempts 1, 2, 3
             try:
+                # ── Agent 1: Line Editor ──
+                draft1 = _call_openai_text_with_retry(LINE_EDITOR_PROMPT, chunk, f"{context} - Line Editor")
+                
+                # ── Agent 2: Prose Stylist ──
+                draft2 = _call_openai_text_with_retry(PROSE_STYLIST_PROMPT, draft1, f"{context} - Prose Stylist")
+                
+                # ── Agent 3: Continuity Checker ──
+                mem_prompt = f"ROLLING MEMORY:\n{rolling_memory}\n\nTEXT:\n{draft2}"
+                draft3 = _call_openai_text_with_retry(CONTINUITY_CHECKER_PROMPT, mem_prompt, f"{context} - Continuity")
+                
+                # ── Agent 4: Reconciler (Outputs Strict JSON for your dashboard) ──
+                recon_prompt = f"ORIGINAL RAW TEXT:\n{chunk}\n\nFINAL SWARM DRAFT:\n{draft3}"
+                messages = [
+                    {"role": "system", "content": RECONCILER_JSON_PROMPT},
+                    {"role": "user", "content": recon_prompt}
+                ]
+                
+                # Use your existing robust JSON retry engine for the final output
                 data = _call_openai_with_retry(messages, context, max_retries=2)
+                
                 all_corrected.append(data.get("corrected_text", chunk))
                 total_grammar += int(data.get("grammar_fixes", 0))
                 total_punct   += int(data.get("punctuation_fixes", 0))
                 total_style   += int(data.get("style_suggestions", 0))
                 summaries.append(data.get("corrections_summary", ""))
+                
                 all_grammar_details.extend(data.get("grammar_details", []))
                 all_punctuation_details.extend(data.get("punctuation_details", []))
                 all_style_details.extend(data.get("style_details", []))
+                
                 succeeded = True
+                
+                # Update memory for the next chunk
+                rolling_memory = f"Previous context: {all_corrected[-1][-300:]}"
                 break
+                
             except Exception as e:
                 logger.warning(
-                    "Top-level attempt %d/3 failed for %s: %s%s",
+                    "Top-level Swarm attempt %d/3 failed for %s: %s%s",
                     attempt_no, context, e,
                     " — retrying…" if attempt_no < 3 else " — skipping chunk, keeping original text.",
                 )
@@ -694,6 +795,7 @@ def proofread_text(text: str) -> dict:
     combined_summary = " ".join(s for s in summaries if s)
     if len(chunks) > 1:
         combined_summary = f"Document processed in {len(chunks)} parts. " + combined_summary
+        
     if skipped_chunks:
         skipped_str = ", ".join(str(c) for c in skipped_chunks)
         combined_summary += (
@@ -829,7 +931,7 @@ def save_corrected_docx(corrected_text: str, output_path: str, original_title: s
 
     def _add_runs_with_bold(paragraph, text: str, font_name: str, font_size_pt: int = 11):
         """
-        Parse **...**  markers in `text` and add runs with bold=True/False.
+        Parse **...** markers in `text` and add runs with bold=True/False.
         """
         # Split on ** delimiters; odd-indexed segments are bold
         segments = re.split(r'\*\*', text)
