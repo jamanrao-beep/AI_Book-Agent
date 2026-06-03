@@ -9,6 +9,11 @@ from pydantic import BaseModel
 from typing import Optional
 import os, sys, uuid, zipfile, shutil, threading, logging, traceback, json
 
+# ── NEW ENTERPRISE WEBSOCKET IMPORTS ─────────────────────────────────────────
+import asyncio
+# pyrefly: ignore [missing-import]
+from fastapi import WebSocket, WebSocketDisconnect
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -112,6 +117,85 @@ async def global_exception_handler(request: Request, exc: Exception):
         status_code=500,
         content={"detail": f"Internal server error: {exc}"},
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ENTERPRISE WEBSOCKET CONNECTION MANAGER (Zero-Latency Streaming)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class ConnectionManager:
+    """
+    Manages active WebSocket connections for real-time progress streaming.
+    Thread-safe implementation allows synchronous background workers (PDF/DOCX renders)
+    to push updates securely to the asynchronous ASGI event loop.
+    Fully supports UTF-8/Devanagari payload streaming without encoding corruption.
+    """
+    def __init__(self):
+        self.active_connections: dict[str, list[WebSocket]] = {}
+        self.lock = threading.Lock()
+
+    async def connect(self, websocket: WebSocket, job_id: str):
+        await websocket.accept()
+        with self.lock:
+            if job_id not in self.active_connections:
+                self.active_connections[job_id] = []
+            self.active_connections[job_id].append(websocket)
+        logger.info(f"🌐 WebSocket Connected: Real-time tunnel established for Job [{job_id}]")
+
+    def disconnect(self, websocket: WebSocket, job_id: str):
+        with self.lock:
+            if job_id in self.active_connections:
+                if websocket in self.active_connections[job_id]:
+                    self.active_connections[job_id].remove(websocket)
+                if not self.active_connections[job_id]:
+                    del self.active_connections[job_id]
+        logger.info(f"🔌 WebSocket Disconnected: Tunnel closed for Job [{job_id}]")
+
+    async def broadcast(self, job_id: str, message: dict):
+        """Pushes JSON payloads to all clients tracking this specific job_id."""
+        if job_id in self.active_connections:
+            dead_connections = []
+            for connection in self.active_connections[job_id]:
+                try:
+                    await connection.send_json(message)
+                except Exception:
+                    dead_connections.append(connection)
+            
+            for dead in dead_connections:
+                self.disconnect(dead, job_id)
+
+manager = ConnectionManager()
+_global_event_loop = None
+
+@app.on_event("startup")
+async def startup_event():
+    """Captures the main ASGI event loop on boot to allow background thread broadcasting."""
+    global _global_event_loop
+    _global_event_loop = asyncio.get_running_loop()
+    logger.info("🚀 Enterprise ASGI Event Loop captured for background task broadcasting.")
+
+def sync_broadcast(job_id: str, message: dict):
+    """
+    Safely bridges synchronous background threads to the async WebSocket publisher 
+    without blocking the server.
+    """
+    global _global_event_loop
+    if _global_event_loop and _global_event_loop.is_running():
+        asyncio.run_coroutine_threadsafe(manager.broadcast(job_id, message), _global_event_loop)
+
+@app.websocket("/ws/status/{job_id}")
+async def websocket_status_endpoint(websocket: WebSocket, job_id: str):
+    """
+    Persistent bi-directional endpoint for live job monitoring.
+    Connect frontend via: new WebSocket(`ws://[domain]/ws/status/${job_id}`)
+    """
+    await manager.connect(websocket, job_id)
+    try:
+        while True:
+            # Keep connection alive until frontend drops or error occurs
+            data = await websocket.receive_text()
+    except WebSocketDisconnect:
+        manager.disconnect(websocket, job_id)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -301,12 +385,17 @@ def _run_proofread_job(job_id: str, tmp_path: str, filename: str, ext: str) -> N
     """
     try:
         _proofread_jobs[job_id]["stage"] = "extracting"
+        sync_broadcast(job_id, {"type": "progress", "job_id": job_id, "stage": "extracting", "progress": 10, "message": "Extracting text..."})
+        
         original_text = extract_text(tmp_path, filename)
         if not original_text.strip():
             _proofread_jobs[job_id].update({"stage": "error", "error": "Document appears to be empty or is an image-based PDF with no text layer."})
+            sync_broadcast(job_id, {"type": "error", "job_id": job_id, "message": "Document appears to be empty."})
             return
 
         _proofread_jobs[job_id]["stage"] = "proofreading"
+        sync_broadcast(job_id, {"type": "progress", "job_id": job_id, "stage": "proofreading", "progress": 40, "message": "Proofreading initiated..."})
+        
         result = proofread_text(original_text)
 
         out_ext = ext if ext in {".docx", ".pdf"} else ".txt"
@@ -321,7 +410,7 @@ def _run_proofread_job(job_id: str, tmp_path: str, filename: str, ext: str) -> N
         else:
             save_corrected_txt(result["corrected_text"], corrected_path)
 
-        _proofread_jobs[job_id].update({
+        payload = {
             "stage": "done",
             "original_filename": filename,
             "original_text": original_text,
@@ -342,11 +431,15 @@ def _run_proofread_job(job_id: str, tmp_path: str, filename: str, ext: str) -> N
                 "style_details": result.get("style_details", []),
                 "download_url": f"/proofread/{job_id}/download",
             },
-        })
+        }
+        
+        _proofread_jobs[job_id].update(payload)
+        sync_broadcast(job_id, {"type": "complete", "job_id": job_id, "result": payload["result"]})
 
     except Exception as exc:
         logger.error("Background proofread failed for '%s': %s\n%s", filename, exc, traceback.format_exc())
         _proofread_jobs[job_id].update({"stage": "error", "error": str(exc)})
+        sync_broadcast(job_id, {"type": "error", "job_id": job_id, "message": str(exc)})
     finally:
         if os.path.exists(tmp_path):
             try:
@@ -1198,9 +1291,16 @@ TRANSLATE_ALLOWED_EXTS = {".pdf", ".docx", ".zip"}
 
 def _run_translation_job(job_id: str, file_path: str, filename: str,
                          target_language: str, source_language: str) -> None:
-    """Background thread worker for translation."""
+    """Background thread worker for translation with WebSocket real-time broadcast."""
     def progress(stage: str, pct: int, message: str) -> None:
         _translate_jobs[job_id].update({"stage": stage, "pct": pct, "message": message})
+        sync_broadcast(job_id, {
+            "type": "progress",
+            "job_id": job_id,
+            "stage": stage,
+            "progress": pct,
+            "message": message
+        })
 
     try:
         result = translate_book(
@@ -1211,7 +1311,8 @@ def _run_translation_job(job_id: str, file_path: str, filename: str,
             source_language=source_language,
             progress_callback=progress,
         )
-        _translate_jobs[job_id].update({
+        
+        payload = {
             "stage": "done",
             "pct": 100,
             "message": "Translation complete!",
@@ -1219,13 +1320,17 @@ def _run_translation_job(job_id: str, file_path: str, filename: str,
             "pdf_path": result["pdf_path"],
             "docx_path": result["docx_path"],
             "title": result["title"],
-        })
+        }
+        _translate_jobs[job_id].update(payload)
+        sync_broadcast(job_id, {"type": "complete", "job_id": job_id, "result": payload["result"]})
+        
     except Exception as e:
         _translate_jobs[job_id].update({
             "stage": "error",
             "pct": 0,
             "message": str(e),
         })
+        sync_broadcast(job_id, {"type": "error", "job_id": job_id, "message": str(e)})
     finally:
         if os.path.exists(file_path):
             try:
@@ -1385,10 +1490,17 @@ def _run_layout_job(
     front_matter: Optional[list] = None,
     back_matter: Optional[list] = None,
 ) -> None:
-    """Background thread worker for layout design."""
+    """Background thread worker for layout design with WebSocket real-time broadcast."""
 
     def progress(stage: str, pct: int, message: str) -> None:
         _layout_jobs[job_id].update({"stage": stage, "pct": pct, "message": message})
+        sync_broadcast(job_id, {
+            "type": "progress",
+            "job_id": job_id,
+            "stage": stage,
+            "progress": pct,
+            "message": message
+        })
 
     try:
         result = design_layout(
@@ -1431,23 +1543,26 @@ def _run_layout_job(
             front_matter=front_matter,
             back_matter=back_matter,
         )
-        _layout_jobs[job_id].update(
-            {
-                "stage": "done",
-                "pct": 100,
-                "message": "Layout design complete!",
-                "result": result,
-                "pdf_path": result["pdf_path"],
-                "docx_path": result["docx_path"],
-                "title": result["title"],
-                "book_type": result.get("book_type", "auto"),
-                "book_type_label": result.get("book_type_label", "Auto (AI chosen)"),
-            }
-        )
+        
+        payload = {
+            "stage": "done",
+            "pct": 100,
+            "message": "Layout design complete!",
+            "result": result,
+            "pdf_path": result["pdf_path"],
+            "docx_path": result["docx_path"],
+            "title": result["title"],
+            "book_type": result.get("book_type", "auto"),
+            "book_type_label": result.get("book_type_label", "Auto (AI chosen)"),
+        }
+        _layout_jobs[job_id].update(payload)
+        sync_broadcast(job_id, {"type": "complete", "job_id": job_id, "result": payload["result"]})
+        
     except Exception as e:
         _layout_jobs[job_id].update(
             {"stage": "error", "pct": 0, "message": str(e)}
         )
+        sync_broadcast(job_id, {"type": "error", "job_id": job_id, "message": str(e)})
     finally:
         if os.path.exists(file_path):
             try:
