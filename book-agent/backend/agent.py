@@ -22,14 +22,14 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 MODEL = "gpt-4o"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# ADVANCED MULTI-AGENT SWARM PROMPTS
+# ADVANCED MULTI-AGENT SWARM PROMPTS (UPGRADED: MEMGPT-STYLE ENTITY GRAPH)
 # ─────────────────────────────────────────────────────────────────────────────
 
 CRITIC_SYSTEM_PROMPT = """You are a ruthless, highly experienced Book Editor.
-Your job is to review the newly drafted section of a book against the 'Story Bible' (which contains all facts established so far) and the intended writing style.
+Your job is to review the newly drafted section of a book against the 'Entity Knowledge Graph' (which contains all facts, characters, and timelines established so far) and the intended writing style.
 
 Look for:
-1. Plot holes, factual inconsistencies, or character breaks compared to the Story Bible.
+1. Plot holes, factual inconsistencies, or character breaks compared to the Entity Knowledge Graph.
 2. Repetitive phrasing, weak transitions, or hallucinations.
 3. Deviation from the requested writing style.
 
@@ -47,11 +47,27 @@ Your job is to rewrite the section to flawlessly address the Editor's critique w
 Do NOT output any conversational text, only the final revised book content.
 """
 
-STORY_BIBLE_PROMPT = """You are a Continuity Manager for a large book generation system.
-You will be given the current 'Story Bible' (a summary of all established facts, characters, plot points, and world-building) and a newly written section.
-Extract any NEW permanent facts, character developments, or world-building rules from the new section and seamlessly merge them into the Story Bible.
-Keep the Story Bible concise but comprehensive (max 1000 words).
-Return ONLY the updated Story Bible text.
+STORY_BIBLE_PROMPT = """You are an elite Continuity Manager and Knowledge Graph Architect for a large book generation system.
+You will be given the current 'Entity Knowledge Graph' (a JSON database of established facts, characters, plot points, and world-building) and a newly written section.
+
+Your job: Extract any NEW permanent facts, character developments, or world-building rules from the new section and seamlessly merge them into the Entity Knowledge Graph.
+Update existing characters' statuses, add new locations, and append to the timeline.
+
+You MUST output ONLY a valid JSON object matching this exact structure:
+{
+    "Core_Premise": "Brief overarching summary of the book",
+    "Characters": {
+        "Character Name": "Description, motivations, current status, physical traits"
+    },
+    "Locations": {
+        "Location Name": "Description and significance"
+    },
+    "Timeline": [
+        "Event 1: Description",
+        "Event 2: Description"
+    ]
+}
+Do NOT wrap the JSON in markdown code blocks.
 """
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -70,31 +86,35 @@ def calculate_chapters(num_pages: int, words_per_page: int) -> int:
 
 def update_story_bible(current_bible: str, new_content: str, book_title: str) -> str:
     """
-    RAG-Lite Engine: Updates the rolling memory of the book to prevent AI amnesia 
-    across 1000+ page generation runs.
+    Entity Knowledge Graph Engine: Updates the structured JSON memory of the book 
+    to prevent AI amnesia and plot holes across 1000+ page generation runs.
     """
-    print("    🧠 Updating Continuity Story Bible...")
+    print("    🧠 Updating Continuity Entity Knowledge Graph...")
     try:
         response = client.chat.completions.create(
             model=MODEL,
+            response_format={"type": "json_object"},
             messages=[
                 {"role": "system", "content": STORY_BIBLE_PROMPT},
-                {"role": "user", "content": f"Book Title: {book_title}\n\nCURRENT BIBLE:\n{current_bible}\n\nNEW SECTION CONTENT:\n{new_content}"}
+                {"role": "user", "content": f"Book Title: {book_title}\n\nCURRENT KNOWLEDGE GRAPH:\n{current_bible}\n\nNEW SECTION CONTENT:\n{new_content}"}
             ],
-            max_tokens=1500,
-            temperature=0.3
+            max_tokens=2500,
+            temperature=0.2
         )
         updated_bible = response.choices[0].message.content.strip()
+        
+        # Verify it is valid JSON before returning
+        json.loads(updated_bible)
         return updated_bible
     except Exception as e:
-        print(f"    ⚠️ Failed to update Story Bible (continuing with old bible): {e}")
+        print(f"    ⚠️ Failed to update Entity Knowledge Graph (continuing with old graph): {e}")
         return current_bible
 
 
 def critique_and_revise(draft: str, story_bible: str, style: str, target_words: int) -> str:
     """
-    Multi-Agent Loop: Critic reviews the draft. If it fails, Revisor rewrites it.
-    Maximum of 2 revision loops to prevent infinite hanging.
+    Multi-Agent Loop: Critic reviews the draft against the JSON Knowledge Graph. 
+    If it fails, Revisor rewrites it. Maximum of 2 revision loops to prevent infinite hanging.
     """
     current_draft = draft
     
@@ -105,7 +125,7 @@ def critique_and_revise(draft: str, story_bible: str, style: str, target_words: 
                 model=MODEL,
                 messages=[
                     {"role": "system", "content": CRITIC_SYSTEM_PROMPT},
-                    {"role": "user", "content": f"STYLE: {style}\nSTORY BIBLE:\n{story_bible}\n\nDRAFT TO CRITIQUE:\n{current_draft}"}
+                    {"role": "user", "content": f"STYLE: {style}\nENTITY KNOWLEDGE GRAPH:\n{story_bible}\n\nDRAFT TO CRITIQUE:\n{current_draft}"}
                 ],
                 max_tokens=500,
                 temperature=0.2
@@ -191,7 +211,14 @@ def run_book_agent(book_id: int):
         print(f"✅ Master Outline established. Total logical blocks to generate: {total_sections}\n")
 
         # ── STEP 2: Swarm Generation & Continuity Loop ───────────────────────
-        story_bible          = f"INITIAL PREMISE: A book titled '{book.title}' written in the style of: {safe_style}."
+        # Initialize the Entity Knowledge Graph as a strict JSON structure
+        initial_graph = {
+            "Core_Premise": f"A book titled '{book.title}' written in the style of: {safe_style}.",
+            "Characters": {},
+            "Locations": {},
+            "Timeline": []
+        }
+        story_bible          = json.dumps(initial_graph)
         segment_order        = 0
         total_words_target   = book.num_pages * book.words_per_page
         words_per_section    = max(300, total_words_target // max(total_sections, 1))
@@ -221,8 +248,8 @@ def run_book_agent(book_id: int):
 
                 print(f"    ✍️  Writer Agent drafting: {subheading} (~{words_per_section} words)")
                 
-                # We inject the story bible into the previous summary context for the Writer Agent
-                enhanced_context = f"STORY BIBLE / CONTINUITY RULES:\n{story_bible}"
+                # We inject the structured JSON story bible into the context for the Writer Agent
+                enhanced_context = f"ENTITY KNOWLEDGE GRAPH / CONTINUITY RULES:\n{story_bible}"
                 
                 raw_draft = generate_section(
                     book_title       = book.title,
