@@ -14,6 +14,10 @@ We use Google Noto fonts because:
 
 Font files are downloaded once at startup into a local cache directory
 (~/.cache/noto_fonts) so repeated runs are instant.
+
+ENTERPRISE UPGRADE:
+- Interactive Clickable TOCs: Injects native PDF Sidebar Bookmarks and clickable
+  hyperlinks within the Table of Contents.
 """
 
 from reportlab.lib.pagesizes import A4
@@ -22,7 +26,7 @@ from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT, TA_RIGHT
 from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Spacer, PageBreak,
-    HRFlowable,
+    HRFlowable, Flowable
 )
 from reportlab.lib.colors import HexColor, white
 from reportlab.pdfbase import pdfmetrics
@@ -203,6 +207,19 @@ _ensure_font("NotoSans")
 PAGE_W, PAGE_H = A4
 MARGIN = 22 * mm
 
+# ── Outline / Sidebar Bookmark Class ──────────────────────────────────────────
+class OutlineBookmark(Flowable):
+    """Injects a PDF bookmark into the native viewer sidebar and allows internal linking."""
+    def __init__(self, title, level, key):
+        self.title = title
+        self.level = level
+        self.key = key
+        Flowable.__init__(self)
+
+    def draw(self):
+        self.canv.bookmarkPage(self.key)
+        self.canv.addOutlineEntry(self.title, self.key, self.level, 0)
+
 
 # ── Footer callback ────────────────────────────────────────────────────────────
 def on_later_page(canvas, doc):
@@ -313,13 +330,22 @@ def generate_pdf(book_title: str, segments, output_dir: str = "output") -> str:
         ch_fnt = get_font_for_text(ch["title"])
         row_st = S(f"ti_{ch_num}", fontName=ch_fnt, fontSize=10, textColor=DARK,
                    leading=16, spaceAfter=3, alignment=align_body)
+                   
+        # --- UPGRADE: Clickable TOC Entry ---
         story.append(Paragraph(
-            f"<b>Chapter {ch_num}</b>  —  {ch['title']}", row_st))
+            f'<link href="ch_{ch_num}" color="{DARK.hexval()}"><b>Chapter {ch_num}</b>  —  {ch["title"]}</link>', 
+            row_st
+        ))
         for sub in ch["subs"]:
             sub_fnt = get_font_for_text(sub)
             sub_st  = S(f"tsi_{sub}", fontName=sub_fnt, fontSize=9, textColor=GRAY,
                         leading=14, leftIndent=14, spaceAfter=2, alignment=align_body)
-            story.append(Paragraph(f"• {sub}", sub_st))
+            sub_key = f"sub_{abs(hash(sub))}"
+            # --- UPGRADE: Clickable Subheading Entry ---
+            story.append(Paragraph(
+                f'<link href="{sub_key}" color="{GRAY.hexval()}">• {sub}</link>', 
+                sub_st
+            ))
         story.append(Spacer(1, 4))
 
     story.append(PageBreak())
@@ -337,6 +363,10 @@ def generate_pdf(book_title: str, segments, output_dir: str = "output") -> str:
             current_chapter = seg.chapter_number
 
             story.append(Spacer(1, 10 * mm))
+            
+            # --- UPGRADE: Inject Native Sidebar Outline Bookmark for Chapter ---
+            story.append(OutlineBookmark(seg.chapter_title, 0, f"ch_{seg.chapter_number}"))
+            
             story.append(Paragraph(
                 f"Chapter {seg.chapter_number}",
                 S(f"cl_{seg.chapter_number}", fontName=seg_fnt, fontSize=11,
@@ -349,6 +379,10 @@ def generate_pdf(book_title: str, segments, output_dir: str = "output") -> str:
                   alignment=seg_align)
             ))
             story.append(HRFlowable(width="100%", thickness=1.5, color=ACCENT, spaceAfter=10))
+
+        sub_key = f"sub_{abs(hash(seg.subheading))}"
+        # --- UPGRADE: Inject Native Sidebar Outline Bookmark for Subheading ---
+        story.append(OutlineBookmark(seg.subheading, 1, sub_key))
 
         # Subheading
         story.append(Paragraph(

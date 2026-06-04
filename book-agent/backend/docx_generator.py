@@ -15,6 +15,10 @@ automatically at render time.  However, we must:
      Word renders them RTL.
   4. Ensure the document charset declaration is UTF-8 (python-docx does this
      by default, but we make it explicit).
+
+ENTERPRISE UPGRADE:
+- Interactive Clickable TOCs: Injects a native Word `w:fldChar` TOC Field allowing 
+  users to Ctrl+Click navigate and right-click update dynamically.
 """
 
 # pyrefly: ignore [missing-import]
@@ -30,7 +34,6 @@ from docx.oxml import OxmlElement
 import datetime
 import os
 import unicodedata
-
 
 # ── Script detection ───────────────────────────────────────────────────────────
 
@@ -54,8 +57,6 @@ _SCRIPT_RANGES = {
 
 _RTL_SCRIPTS = {"Arabic", "Hebrew"}
 
-# Map script → preferred font name (must be available in Word/LibreOffice)
-# Noto fonts cover everything; system fonts are listed as fallbacks.
 _SCRIPT_FONT = {
     "Arabic":     "Noto Sans Arabic",
     "Hebrew":     "Noto Sans Hebrew",
@@ -75,7 +76,6 @@ _SCRIPT_FONT = {
     "Latin":      "Calibri",
 }
 
-
 def _detect_script(text: str) -> str:
     counts = {k: 0 for k in _SCRIPT_RANGES}
     for ch in text:
@@ -87,25 +87,19 @@ def _detect_script(text: str) -> str:
     best = max(counts, key=counts.get)
     return best if counts[best] > 0 else "Latin"
 
-
 def _font_for(text: str) -> str:
     return _SCRIPT_FONT.get(_detect_script(text), "Calibri")
-
 
 def _is_rtl(text: str) -> bool:
     return _detect_script(text) in _RTL_SCRIPTS
 
-
 def _para_align(text: str):
     return WD_ALIGN_PARAGRAPH.RIGHT if _is_rtl(text) else WD_ALIGN_PARAGRAPH.JUSTIFY
-
 
 # ── XML helpers ────────────────────────────────────────────────────────────────
 
 def _set_run_font(run, font_name: str):
-    """Set ascii, hAnsi, eastAsia, and cs (complex script) font on a run."""
     run.font.name = font_name
-    # Force the complex-script font via OOXML so Arabic/Hebrew/Indic shaping works
     rPr = run._r.get_or_add_rPr()
     for tag in ("w:rFonts",):
         el = rPr.find(qn(tag))
@@ -117,9 +111,7 @@ def _set_run_font(run, font_name: str):
         el.set(qn("w:eastAsia"), font_name)
         el.set(qn("w:cs"),      font_name)
 
-
 def _set_para_bidi(paragraph, rtl: bool):
-    """Set or remove the <w:bidi> element on a paragraph for RTL text."""
     pPr = paragraph._p.get_or_add_pPr()
     bidi = pPr.find(qn("w:bidi"))
     if rtl:
@@ -131,11 +123,9 @@ def _set_para_bidi(paragraph, rtl: bool):
         if bidi is not None:
             pPr.remove(bidi)
 
-
 def _add_run(paragraph, text: str, size_pt: float,
              bold: bool = False, italic: bool = False,
              color: RGBColor | None = None) -> None:
-    """Add a run with correct font, size, direction, and optional style."""
     font_name = _font_for(text)
     run = paragraph.add_run(text)
     _set_run_font(run, font_name)
@@ -147,7 +137,6 @@ def _add_run(paragraph, text: str, size_pt: float,
     _set_para_bidi(paragraph, _is_rtl(text))
     paragraph.alignment = _para_align(text)
 
-
 def set_heading_color(paragraph, hex_color: str = "4F46E5"):
     for run in paragraph.runs:
         run.font.color.rgb = RGBColor(
@@ -155,9 +144,7 @@ def set_heading_color(paragraph, hex_color: str = "4F46E5"):
             int(hex_color[2:4], 16),
             int(hex_color[4:6], 16),
         )
-        # Re-apply complex-script font so headings render correctly too
         _set_run_font(run, _font_for(run.text))
-
 
 def add_page_number(paragraph):
     run = paragraph.add_run()
@@ -171,6 +158,28 @@ def add_page_number(paragraph):
     run._r.append(instrText)
     run._r.append(fldChar2)
 
+def add_native_toc(paragraph):
+    """Injects a native Word Table of Contents field (Interactive/Clickable)."""
+    run = paragraph.add_run()
+    
+    fldChar1 = OxmlElement('w:fldChar')
+    fldChar1.set(qn('w:fldCharType'), 'begin')
+    
+    instrText = OxmlElement('w:instrText')
+    instrText.set(qn('xml:space'), 'preserve')
+    # \o "1-3" limits heading levels, \h creates hyperlinks
+    instrText.text = 'TOC \\o "1-3" \\h \\z \\u'
+    
+    fldChar2 = OxmlElement('w:fldChar')
+    fldChar2.set(qn('w:fldCharType'), 'separate')
+    
+    fldChar3 = OxmlElement('w:fldChar')
+    fldChar3.set(qn('w:fldCharType'), 'end')
+    
+    run._r.append(fldChar1)
+    run._r.append(instrText)
+    run._r.append(fldChar2)
+    run._r.append(fldChar3)
 
 # ── Main generator ─────────────────────────────────────────────────────────────
 
@@ -192,7 +201,6 @@ def generate_docx(book_title: str, segments, output_dir: str = "output") -> str:
     section.top_margin    = Cm(2.5)
     section.bottom_margin = Cm(2.0)
 
-    # Enable complex-script layout at document level
     settings = doc.settings.element
     compat = OxmlElement("w:compat")
     cs_el  = OxmlElement("w:compatSetting")
@@ -202,7 +210,6 @@ def generate_docx(book_title: str, segments, output_dir: str = "output") -> str:
     compat.append(cs_el)
     settings.append(compat)
 
-    # Default Normal style
     style_normal = doc.styles["Normal"]
     style_normal.font.name = _font_for(book_title)
     style_normal.font.size = Pt(11)
@@ -239,6 +246,10 @@ def generate_docx(book_title: str, segments, output_dir: str = "output") -> str:
     # ══════════════════════════════════════════════════════════════════════════
     toc_heading = doc.add_heading("Table of Contents", level=1)
     set_heading_color(toc_heading, "1E293B")
+    
+    # Inject Native Interactive TOC
+    toc_para = doc.add_paragraph()
+    add_native_toc(toc_para)
 
     chapters: dict = {}
     for seg in segments:
@@ -247,6 +258,7 @@ def generate_docx(book_title: str, segments, output_dir: str = "output") -> str:
             chapters[key] = {"title": seg.chapter_title, "subs": []}
         chapters[key]["subs"].append(seg.subheading)
 
+    # Keeping static fallback list below native TOC so visual structure remains intact
     for ch_num in sorted(chapters.keys()):
         ch   = chapters[ch_num]
         para = doc.add_paragraph(style="List Bullet")
