@@ -9,6 +9,7 @@ MAXIMIZED ENTERPRISE EDITION:
 - Automated Terminology Glossary Extraction
 - Exponential Backoff Rate-Limit Handling (Zero Drop-offs)
 - Dynamic Unicode/Devanagari Font Engine for Flawless Global PDF/DOCX Exports
+- Semantic Overlap Chunking (Flawless grammar continuity across chunk boundaries)
 """
 
 from __future__ import annotations
@@ -206,7 +207,8 @@ Strict Guidelines:
 1. Preserve original emotional tone, style, author voice, and nuances.
 2. Adapt idioms into natural equivalents in the target language.
 3. You MUST rigidly follow the provided Translation Glossary Map for names and nouns.
-4. Maintain paragraph breaks exactly as presented."""
+4. Maintain paragraph breaks exactly as presented.
+5. If a PREVIOUS CHUNK CONTEXT is provided, use it ONLY to understand the immediate preceding context for continuity. Do NOT translate it."""
 
 CRITIC_SYSTEM_PROMPT = """You are a ruthless Cultural Editor and Localization Expert. 
 Compare the original book section with its newly translated version.
@@ -365,7 +367,8 @@ def _translate_chunk_swarm(
     text_chunk: str, 
     target_language: str, 
     source_language: str, 
-    context_hint: str, 
+    context_hint: str,
+    overlap_context: str,
     glossary_map: dict
 ) -> str:
     str_glossary = json.dumps(glossary_map or {}, ensure_ascii=False)
@@ -375,9 +378,12 @@ def _translate_chunk_swarm(
         f"SOURCE: {source_language}\n"
         f"TARGET: {target_language}\n"
         f"GLOSSARY:\n{str_glossary}\n"
-        f"CONTEXT: {context_hint}\n\n"
-        f"ORIGINAL:\n{text_chunk}"
+        f"CONTEXT: {context_hint}\n"
     )
+    if overlap_context:
+        user_content += f"\n[PREVIOUS CHUNK CONTEXT - DO NOT TRANSLATE THIS]:\n{overlap_context}\n\n"
+        
+    user_content += f"ORIGINAL TO TRANSLATE:\n{text_chunk}"
     
     resp1 = _api_call_with_retry(
         _client.chat.completions.create, 
@@ -478,16 +484,23 @@ def _translate_chapter(
 
     translated_parts = []
     rolling_memory = f'Book: "{book_title}"'
+    previous_chunk_tail = "" # NEW: Holds the last ~200 words of the previous chunk
     
     for chunk in chunks:
         translated_text = _translate_chunk_swarm(
-            chunk, 
-            target_language, 
-            source_language, 
-            rolling_memory, 
-            glossary_map
+            text_chunk=chunk, 
+            target_language=target_language, 
+            source_language=source_language, 
+            context_hint=rolling_memory, 
+            overlap_context=previous_chunk_tail, # NEW: Semantic overlap injected here
+            glossary_map=glossary_map
         )
         translated_parts.append(translated_text)
+        
+        # NEW: Extract the last ~200 words of this chunk to pass to the next iteration
+        words = chunk.split()
+        previous_chunk_tail = " ".join(words[-200:]) if len(words) > 200 else chunk
+        
         rolling_memory = f"Book: '{book_title}'. Last translated stylistic line: {translated_text[-250:]}"
 
     return {"title": translated_title, "body": "\n\n".join(translated_parts)}
