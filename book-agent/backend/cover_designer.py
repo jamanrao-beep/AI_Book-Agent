@@ -410,6 +410,148 @@ def _generate_procedural_fallback_image(concept: dict, width: int = 1024, height
         return None
 
 
+def generate_cover_from_svg_template(
+    title: str,
+    concept: dict | None = None,
+    author: str = "",
+) -> bytes | None:
+    """
+    Genre-aware SVG template fallback.
+
+    Template naming convention (put your SVGs in the templates/ folder):
+        thriller_01.svg, thriller_02.svg ...
+        scifi_01.svg, scifi_dark_02.svg ...
+        romance_floral_01.svg ...
+        fantasy_01.svg ...
+        academic_01.svg, academic_blue_02.svg ...
+        business_01.svg ...
+        history_01.svg ...
+        horror_01.svg ...
+        general_01.svg   <- catch-all for unmatched genres
+
+    Scoring: each SVG filename + parent folder is matched against the book's
+    genre and style keywords. Highest-scoring group is collected, then one
+    is chosen at random -- so 80 thriller templates each get equal chance.
+
+    PLACEHOLDER TABLE (use these strings inside your .svg files):
+        {{TITLE}}           -> book title  (<=30 chars)
+        {{AUTHOR}}          -> author line (<=28 chars)
+        {{GENRE}}           -> genre label (e.g. THRILLER)
+        {{TAGLINE}}         -> one-line tagline
+        {{SUBTITLE}}        -> subtitle
+        {{BG_PRIMARY}}      -> hex bg colour    (e.g. #0f172a)
+        {{BG_SECONDARY}}    -> hex gradient colour
+        {{ACCENT}}          -> hex accent colour
+        {{ACCENT2}}         -> hex secondary accent
+        {{TITLE_COLOR}}     -> hex title text colour
+        {{SUBTITLE_COLOR}}  -> hex subtitle text colour
+
+        Legacy placeholders still honoured:
+        "Your Title Here", "Your Title", "Author Name"
+    """
+    import glob
+
+    concept   = concept or {}
+    palette   = concept.get("palette", {})
+    genre_raw = concept.get("genre_label", "").lower().strip()
+    style_raw = concept.get("style",       "").lower().strip()
+
+    GENRE_ALIASES: dict[str, list[str]] = {
+        "thriller":  ["thriller", "suspense", "crime", "mystery", "noir"],
+        "scifi":     ["scifi", "sci-fi", "science fiction", "sf", "space", "futur"],
+        "fantasy":   ["fantasy", "magic", "epic", "sword", "dragon", "mythic"],
+        "romance":   ["romance", "love", "romantic", "contemporary romance"],
+        "horror":    ["horror", "dark", "gothic", "paranormal", "occult"],
+        "academic":  ["academic", "textbook", "education", "science", "research",
+                      "nonfiction", "non-fiction", "reference"],
+        "business":  ["business", "finance", "economics", "entrepreneur", "leadership",
+                      "self-help", "productivity", "management"],
+        "history":   ["history", "historical", "biography", "memoir", "war",
+                      "political", "true crime"],
+        "children":  ["children", "kids", "juvenile", "middle grade", "picture book"],
+        "poetry":    ["poetry", "poems", "verse", "literary"],
+    }
+
+    search_keywords: list[str] = []
+    for canonical, aliases in GENRE_ALIASES.items():
+        if any(a in genre_raw or a in style_raw for a in aliases):
+            search_keywords.append(canonical)
+    search_keywords += [genre_raw, style_raw]
+
+    templates_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates")
+    svgs = glob.glob(os.path.join(templates_dir, "**", "*.svg"), recursive=True)
+    if not svgs:
+        logger.warning("  No SVG templates found in templates/ folder.")
+        return None
+
+    def _score(svg_path: str) -> int:
+        name     = os.path.basename(svg_path).lower()
+        folder   = os.path.basename(os.path.dirname(svg_path)).lower()
+        combined = folder + "_" + name
+        score    = 0
+        for rank, kw in enumerate(reversed(search_keywords)):
+            if kw and kw in combined:
+                score += (rank + 1) * 10
+        if "general" in combined or "default" in combined:
+            score -= 5
+        return score
+
+    scored    = sorted(svgs, key=_score, reverse=True)
+    top_score = _score(scored[0])
+    top_pool  = [s for s in scored if _score(s) == top_score]
+    svg_path  = random.choice(top_pool)
+
+    logger.info(
+        f"  SVG template selected: {os.path.relpath(svg_path, templates_dir)!r}"
+        f"  (score={top_score}, pool={len(top_pool)} of {len(svgs)},"
+        f"  genre={genre_raw!r}, style={style_raw!r})"
+    )
+
+    try:
+        with open(svg_path, "r", encoding="utf-8") as f:
+            svg = f.read()
+
+        short_title    = title[:30]  if len(title)  > 30 else title
+        short_author   = (concept.get("author_line") or author or "")[:28]
+        short_genre    = concept.get("genre_label", "").upper()[:20]
+        short_tagline  = concept.get("tagline",  "")[:60]
+        short_subtitle = concept.get("subtitle", "")[:60]
+
+        bg1  = palette.get("bg_primary",    "#0f172a")
+        bg2  = palette.get("bg_secondary",  "#1e3a5f")
+        acc  = palette.get("accent",        "#f59e0b")
+        acc2 = palette.get("accent2",       "#fbbf24")
+        tcol = palette.get("title_color",   "#ffffff")
+        scol = palette.get("subtitle_color","#e2e8f0")
+
+        substitutions = {
+            "{{TITLE}}":          short_title,
+            "{{AUTHOR}}":         short_author,
+            "{{GENRE}}":          short_genre,
+            "{{TAGLINE}}":        short_tagline,
+            "{{SUBTITLE}}":       short_subtitle,
+            "{{BG_PRIMARY}}":     bg1,
+            "{{BG_SECONDARY}}":   bg2,
+            "{{ACCENT}}":         acc,
+            "{{ACCENT2}}":        acc2,
+            "{{TITLE_COLOR}}":    tcol,
+            "{{SUBTITLE_COLOR}}": scol,
+        }
+        for placeholder, value in substitutions.items():
+            svg = svg.replace(placeholder, value)
+
+        # Legacy backward-compatibility placeholders
+        svg = svg.replace("Your Title Here", short_title)
+        svg = svg.replace("Your Title",      short_title)
+        svg = svg.replace("Author Name",     short_author)
+
+        return svg.encode("utf-8")
+
+    except Exception as e:
+        logger.warning(f"  SVG template fallback failed: {e}\n{traceback.format_exc()}")
+        return None
+
+
 def generate_cover_image(concept: dict, book_title: str, book_text: str = "") -> bytes | None:
     """
     Maximized 5-Tier Fallback Loop:
@@ -627,6 +769,9 @@ def generate_cover_concept(
     p.setdefault("bg_secondary",  p.get("bg_bottom", "#1e3a5f"))
     p.setdefault("panel_color",   p.get("bg_secondary", "#1e293b"))
     p.setdefault("accent2",       p.get("accent", "#f59e0b"))
+    # Ensure frontend-expected keys are always present (bg_top / bg_bottom)
+    p.setdefault("bg_top",    p.get("bg_primary",   "#0f172a"))
+    p.setdefault("bg_bottom", p.get("bg_secondary", "#1e3a5f"))
 
     rationale = concept.get("design_rationale", "")
     if rationale:
@@ -1198,7 +1343,8 @@ def _render_cover_pdf_legacy(concept: dict, output_path: str,
 
         if layout not in ("left_panel",):
             c.saveState()
-            c.setFillColorRGB(*panel, alpha=0.78)
+            c.setFillAlpha(0.78)
+            c.setFillColorRGB(*panel)
             c.rect(text_panel_x, text_panel_y, text_panel_w, text_panel_h, fill=1, stroke=0)
             c.restoreState()
             
@@ -1283,7 +1429,8 @@ def _render_cover_pdf_legacy(concept: dict, output_path: str,
         c.drawRightString(W - 20 * mm, BAND_H * 0.38, "EDITORIAL AI")
 
         c.saveState()
-        c.setFillColorRGB(*acc, alpha=0.28)
+        c.setFillAlpha(0.28)
+        c.setFillColorRGB(*acc)
         c.rect(0, H - 5, W, 5, fill=1, stroke=0)
         c.restoreState()
 
@@ -1303,7 +1450,8 @@ def _draw_motif(c, motif: str, acc: tuple, W: float, H: float, rng: random.Rando
     if motif == "concentric_circles":
         for radius in range(20, int(W * 0.9), 30):
             c.saveState()
-            c.setStrokeColorRGB(*acc, alpha=max(0.02, 0.09 - radius * 0.00015))
+            c.setStrokeAlpha(max(0.02, 0.09 - radius * 0.00015))
+            c.setStrokeColorRGB(*acc)
             c.setLineWidth(0.7)
             c.circle(W * 0.5, H * 0.5, radius, fill=0, stroke=1)
             c.restoreState()
@@ -1311,7 +1459,8 @@ def _draw_motif(c, motif: str, acc: tuple, W: float, H: float, rng: random.Rando
     elif motif == "diagonal_stripes":
         for x in range(-int(H), int(W) + int(H), 22):
             c.saveState()
-            c.setStrokeColorRGB(*acc, alpha=0.07)
+            c.setStrokeAlpha(0.07)
+            c.setStrokeColorRGB(*acc)
             c.setLineWidth(1.1)
             c.line(x, 0, x + H, H)
             c.restoreState()
@@ -1319,21 +1468,24 @@ def _draw_motif(c, motif: str, acc: tuple, W: float, H: float, rng: random.Rando
     elif motif == "scattered_dots":
         for _ in range(180):
             c.saveState()
-            c.setFillColorRGB(*acc, alpha=rng.uniform(0.03, 0.15))
+            c.setFillAlpha(rng.uniform(0.03, 0.15))
+            c.setFillColorRGB(*acc)
             c.circle(rng.uniform(0, W), rng.uniform(0, H), rng.uniform(1.5, 5), fill=1, stroke=0)
             c.restoreState()
 
     elif motif == "grid_lines":
         for x in range(0, int(W), 26):
             c.saveState()
-            c.setStrokeColorRGB(*acc, alpha=0.055)
+            c.setStrokeAlpha(0.055)
+            c.setStrokeColorRGB(*acc)
             c.setLineWidth(0.5)
             c.line(x, 0, x, H)
             c.restoreState()
             
         for y in range(0, int(H), 26):
             c.saveState()
-            c.setStrokeColorRGB(*acc, alpha=0.055)
+            c.setStrokeAlpha(0.055)
+            c.setStrokeColorRGB(*acc)
             c.setLineWidth(0.5)
             c.line(0, y, W, y)
             c.restoreState()
@@ -1341,7 +1493,8 @@ def _draw_motif(c, motif: str, acc: tuple, W: float, H: float, rng: random.Rando
     elif motif == "wave_curves":
         for offset in range(-100, 340, 28):
             c.saveState()
-            c.setStrokeColorRGB(*acc, alpha=0.09)
+            c.setStrokeAlpha(0.09)
+            c.setStrokeColorRGB(*acc)
             c.setLineWidth(1.4)
             path = c.beginPath()
             path.moveTo(0, H * 0.45 + offset)
@@ -1361,7 +1514,8 @@ def _draw_motif(c, motif: str, acc: tuple, W: float, H: float, rng: random.Rando
                         hy + hr * math.sin(math.radians(60*i+30))) for i in range(6)]
                         
                 c.saveState()
-                c.setStrokeColorRGB(*acc, alpha=0.055)
+                c.setStrokeAlpha(0.055)
+                c.setStrokeColorRGB(*acc)
                 c.setLineWidth(0.6)
                 
                 path = c.beginPath()
@@ -1378,7 +1532,8 @@ def _draw_motif(c, motif: str, acc: tuple, W: float, H: float, rng: random.Rando
         for row in range(0, int(H)+ts, ts):
             for col in range(0, int(W)+ts, ts):
                 c.saveState()
-                c.setStrokeColorRGB(*acc, alpha=0.055)
+                c.setStrokeAlpha(0.055)
+                c.setStrokeColorRGB(*acc)
                 c.setLineWidth(0.6)
                 
                 path = c.beginPath()
@@ -1398,14 +1553,16 @@ def _draw_motif(c, motif: str, acc: tuple, W: float, H: float, rng: random.Rando
     elif motif == "stars":
         for _ in range(90):
             c.saveState()
-            c.setFillColorRGB(*acc, alpha=rng.uniform(0.05, 0.25))
+            c.setFillAlpha(rng.uniform(0.05, 0.25))
+            c.setFillColorRGB(*acc)
             c.circle(rng.uniform(0, W), rng.uniform(0, H), rng.uniform(0.8, 2.8), fill=1, stroke=0)
             c.restoreState()
             
         for _ in range(14):
             sx, sy = rng.uniform(0, W), rng.uniform(0, H)
             c.saveState()
-            c.setStrokeColorRGB(*acc, alpha=0.13)
+            c.setStrokeAlpha(0.13)
+            c.setStrokeColorRGB(*acc)
             c.setLineWidth(0.5)
             
             for a in range(0, 360, 45):
@@ -1417,7 +1574,8 @@ def _draw_motif(c, motif: str, acc: tuple, W: float, H: float, rng: random.Rando
         for ox, oy in [(0,0),(W,0),(0,H),(W,H)]:
             for r in range(40, 320, 36):
                 c.saveState()
-                c.setStrokeColorRGB(*acc, alpha=max(0.03, 0.13-r*0.0003))
+                c.setStrokeAlpha(max(0.03, 0.13-r*0.0003))
+                c.setStrokeColorRGB(*acc)
                 c.setLineWidth(0.9)
                 c.arc(ox-r, oy-r, ox+r, oy+r, startAng=0, extent=90)
                 c.restoreState()
@@ -1428,7 +1586,8 @@ def _draw_motif(c, motif: str, acc: tuple, W: float, H: float, rng: random.Rando
             y0 = rng.uniform(0, H)
             
             c.saveState()
-            c.setStrokeColorRGB(*acc, alpha=0.10)
+            c.setStrokeAlpha(0.10)
+            c.setStrokeColorRGB(*acc)
             c.setLineWidth(0.8)
             
             path = c.beginPath()
@@ -1444,7 +1603,8 @@ def _draw_motif(c, motif: str, acc: tuple, W: float, H: float, rng: random.Rando
             c.restoreState()
             
             c.saveState()
-            c.setFillColorRGB(*acc, alpha=0.20)
+            c.setFillAlpha(0.20)
+            c.setFillColorRGB(*acc)
             c.circle(x0, y0, 2.5, fill=1, stroke=0)
             c.restoreState()
 
@@ -1456,14 +1616,16 @@ def _draw_motif(c, motif: str, acc: tuple, W: float, H: float, rng: random.Rando
                 r = max(0.5, 4.5 - dist * 0.006)
                 
                 c.saveState()
-                c.setFillColorRGB(*acc, alpha=0.07)
+                c.setFillAlpha(0.07)
+                c.setFillColorRGB(*acc)
                 c.circle(col, row, r, fill=1, stroke=0)
                 c.restoreState()
 
     elif motif == "ink_drops":
         for _ in range(60):
             c.saveState()
-            c.setFillColorRGB(*acc, alpha=rng.uniform(0.04, 0.14))
+            c.setFillAlpha(rng.uniform(0.04, 0.14))
+            c.setFillColorRGB(*acc)
             rx = rng.uniform(3, 14)
             ry = rng.uniform(3, 14)
             bx = rng.uniform(0, W)
@@ -1480,19 +1642,22 @@ def _draw_illustration(c, illus: str, acc: tuple, cx: float, cy: float):
     if illus == "large_circle":
         for radius, alpha in [(190, 0.14), (140, 0.18), (90, 0.26), (48, 0.38)]:
             c.saveState()
-            c.setFillColorRGB(*acc, alpha=alpha)
+            c.setFillAlpha(alpha)
+            c.setFillColorRGB(*acc)
             c.circle(cx, cy, radius, fill=1, stroke=0)
             c.restoreState()
             
         c.saveState()
-        c.setFillColorRGB(*acc, alpha=0.52)
+        c.setFillAlpha(0.52)
+        c.setFillColorRGB(*acc)
         c.circle(cx, cy, 26, fill=1, stroke=0)
         c.restoreState()
 
     elif illus == "diamond":
         for size, alpha in [(255, 0.11), (175, 0.17), (105, 0.25), (52, 0.42)]:
             c.saveState()
-            c.setFillColorRGB(*acc, alpha=alpha)
+            c.setFillAlpha(alpha)
+            c.setFillColorRGB(*acc)
             c.translate(cx, cy)
             c.rotate(45)
             c.rect(-size/2, -size/2, size, size, fill=1, stroke=0)
@@ -1501,14 +1666,16 @@ def _draw_illustration(c, illus: str, acc: tuple, cx: float, cy: float):
     elif illus == "arch":
         for ow, oh, alpha in [(170, 230, 0.18), (220, 290, 0.10)]:
             c.saveState()
-            c.setFillColorRGB(*acc, alpha=alpha)
+            c.setFillAlpha(alpha)
+            c.setFillColorRGB(*acc)
             c.roundRect(cx-ow/2, cy-oh/2, ow, oh, ow/2, fill=1, stroke=0)
             c.restoreState()
 
     elif illus == "triangle":
         for size, alpha in [(300, 0.09), (210, 0.15), (130, 0.23), (68, 0.38)]:
             c.saveState()
-            c.setFillColorRGB(*acc, alpha=alpha)
+            c.setFillAlpha(alpha)
+            c.setFillColorRGB(*acc)
             
             path = c.beginPath()
             path.moveTo(cx, cy+size*0.6)
@@ -1523,26 +1690,30 @@ def _draw_illustration(c, illus: str, acc: tuple, cx: float, cy: float):
         for angle in range(0, 360, 14):
             r = math.radians(angle)
             c.saveState()
-            c.setStrokeColorRGB(*acc, alpha=0.16)
+            c.setStrokeAlpha(0.16)
+            c.setStrokeColorRGB(*acc)
             c.setLineWidth(3.0)
             c.line(cx+math.cos(r)*34, cy+math.sin(r)*34,
                    cx+math.cos(r)*205, cy+math.sin(r)*205)
             c.restoreState()
             
         c.saveState()
-        c.setFillColorRGB(*acc, alpha=0.38)
+        c.setFillAlpha(0.38)
+        c.setFillColorRGB(*acc)
         c.circle(cx, cy, 36, fill=1, stroke=0)
         c.restoreState()
 
     elif illus == "cross_lines":
         c.saveState()
-        c.setFillColorRGB(*acc, alpha=0.16)
+        c.setFillAlpha(0.16)
+        c.setFillColorRGB(*acc)
         c.rect(cx-9, cy-195, 18, 390, fill=1, stroke=0)
         c.rect(cx-195, cy-9, 390, 18, fill=1, stroke=0)
         c.restoreState()
         
         c.saveState()
-        c.setFillColorRGB(*acc, alpha=0.32)
+        c.setFillAlpha(0.32)
+        c.setFillColorRGB(*acc)
         c.circle(cx, cy, 28, fill=1, stroke=0)
         c.restoreState()
 
@@ -1552,7 +1723,8 @@ def _draw_illustration(c, illus: str, acc: tuple, cx: float, cy: float):
                     cy + scale * math.sin(math.radians(60*i-30))) for i in range(6)]
                     
             c.saveState()
-            c.setFillColorRGB(*acc, alpha=alpha)
+            c.setFillAlpha(alpha)
+            c.setFillColorRGB(*acc)
             
             path = c.beginPath()
             path.moveTo(*pts[0])
@@ -1577,13 +1749,15 @@ def _draw_accent_elements(c, elements: list, acc: tuple, acc2: tuple,
             stars = [(rng.uniform(W*0.4, W*0.95), rng.uniform(H*0.4, H*0.95)) for _ in range(12)]
             for sx, sy in stars:
                 c.saveState()
-                c.setFillColorRGB(*acc2, alpha=0.30)
+                c.setFillAlpha(0.30)
+                c.setFillColorRGB(*acc2)
                 c.circle(sx, sy, rng.uniform(1.5, 3.5), fill=1, stroke=0)
                 c.restoreState()
                 
             for i in range(len(stars)-1):
                 c.saveState()
-                c.setStrokeColorRGB(*acc, alpha=0.12)
+                c.setStrokeAlpha(0.12)
+                c.setStrokeColorRGB(*acc)
                 c.setLineWidth(0.6)
                 c.line(stars[i][0], stars[i][1], stars[i+1][0], stars[i+1][1])
                 c.restoreState()
@@ -1592,7 +1766,8 @@ def _draw_accent_elements(c, elements: list, acc: tuple, acc2: tuple,
             for _ in range(8):
                 x0, y0 = rng.uniform(0, W), rng.uniform(0, H)
                 c.saveState()
-                c.setStrokeColorRGB(*acc, alpha=0.14)
+                c.setStrokeAlpha(0.14)
+                c.setStrokeColorRGB(*acc)
                 c.setLineWidth(1.0)
                 
                 path = c.beginPath()
@@ -1609,7 +1784,8 @@ def _draw_accent_elements(c, elements: list, acc: tuple, acc2: tuple,
         elif "watercolour" in el or "watercolor" in el or "wash" in el:
             for _ in range(6):
                 c.saveState()
-                c.setFillColorRGB(*acc, alpha=rng.uniform(0.04, 0.10))
+                c.setFillAlpha(rng.uniform(0.04, 0.10))
+                c.setFillColorRGB(*acc)
                 rx = rng.uniform(60, 160)
                 ry = rng.uniform(40, 120)
                 bx = rng.uniform(0, W)
@@ -1620,7 +1796,8 @@ def _draw_accent_elements(c, elements: list, acc: tuple, acc2: tuple,
         elif "ink" in el or "splatter" in el:
             for _ in range(30):
                 c.saveState()
-                c.setFillColorRGB(*acc, alpha=rng.uniform(0.06, 0.18))
+                c.setFillAlpha(rng.uniform(0.06, 0.18))
+                c.setFillColorRGB(*acc)
                 r = rng.uniform(1.5, 8)
                 c.circle(rng.uniform(0,W), rng.uniform(0,H), r, fill=1, stroke=0)
                 c.restoreState()
@@ -1629,7 +1806,8 @@ def _draw_accent_elements(c, elements: list, acc: tuple, acc2: tuple,
             for i in range(3):
                 ly = H * (0.30 + i * 0.15)
                 c.saveState()
-                c.setStrokeColorRGB(*acc2, alpha=0.22)
+                c.setStrokeAlpha(0.22)
+                c.setStrokeColorRGB(*acc2)
                 c.setLineWidth(0.8)
                 c.line(20*6, ly, W - 20*6, ly)
                 c.restoreState()
@@ -1638,7 +1816,8 @@ def _draw_accent_elements(c, elements: list, acc: tuple, acc2: tuple,
             for gx in range(0, int(W), 18):
                 for gy in range(0, int(H), 18):
                     c.saveState()
-                    c.setFillColorRGB(*acc, alpha=0.055)
+                    c.setFillAlpha(0.055)
+                    c.setFillColorRGB(*acc)
                     c.circle(gx, gy, 0.9, fill=1, stroke=0)
                     c.restoreState()
 
@@ -1707,7 +1886,8 @@ def replace_first_page_of_pdf(cover_pdf: str, original_pdf: str, output_pdf: str
 # DOCX cover renderer + prepend
 # ─────────────────────────────────────────────────────────────────────────────
 
-def prepend_cover_to_docx(concept: dict, original_docx: str, output_docx: str) -> str:
+def prepend_cover_to_docx(concept: dict, original_docx: str, output_docx: str,
+                          cover_image_bytes: bytes | None = None) -> str:
     try:
         from docx import Document                           # pyrefly: ignore [missing-import]
         from docx.shared import Pt, RGBColor, Cm           # pyrefly: ignore [missing-import]
@@ -1724,14 +1904,120 @@ def prepend_cover_to_docx(concept: dict, original_docx: str, output_docx: str) -
                 h = "".join(c*2 for c in h)
             return RGBColor(int(h[0:2],16), int(h[2:4],16), int(h[4:6],16))
 
+        from docx.shared import Inches, Emu              # pyrefly: ignore [missing-import]
+        from docx.oxml.ns import nsmap                      # pyrefly: ignore [missing-import]
+        from lxml import etree                              # pyrefly: ignore [missing-import]
+
+        # ── Rasterise SVG cover image to JPEG if needed ──────────────────────
+        # DOCX cannot embed SVG directly; convert to JPEG via Pillow+cairosvg
+        # or fall back to a gradient JPEG generated from the palette.
+        def _cover_img_bytes_to_jpeg(raw: bytes) -> bytes | None:
+            """Convert any cover bytes (JPEG, PNG, or SVG) to JPEG for DOCX embedding."""
+            try:
+                if raw[:5] in (b"<?xml", b"<svg ") or b"<svg" in raw[:100]:
+                    # SVG -> PNG via cairosvg, then JPEG via Pillow
+                    try:
+                        import cairosvg                     # pyrefly: ignore [missing-import]
+                        from PIL import Image               # pyrefly: ignore [missing-import]
+                        png_data = cairosvg.svg2png(bytestring=raw, output_width=595, output_height=842)
+                        img = Image.open(io.BytesIO(png_data)).convert("RGB")
+                    except ImportError:
+                        logger.warning("  cairosvg/PIL not available; SVG->JPEG conversion skipped.")
+                        return None
+                else:
+                    from PIL import Image                   # pyrefly: ignore [missing-import]
+                    img = Image.open(io.BytesIO(raw)).convert("RGB")
+                # Resize to A4 at 150 DPI: 595 x 842 pt = ~1240 x 1754 px
+                img = img.resize((1240, 1754), Image.LANCZOS)
+                buf = io.BytesIO()
+                img.save(buf, format="JPEG", quality=88)
+                return buf.getvalue()
+            except Exception as ex:
+                logger.warning(f"  Cover image conversion failed: {ex}")
+                return None
+
+        def _make_gradient_jpeg(palette: dict) -> bytes:
+            """Generate a palette-based gradient JPEG when no image is available."""
+            try:
+                from PIL import Image, ImageDraw            # pyrefly: ignore [missing-import]
+                def _hx(h):
+                    h = h.lstrip("#")
+                    if len(h)==3: h="".join(c*2 for c in h)
+                    return (int(h[0:2],16), int(h[2:4],16), int(h[4:6],16))
+                w, h = 1240, 1754
+                bg1 = _hx(palette.get("bg_primary",   "#0f172a"))
+                bg2 = _hx(palette.get("bg_secondary", "#1e3a5f"))
+                img = Image.new("RGB", (w, h))
+                draw = ImageDraw.Draw(img)
+                for yi in range(h):
+                    t = yi / h
+                    r = int(bg1[0]*(1-t) + bg2[0]*t)
+                    g = int(bg1[1]*(1-t) + bg2[1]*t)
+                    b = int(bg1[2]*(1-t) + bg2[2]*t)
+                    draw.line([(0,yi),(w,yi)], fill=(r,g,b))
+                buf = io.BytesIO()
+                img.save(buf, format="JPEG", quality=85)
+                return buf.getvalue()
+            except Exception:
+                return b""  # absolute last resort: empty
+
+        # Convert/prepare the cover image for embedding
+        jpeg_cover: bytes | None = None
+        if cover_image_bytes:
+            jpeg_cover = _cover_img_bytes_to_jpeg(cover_image_bytes)
+            if not jpeg_cover:
+                jpeg_cover = _make_gradient_jpeg(palette)
+        else:
+            jpeg_cover = _make_gradient_jpeg(palette)
+
+        # ── Helper: set paragraph page background via XML shading ────────────
+        def _set_para_shading(para, fill_hex: str):
+            """Apply solid background fill to a paragraph (simulates bg colour)."""
+            h = fill_hex.lstrip("#")
+            if len(h)==3: h="".join(c*2 for c in h)
+            pPr = para._p.get_or_add_pPr()
+            shd = OxmlElement("w:shd")
+            shd.set(qn("w:val"),   "clear")
+            shd.set(qn("w:color"), "auto")
+            shd.set(qn("w:fill"),  h.upper())
+            pPr.append(shd)
+
         cover_doc = Document()
         sec = cover_doc.sections[0]
         sec.page_height = Cm(29.7)
         sec.page_width  = Cm(21.0)
-        sec.left_margin = Cm(2.5)
-        sec.right_margin= Cm(2.5)
-        sec.top_margin  = Cm(3.0)
-        sec.bottom_margin= Cm(2.0)
+        sec.left_margin = Cm(0.0)
+        sec.right_margin= Cm(0.0)
+        sec.top_margin  = Cm(0.0)
+        sec.bottom_margin= Cm(0.0)
+
+        # ── Embed cover image as full-page inline picture ─────────────────────
+        if jpeg_cover:
+            try:
+                img_para = cover_doc.add_paragraph()
+                img_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                img_para.paragraph_format.space_before = Pt(0)
+                img_para.paragraph_format.space_after  = Pt(0)
+                run = img_para.add_run()
+                run.add_picture(io.BytesIO(jpeg_cover), width=Cm(21.0), height=Cm(29.7))
+                cover_doc.add_page_break()
+                logger.info("  DOCX: full-bleed cover image embedded successfully.")
+            except Exception as img_err:
+                logger.warning(f"  DOCX image embed failed: {img_err}; falling back to text cover.")
+                # Reset: start a fresh document for text-only fallback
+                cover_doc = Document()
+                sec = cover_doc.sections[0]
+                sec.page_height = Cm(29.7)
+                sec.page_width  = Cm(21.0)
+        else:
+            # No image — set page background colour via document XML
+            pass
+
+        # Restore margins for the text content pages
+        sec.left_margin   = Cm(2.5)
+        sec.right_margin  = Cm(2.5)
+        sec.top_margin    = Cm(3.0)
+        sec.bottom_margin = Cm(2.0)
 
         def add_para(text, size, bold=False, italic=False,
                      color_key="title_color", fallback="#ffffff",
@@ -1889,7 +2175,15 @@ def design_cover(
                 if generated_illustration:
                     logger.info(f"  ✅ Image pipeline resolved successfully ({len(generated_illustration)//1024} KB)")
                 else:
-                    logger.warning("  ⚠️ All visual generators offline — cover fallback engaging gradient arrays.")
+                    # Try SVG template fallback before giving up
+                    svg_bytes = generate_cover_from_svg_template(book_title, concept=concept)
+                    if svg_bytes:
+                        generated_illustration = svg_bytes
+                        logger.info("  🖼️  Using SVG template as cover background.")
+                    else:
+                        logger.warning("  ⚠️ All visual generators offline — cover using gradient background.")
+                        concept["_dalle_failed"] = True
+                        concept["_dalle_note"] = "Image generation unavailable — cover uses gradient background. Check your OpenAI API key has Images access (paid tier required)."
 
             render_cover_pdf(concept, cover_pdf,
                              book_image_bytes=book_image,
@@ -1904,7 +2198,25 @@ def design_cover(
                 os.remove(cover_pdf)
 
         elif ext == ".docx":
-            prepend_cover_to_docx(concept, file_path, out_path)
+            # Generate cover image for DOCX the same way as PDF
+            docx_illustration: bytes | None = None
+            if cover_image_bytes:
+                docx_illustration = cover_image_bytes
+                logger.info("  🖼️  User-supplied cover image will be embedded in DOCX cover.")
+            else:
+                logger.info("  🖼️  Generating cover image for DOCX via 5-Tier cluster…")
+                docx_illustration = generate_cover_image(concept, book_title, book_text)
+                if docx_illustration:
+                    logger.info(f"  ✅ Cover image ready for DOCX ({len(docx_illustration)//1024} KB)")
+                else:
+                    svg_bytes = generate_cover_from_svg_template(book_title, concept=concept)
+                    if svg_bytes:
+                        docx_illustration = svg_bytes
+                        logger.info("  🖼️  Using SVG template as DOCX cover background.")
+                    else:
+                        logger.warning("  ⚠️  No image for DOCX cover — text-only layout.")
+            prepend_cover_to_docx(concept, file_path, out_path,
+                                  cover_image_bytes=docx_illustration)
         else:
             raise ValueError(f"Unsupported file type: {ext}. Upload a .pdf or .docx")
 
