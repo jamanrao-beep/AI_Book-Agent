@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="595" height="842" viewBox="0 0 595 842">
+  <rect width="595" height="842" fill="#fafaf9"/>
+  <rect x="0" y="0" width="595" height="420" fill="#1c1917"/>
+  <rect x="0" y="415" width="595" height="10" fill="#d97706"/>
+  <text x="50" y="200" font-family="Helvetica" font-size="54" font-weight="bold" fill="white" xml:space="preserve">Your Title</text>
+  <text x="50" y="265" font-family="Helvetica" font-size="54" font-weight="bold" fill="white" xml:space="preserve">Here</text>
+  <rect x="50" y="290" width="120" height="3" fill="#d97706"/>
+  <text x="50" y="580" font-family="Helvetica" font-size="16" fill="#44403c" xml:space="preserve">Author Name</text>
+</svg>

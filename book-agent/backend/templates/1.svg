@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="595" height="842" viewBox="0 0 595 842">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#1e3a5f"/>
+    </linearGradient>
+  </defs>
+  <rect width="595" height="842" fill="url(#bg)"/>
+  <rect x="0" y="0" width="8" height="842" fill="#f59e0b"/>
+  <rect x="0" y="680" width="595" height="162" fill="#f59e0b" opacity="0.08"/>
+  <text x="40" y="260" font-family="Helvetica" font-size="52" font-weight="bold" fill="white" xml:space="preserve">Your Title Here</text>
+  <line x1="40" y1="285" x2="555" y2="285" stroke="#f59e0b" stroke-width="2"/>
+  <text x="40" y="800" font-family="Helvetica" font-size="18" fill="#94a3b8" xml:space="preserve">Author Name</text>
+</svg>
