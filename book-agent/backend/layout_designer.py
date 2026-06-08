@@ -48,6 +48,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger("layout_designer")
 
+# ── pypdf: safe top-level import (guards against missing package at startup) ──
+try:
+    from pypdf import PdfReader as _PdfReader, PdfWriter as _PdfWriter  # pyrefly: ignore
+    _PYPDF_AVAILABLE = True
+except ImportError:
+    _PYPDF_AVAILABLE = False
+    logger.warning("⚠️  pypdf not installed — layout PDF merge step will fail. Add 'pypdf' to requirements.txt")
+
 # ── Pyphen: dictionary-based hyphenation (TeX-grade H&J) ─────────────────────
 try:
     import pyphen as _pyphen  # pyrefly: ignore [missing-import]
@@ -1548,8 +1556,9 @@ def _extract_from_pdf(path: str) -> str:
     text = ""
     # Primary: pypdf
     try:
-        from pypdf import PdfReader  # pyrefly: ignore [missing-import]
-        reader = PdfReader(path)
+        if not _PYPDF_AVAILABLE:
+            raise ImportError("pypdf not installed")
+        reader = _PdfReader(path)
         pages = []
         for page in reader.pages:
             t = page.extract_text()
@@ -2546,7 +2555,8 @@ def render_layout_pdf(
         # reference publisher layout exactly. They are written to a temp PDF,
         # then merged with the main body PDF at the end.
         import tempfile as _tempfile
-        from pypdf import PdfReader as _PdfReader, PdfWriter as _PdfWriter  # pyrefly: ignore [missing-import]
+        #pyrefly: ignore [missing-import]
+        from pypdf import PdfReader as _PdfReader, PdfWriter as _PdfWriter  # use module-level if available
         from reportlab.pdfgen import canvas as _rl_canvas  # pyrefly: ignore [missing-import]
 
         with _tempfile.NamedTemporaryFile(suffix="_front.pdf", delete=False) as _tmp_f:
