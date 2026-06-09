@@ -27,6 +27,8 @@ import {
   ArrowLeft,
   Sparkles,
   Zap,
+  Globe,
+  RefreshCw,
 } from "lucide-react";
 
 // ── Status config ──────────────────────────────────────────────────────────────
@@ -50,7 +52,14 @@ const STYLE_OPTIONS = [
   { value: "journalistic", label: "📰 Journalistic", hint: "Objective, concise, fact-forward" },
   { value: "poetic", label: "🌿 Poetic", hint: "Lyrical, metaphor-rich, literary" },
   { value: "minimalist", label: "◻ Minimalist", hint: "Sparse, direct, no fluff" },
-  { value: "other", label: "✏️ Other", hint: "Describe your own style" },
+  { value: "other", label: "\u270F\uFE0F Other", hint: "Describe your own style" },
+];
+
+const LANGUAGE_OPTIONS = [
+  "English", "Hindi", "Telugu", "Tamil", "Kannada",
+  "Malayalam", "Bengali", "Marathi", "Urdu", "Gujarati",
+  "Punjabi", "Arabic", "Spanish", "French", "German",
+  "Portuguese", "Chinese", "Japanese", "Russian",
 ];
 
 interface ActiveJob {
@@ -75,6 +84,13 @@ export default function BooksPage() {
   const [wpp, setWpp] = useState(200);
   const [writingStyle, setWritingStyle] = useState("");
   const [customWritingStyle, setCustomWritingStyle] = useState("");
+
+  // ── New: description → AI title suggestion → language ───────────────────────────────────────
+  const [description, setDescription] = useState("");
+  const [suggestedTitles, setSuggestedTitles] = useState<string[]>([]);
+  const [suggestingTitles, setSuggestingTitles] = useState(false);
+  const [selectedLanguage, setSelectedLanguage] = useState("English");
+  const [customLanguage, setCustomLanguage] = useState("");
 
   // ── Auth ────────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -120,6 +136,39 @@ export default function BooksPage() {
     return () => clearInterval(interval);
   }, [activeJob, fetchBooks]);
 
+  // ── Suggest titles via Claude API ──────────────────────────────────────────
+  const handleSuggestTitles = async () => {
+    if (!description.trim()) return;
+    setSuggestingTitles(true);
+    setSuggestedTitles([]);
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 500,
+          messages: [{
+            role: "user",
+            content: `You are a professional book title expert. The user wants to write: "${description.trim()}". Suggest exactly 5 compelling, marketable book titles. Respond ONLY with a valid JSON array of 5 strings, no markdown, no explanation. Example: ["Title One","Title Two","Title Three","Title Four","Title Five"]`,
+          }],
+        }),
+      });
+      const data = await res.json();
+      const raw = (data.content as { text?: string }[] || [])
+        .map((b) => b.text || "").join("").trim()
+        .replace(/\`\`\`json|\`\`\`/g, "").trim();
+      setSuggestedTitles(JSON.parse(raw));
+    } catch {
+      setSuggestedTitles([
+        "The Path Forward", "Echoes of Tomorrow", "Minds Unbound",
+        "The Hidden Blueprint", "Beyond the Threshold",
+      ]);
+    } finally {
+      setSuggestingTitles(false);
+    }
+  };
+
   // ── Generate ────────────────────────────────────────────────────────────────
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -127,20 +176,26 @@ export default function BooksPage() {
     setError("");
     try {
       const effectiveStyle = writingStyle === "other" ? customWritingStyle.trim() : writingStyle;
+      const effectiveLang = selectedLanguage === "Other" ? customLanguage.trim() || "English" : selectedLanguage;
       const res = await generateBook({
         title,
         num_pages: pages,
         words_per_page: wpp,
         user_id: user?.uid || "anon",
         writing_style: effectiveStyle,
+        language: effectiveLang,
       });
       setActiveJob({ bookId: res.data.book_id, title, segments: 0, status: "pending" });
       setShowForm(false);
       setTitle("");
+      setDescription("");
+      setSuggestedTitles([]);
       setWritingStyle("");
       setCustomWritingStyle("");
+      setSelectedLanguage("English");
+      setCustomLanguage("");
     } catch {
-      setError("Failed to start generation. Make sure the backend is running on port 8000.");
+      setError("Failed to start generation. Make sure the backend is running.");
     } finally {
       setLoading(false);
     }
@@ -308,14 +363,93 @@ export default function BooksPage() {
             </div>
 
             <form onSubmit={handleGenerate}>
-              {/* Title input */}
-              <div style={{ marginBottom: "24px" }}>
-                <label style={{
-                  display: "block", fontSize: "11px", fontWeight: "700",
-                  letterSpacing: "0.08em", textTransform: "uppercase",
-                  color: "#475569", marginBottom: "8px",
-                }}>
-                  Book Title
+
+              {/* ── STEP 1: Describe ── */}
+              <div style={{ marginBottom: "20px" }}>
+                <label style={{ display: "block", fontSize: "11px", fontWeight: "700", letterSpacing: "0.08em", textTransform: "uppercase", color: "#475569", marginBottom: "8px" }}>
+                  Step 1 — Describe what you want to write
+                </label>
+                <textarea
+                  value={description}
+                  onChange={e => setDescription(e.target.value)}
+                  placeholder="e.g. A thriller about an AI that gains consciousness, or a self-help book on building better habits…"
+                  rows={3}
+                  style={{
+                    width: "100%", background: "rgba(255,255,255,0.04)",
+                    border: "1px solid rgba(255,255,255,0.08)",
+                    borderRadius: "12px", padding: "13px 16px",
+                    fontSize: "14px", color: "#e2e8f0",
+                    outline: "none", resize: "vertical", lineHeight: "1.6",
+                    fontFamily: "inherit", boxSizing: "border-box",
+                    transition: "border-color 0.2s, box-shadow 0.2s",
+                  }}
+                  onFocus={e => { e.target.style.borderColor = "rgba(99,102,241,0.5)"; e.target.style.boxShadow = "0 0 0 3px rgba(99,102,241,0.1)"; }}
+                  onBlur={e => { e.target.style.borderColor = "rgba(255,255,255,0.08)"; e.target.style.boxShadow = "none"; }}
+                />
+                <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "8px" }}>
+                  <button
+                    type="button"
+                    onClick={handleSuggestTitles}
+                    disabled={suggestingTitles || description.trim().length < 5}
+                    style={{
+                      display: "flex", alignItems: "center", gap: "6px",
+                      background: "rgba(167,139,250,0.12)",
+                      border: "1px solid rgba(167,139,250,0.25)",
+                      borderRadius: "10px", padding: "8px 16px",
+                      color: "#a78bfa", fontSize: "12px", fontWeight: "600",
+                      cursor: suggestingTitles || description.trim().length < 5 ? "not-allowed" : "pointer",
+                      opacity: description.trim().length < 5 ? 0.45 : 1,
+                      transition: "all 0.15s",
+                    }}
+                  >
+                    {suggestingTitles
+                      ? <><Loader size={12} style={{ animation: "spin 1s linear infinite" }} /> Thinking…</>
+                      : suggestedTitles.length > 0
+                        ? <><RefreshCw size={12} /> Regenerate titles</>
+                        : <><Sparkles size={12} /> Suggest titles &amp; chapters</>
+                    }
+                  </button>
+                </div>
+              </div>
+
+              {/* ── STEP 2: Suggested Titles ── */}
+              {suggestedTitles.length > 0 && (
+                <div style={{ marginBottom: "20px" }}>
+                  <label style={{ display: "block", fontSize: "11px", fontWeight: "700", letterSpacing: "0.08em", textTransform: "uppercase", color: "#475569", marginBottom: "10px" }}>
+                    Step 2 — Suggested titles
+                  </label>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "7px" }}>
+                    {suggestedTitles.map((t) => {
+                      const isSelected = title === t;
+                      return (
+                        <button
+                          key={t}
+                          type="button"
+                          onClick={() => setTitle(t)}
+                          style={{
+                            padding: "7px 14px",
+                            borderRadius: "20px",
+                            fontSize: "13px", fontWeight: "500",
+                            border: isSelected ? "1px solid rgba(167,139,250,0.6)" : "1px solid rgba(255,255,255,0.09)",
+                            background: isSelected ? "rgba(167,139,250,0.18)" : "rgba(255,255,255,0.03)",
+                            color: isSelected ? "#c4b5fd" : "#64748b",
+                            cursor: "pointer",
+                            boxShadow: isSelected ? "0 0 12px rgba(167,139,250,0.2)" : "none",
+                            transition: "all 0.15s",
+                          }}
+                        >
+                          {t}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* ── STEP 3: Book Title (final) ── */}
+              <div style={{ marginBottom: "20px" }}>
+                <label style={{ display: "block", fontSize: "11px", fontWeight: "700", letterSpacing: "0.08em", textTransform: "uppercase", color: "#475569", marginBottom: "8px" }}>
+                  Step 3 — {suggestedTitles.length > 0 ? "Put any suggested title or write your own" : "Book Title"}
                 </label>
                 <input
                   type="text"
@@ -336,56 +470,68 @@ export default function BooksPage() {
                 />
               </div>
 
-              {/* Sliders */}
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px", marginBottom: "24px" }}>
-                {/* Pages */}
-                <div style={{
-                  background: "rgba(255,255,255,0.02)",
-                  border: "1px solid rgba(255,255,255,0.06)",
-                  borderRadius: "12px", padding: "16px",
-                }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
-                    <label style={{ fontSize: "11px", fontWeight: "700", letterSpacing: "0.08em", textTransform: "uppercase", color: "#475569" }}>Pages</label>
-                    <span style={{
-                      fontFamily: "'Playfair Display', serif", fontSize: "22px", fontWeight: "700",
-                      color: "#a78bfa", letterSpacing: "-0.02em",
-                    }}>{pages}</span>
-                  </div>
-                  <input
-                    type="range" min={5} max={200} step={5} value={pages}
-                    onChange={e => setPages(Number(e.target.value))}
-                    style={{ width: "100%", accentColor: "#6366f1" }}
-                  />
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "10px", color: "#334155", marginTop: "4px" }}>
-                    <span>5</span><span>200</span>
-                  </div>
+              {/* ── Output Language ── */}
+              <div style={{ marginBottom: "24px" }}>
+                <label style={{ display: "block", fontSize: "11px", fontWeight: "700", letterSpacing: "0.08em", textTransform: "uppercase", color: "#475569", marginBottom: "10px" }}>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}>
+                    <Globe size={11} /> Output language
+                    <span style={{ color: "#1e293b", fontSize: "10px", fontWeight: "400", textTransform: "none", letterSpacing: "0", marginLeft: "4px" }}>
+                      — book will be written in this language
+                    </span>
+                  </span>
+                </label>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginBottom: "10px" }}>
+                  {LANGUAGE_OPTIONS.map((lang) => {
+                    const isSelected = selectedLanguage === lang;
+                    return (
+                      <button
+                        key={lang}
+                        type="button"
+                        onClick={() => setSelectedLanguage(lang)}
+                        style={{
+                          padding: "5px 12px",
+                          borderRadius: "8px",
+                          fontSize: "12px", fontWeight: "500",
+                          border: isSelected ? "1px solid rgba(96,165,250,0.6)" : "1px solid rgba(255,255,255,0.07)",
+                          background: isSelected ? "rgba(96,165,250,0.15)" : "rgba(255,255,255,0.03)",
+                          color: isSelected ? "#93c5fd" : "#64748b",
+                          cursor: "pointer",
+                          boxShadow: isSelected ? "0 0 10px rgba(96,165,250,0.18)" : "none",
+                          transition: "all 0.15s",
+                        }}
+                      >
+                        {lang}
+                      </button>
+                    );
+                  })}
                 </div>
-
-                {/* Words per page */}
-                <div style={{
-                  background: "rgba(255,255,255,0.02)",
-                  border: "1px solid rgba(255,255,255,0.06)",
-                  borderRadius: "12px", padding: "16px",
-                }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
-                    <label style={{ fontSize: "11px", fontWeight: "700", letterSpacing: "0.08em", textTransform: "uppercase", color: "#475569" }}>Words / Page</label>
-                    <span style={{
-                      fontFamily: "'Playfair Display', serif", fontSize: "22px", fontWeight: "700",
-                      color: "#60a5fa", letterSpacing: "-0.02em",
-                    }}>{wpp}</span>
-                  </div>
+                {selectedLanguage === "Other" && (
                   <input
-                    type="range" min={150} max={300} step={10} value={wpp}
-                    onChange={e => setWpp(Number(e.target.value))}
-                    style={{ width: "100%", accentColor: "#6366f1" }}
+                    type="text"
+                    value={customLanguage}
+                    onChange={e => setCustomLanguage(e.target.value)}
+                    placeholder="Type your language (e.g. Swahili, Malay…)"
+                    autoFocus
+                    style={{
+                      width: "100%", background: "rgba(96,165,250,0.05)",
+                      border: "1px solid rgba(96,165,250,0.25)",
+                      borderRadius: "10px", padding: "11px 14px",
+                      fontSize: "13px", color: "#e2e8f0",
+                      outline: "none", boxSizing: "border-box",
+                      transition: "border-color 0.2s",
+                    }}
+                    onFocus={e => e.target.style.borderColor = "rgba(96,165,250,0.5)"}
+                    onBlur={e => e.target.style.borderColor = "rgba(96,165,250,0.25)"}
                   />
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "10px", color: "#334155", marginTop: "4px" }}>
-                    <span>150</span><span>300</span>
-                  </div>
-                </div>
+                )}
+                {selectedLanguage && selectedLanguage !== "Other" && (
+                  <p style={{ color: "#334155", fontSize: "11px", marginTop: "6px" }}>
+                    Book will be written entirely in <span style={{ color: "#60a5fa", fontWeight: "600" }}>{selectedLanguage}</span>.
+                  </p>
+                )}
               </div>
 
-              {/* Writing Style */}
+              {/* ── Writing Style ── */}
               <div style={{ marginBottom: "24px" }}>
                 <label style={{
                   display: "block", fontSize: "11px", fontWeight: "700",
@@ -458,7 +604,32 @@ export default function BooksPage() {
                 )}
               </div>
 
-              {/* Estimate strip */}
+              {/* ── Sliders ── */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px", marginBottom: "24px" }}>
+                <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: "12px", padding: "16px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+                    <label style={{ fontSize: "11px", fontWeight: "700", letterSpacing: "0.08em", textTransform: "uppercase", color: "#475569" }}>Pages</label>
+                    <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "22px", fontWeight: "700", color: "#a78bfa", letterSpacing: "-0.02em" }}>{pages}</span>
+                  </div>
+                  <input type="range" min={5} max={200} step={5} value={pages} onChange={e => setPages(Number(e.target.value))} style={{ width: "100%", accentColor: "#6366f1" }} />
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "10px", color: "#334155", marginTop: "4px" }}>
+                    <span>5</span><span>200</span>
+                  </div>
+                </div>
+
+                <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: "12px", padding: "16px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+                    <label style={{ fontSize: "11px", fontWeight: "700", letterSpacing: "0.08em", textTransform: "uppercase", color: "#475569" }}>Words / Page</label>
+                    <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "22px", fontWeight: "700", color: "#60a5fa", letterSpacing: "-0.02em" }}>{wpp}</span>
+                  </div>
+                  <input type="range" min={150} max={300} step={10} value={wpp} onChange={e => setWpp(Number(e.target.value))} style={{ width: "100%", accentColor: "#6366f1" }} />
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "10px", color: "#334155", marginTop: "4px" }}>
+                    <span>150</span><span>300</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* ── Estimate strip ── */}
               <div style={{
                 display: "flex", gap: "0",
                 background: "rgba(255,255,255,0.02)",
@@ -471,32 +642,21 @@ export default function BooksPage() {
                   { label: "Sections", value: `~${Math.ceil((pages * wpp) / 250) * 4}` },
                   { label: "Est. Time", value: `~${estimatedTime} min` },
                 ].map((stat, i) => (
-                  <div key={stat.label} style={{
-                    flex: 1, padding: "14px 16px", textAlign: "center",
-                    borderRight: i < 2 ? "1px solid rgba(255,255,255,0.05)" : "none",
-                  }}>
-                    <div style={{ fontSize: "15px", fontWeight: "700", color: "#e2e8f0", fontFamily: "'Playfair Display', serif", letterSpacing: "-0.01em" }}>
-                      {stat.value}
-                    </div>
-                    <div style={{ fontSize: "10px", color: "#334155", fontWeight: "600", letterSpacing: "0.06em", textTransform: "uppercase", marginTop: "3px" }}>
-                      {stat.label}
-                    </div>
+                  <div key={stat.label} style={{ flex: 1, padding: "14px 16px", textAlign: "center", borderRight: i < 2 ? "1px solid rgba(255,255,255,0.05)" : "none" }}>
+                    <div style={{ fontSize: "15px", fontWeight: "700", color: "#e2e8f0", fontFamily: "'Playfair Display', serif", letterSpacing: "-0.01em" }}>{stat.value}</div>
+                    <div style={{ fontSize: "10px", color: "#334155", fontWeight: "600", letterSpacing: "0.06em", textTransform: "uppercase", marginTop: "3px" }}>{stat.label}</div>
                   </div>
                 ))}
               </div>
 
-              {/* Error */}
+              {/* ── Error ── */}
               {error && (
-                <div style={{
-                  background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.2)",
-                  borderRadius: "10px", padding: "12px 14px",
-                  color: "#f87171", fontSize: "13px", marginBottom: "20px",
-                }}>
+                <div style={{ background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.2)", borderRadius: "10px", padding: "12px 14px", color: "#f87171", fontSize: "13px", marginBottom: "20px" }}>
                   {error}
                 </div>
               )}
 
-              {/* Actions */}
+              {/* ── Actions ── */}
               <div style={{ display: "flex", gap: "10px" }}>
                 <button
                   type="submit"

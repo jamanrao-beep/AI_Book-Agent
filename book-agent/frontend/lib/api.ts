@@ -17,6 +17,7 @@ export interface BookRequest {
   words_per_page: number;
   user_id?: string;
   writing_style?: string;
+  language?: string;
 }
 
 export interface BookStatus {
