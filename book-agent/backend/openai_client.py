@@ -74,6 +74,7 @@ def _language_instruction(title: str, writing_style: str = "") -> str:
 # ── Core call helper ──────────────────────────────────────────────────────────
 
 def _call(prompt: str, max_tokens: int = 2048, retries: int = 3) -> str:
+    """Maintained for legacy compatibility with other pipeline modules."""
     for attempt in range(retries):
         try:
             response = client.chat.completions.create(
@@ -111,35 +112,56 @@ def generate_outline(title: str, num_chapters: int, writing_style: str = "") -> 
 
 
 def _generate_outline_batch(title: str, start: int, count: int, writing_style: str = "") -> dict:
+    """
+    Generates a deeply structured outline batch.
+    Forces strict JSON formatting so the Swarm Agent can parse it flawlessly.
+    """
     end = start + count - 1
-    style_note = (
-        f"\nThe book should be written in a '{writing_style}' style — "
-        "reflect this in chapter titles and subheadings."
-        if writing_style else ""
-    )
     lang_rules = _language_instruction(title, writing_style)
+    
     prompt = f"""{lang_rules}
-You are a professional book author and editor.
-Create a detailed outline for a book titled: "{title}"{style_note}
-Generate exactly {count} chapters numbered {start} through {end}.
-Each chapter must have exactly 4 sub-headings.
-Return ONLY valid JSON, no markdown, no explanation, no code fences:
+You are an elite publishing architect outlining a book.
+Book Title: "{title}"
+Target Chapters for this batch: {count} (Chapters {start} through {end})
+Style/Genre: {writing_style}
+
+Create a highly detailed, compelling outline. Each chapter must have EXACTLY 3 to 5 logical subheadings.
+The pacing must make sense for a full-length book.
+
+You MUST respond strictly with valid JSON in this exact format, with no markdown fences:
 {{
   "chapters": [
     {{
       "chapter_number": {start},
-      "title": "Chapter Title Here",
-      "subheadings": ["Sub One", "Sub Two", "Sub Three", "Sub Four"]
+      "title": "Chapter {start}: Title Here",
+      "subheadings": [
+        "Setting the Scene",
+        "The Inciting Incident",
+        "The Immediate Fallout"
+      ]
     }}
   ]
-}}"""
-    raw = _call(prompt, max_tokens=4096)
-    raw = raw.replace("```json", "").replace("```", "").strip()
-    s = raw.find("{")
-    e = raw.rfind("}") + 1
-    if s == -1 or e == 0:
-        raise Exception(f"No JSON found in outline batch response (chapters {start}-{end})")
-    return json.loads(raw[s:e])
+}}
+"""
+    for attempt in range(3):
+        try:
+            response = client.chat.completions.create(
+                model=MODEL,
+                messages=[
+                    {"role": "system", "content": "You are a master book outliner. Output only raw JSON."},
+                    {"role": "user", "content": prompt}
+                ],
+                response_format={"type": "json_object"},
+                temperature=0.7,
+                max_tokens=4000,
+            )
+            raw = response.choices[0].message.content.strip()
+            return json.loads(raw)
+        except Exception as e:
+            print(f"  ⚠️  Outline batch generation attempt {attempt+1} failed: {e}")
+            time.sleep(3 * (attempt + 1))
+            
+    raise Exception(f"Failed to generate structured JSON outline for chapters {start}-{end}")
 
 
 # ── Section generation ────────────────────────────────────────────────────────
@@ -152,26 +174,58 @@ def generate_section(
     word_count      : int = 400,
     writing_style   : str = "",
 ) -> str:
+    """
+    Drafts the actual book content using Premium Bestseller Prose constraints.
+    Eliminates passive voice, repetitive AI jargon, and forces 'Show, Don't Tell'.
+    """
     context = (
-        f"The previous section ended with: {previous_summary}"
+        f"The previous section established the following context/memory:\n{previous_summary}"
         if previous_summary else "This is the very first section of the book."
     )
+    
     style_instruction = (
-        f"\nWriting style: '{writing_style}' — strictly maintain this tone and style throughout."
+        f"\nTARGET WRITING STYLE: '{writing_style}' — strictly maintain this tone."
         if writing_style else ""
     )
+    
     lang_rules = _language_instruction(book_title, writing_style)
+    
     prompt = f"""{lang_rules}
-You are a professional author writing a book titled: "{book_title}"{style_instruction}
-Chapter: {chapter_title}
-Section: {subheading}
-Context: {context}
-Write EXACTLY {word_count} words for this section. Count carefully — do not stop early.
-- Do NOT repeat the section title or chapter title
-- Write flowing, engaging prose paragraphs
-- Maintain consistent tone matching the writing style
-- No bullet points, pure prose only
-- Fill the full {word_count} word requirement
-Write only the content:"""
-    max_tok = min(4096, int(word_count * 1.6) + 200)
-    return _call(prompt, max_tokens=max_tok)
+You are a bestselling author writing a commercial manuscript.
+Book: "{book_title}"{style_instruction}
+Current Chapter: {chapter_title}
+Current Section: {subheading}
+
+CONTINUITY CONTEXT:
+{context}
+
+CRITICAL PROSE DIRECTIVES:
+1. Write EXACTLY {word_count} words for this section. Do not stop early.
+2. SHOW, DON'T TELL. Use strong sensory details, active voice, and dynamic verbs.
+3. Avoid generic AI phrasing (e.g., "It is important to note," "In conclusion," "A testament to").
+4. Do NOT repeat the section title or chapter title at the top of the text.
+5. Write in flowing, engaging prose paragraphs. No bullet points.
+6. Seamlessly continue the narrative or argument from the CONTINUITY CONTEXT.
+
+Write only the prose content:"""
+
+    max_toks = min(4096, int(word_count * 1.5) + 200)
+    
+    for attempt in range(3):
+        try:
+            response = client.chat.completions.create(
+                model=MODEL,
+                messages=[
+                    {"role": "system", "content": "You are a master author generating premium, publish-ready prose."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.7,
+                max_tokens=max_toks,
+            )
+            text = response.choices[0].message.content.strip()
+            return unicodedata.normalize("NFC", text)
+        except Exception as e:
+            print(f"  ⚠️  Section generation attempt {attempt+1} failed: {e}")
+            time.sleep(3 * (attempt + 1))
+            
+    raise Exception("Failed to generate section after all retries")

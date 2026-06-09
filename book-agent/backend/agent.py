@@ -3,6 +3,7 @@ import time
 import sys
 import os
 import traceback
+from datetime import datetime
 from typing import Dict, Any
 
 sys.path.insert(0, os.path.dirname(__file__))
@@ -279,7 +280,17 @@ def run_book_agent(book_id: int):
                     is_complete    = True
                 )
                 db.add(segment)
+                # E8: heartbeat — lets monitoring know the job is alive
+                book.last_heartbeat = datetime.utcnow()
                 db.commit()
+
+                # E8: check for cancellation signal after every section
+                db.refresh(book)
+                if book.is_cancelled:
+                    print(f"    🛑 Cancellation requested — stopping after section {done_sections}.")
+                    book.status = "cancelled"
+                    db.commit()
+                    return
 
                 # Update the rolling memory for the next section
                 story_bible = update_story_bible(story_bible, final_content, book.title)
