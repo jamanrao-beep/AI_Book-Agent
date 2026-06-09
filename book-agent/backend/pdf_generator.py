@@ -102,8 +102,11 @@ NOTO_FONTS = {
     # Cyrillic is included in the base NotoSans above.
 }
 
-FONT_CACHE = pathlib.Path.home() / ".cache" / "noto_fonts"
-FONT_CACHE.mkdir(parents=True, exist_ok=True)
+_LOCAL_FONTS_DIR = pathlib.Path(__file__).parent / "fonts"
+_LOCAL_FONTS_DIR.mkdir(parents=True, exist_ok=True)
+# Use local committed fonts/ dir as primary cache (avoids GitHub downloads on Railway).
+# Falls back to home cache only if local dir is somehow unavailable.
+FONT_CACHE = _LOCAL_FONTS_DIR
 
 _registered: set[str] = set()
 

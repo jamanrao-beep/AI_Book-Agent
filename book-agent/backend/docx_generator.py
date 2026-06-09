@@ -34,6 +34,7 @@ from docx.oxml import OxmlElement
 import datetime
 import os
 import unicodedata
+from typing import Optional
 
 # ── Script detection ───────────────────────────────────────────────────────────
 
@@ -125,7 +126,7 @@ def _set_para_bidi(paragraph, rtl: bool):
 
 def _add_run(paragraph, text: str, size_pt: float,
              bold: bool = False, italic: bool = False,
-             color: RGBColor | None = None) -> None:
+             color: Optional[RGBColor] = None) -> None:
     font_name = _font_for(text)
     run = paragraph.add_run(text)
     _set_run_font(run, font_name)
