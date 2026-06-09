@@ -157,7 +157,7 @@ export const proofreadDocument = (
     form,
     {
       // No Content-Type header — axios sets multipart/form-data + boundary automatically
-      timeout: 3600000,
+      timeout: 7200000,
       onUploadProgress: onUploadProgress
         ? (e) => {
           if (e.total) {
@@ -179,8 +179,8 @@ export const proofreadDocument = (
       // doesn't stall the entire job. Railway silently closes sockets on large
       // responses; axios reports ERR_NETWORK immediately (not a timeout), so we
       // catch it and retry rather than rejecting the whole promise.
-      const POLL_TIMEOUT_MS = 15_000; // 15 s per individual poll request
-      const MAX_CONSECUTIVE_ERRORS = 5; // give up after 5 back-to-back failures
+      const POLL_TIMEOUT_MS = 180_000; // 60 s per individual poll request
+      const MAX_CONSECUTIVE_ERRORS = 10; // give up after 10 back-to-back failures
       let consecutiveErrors = 0;
 
       const poll = () => {
@@ -321,8 +321,8 @@ export const designLayout = (
   return API.post<LayoutResult>("/design-layout", form, {
     // No Content-Type header — axios sets multipart/form-data with boundary automatically
     // Large Hindi books are split into many small chunks; each chunk can take
-    // ~30–60 s, and a 200-page book may have 20–30 chunks → allow up to 1 hour.
-    timeout: 3600000,
+    // ~30–60 s, and a 200-page book may have 20–30 chunks → allow up to 1snd half hour.
+    timeout: 4800000,
     onUploadProgress: onUploadProgress
       ? (e) => {
         if (e.total) {
