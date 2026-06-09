@@ -49,7 +49,10 @@ export interface ErrorDetail {
 export interface ProofreadResult {
   job_id: string;
   original_filename: string;
-  corrected_text: string;
+  /** Not returned by the status endpoint — fetch via downloadProofreadDoc() instead.
+   *  Omitting corrected_text from the poll response is the fix for Railway's
+   *  response-size limit (Bug A) and gzip mid-stream corruption (Bug C). */
+  corrected_text?: string;
   grammar_fixes: number;
   punctuation_fixes: number;
   style_suggestions: number;
@@ -171,14 +174,23 @@ export const proofreadDocument = (
       // Signal 100% upload so the UI switches to "Analysing…"
       onUploadProgress?.(100);
 
+      // BUG D fix: use a short per-poll timeout so a single dropped connection
+      // doesn't stall the entire job. Railway silently closes sockets on large
+      // responses; axios reports ERR_NETWORK immediately (not a timeout), so we
+      // catch it and retry rather than rejecting the whole promise.
+      const POLL_TIMEOUT_MS = 15_000; // 15 s per individual poll request
+      const MAX_CONSECUTIVE_ERRORS = 5; // give up after 5 back-to-back failures
+      let consecutiveErrors = 0;
+
       const poll = () => {
         API.get<{
           job_id: string;
           stage: string;
           result?: ProofreadResult;
           error?: string;
-        }>(`/proofread/${jobId}/status`)
+        }>(`/proofread/${jobId}/status`, { timeout: POLL_TIMEOUT_MS })
           .then(({ data: status }) => {
+            consecutiveErrors = 0; // reset on success
             if (status.stage === "done" && status.result) {
               resolve({ data: status.result });
             } else if (status.stage === "error") {
@@ -188,7 +200,18 @@ export const proofreadDocument = (
               setTimeout(poll, 3000);
             }
           })
-          .catch(reject);
+          .catch((err) => {
+            consecutiveErrors += 1;
+            if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+              reject(new Error(`Polling failed ${MAX_CONSECUTIVE_ERRORS} times in a row: ${err?.message ?? err}`));
+              return;
+            }
+            // Transient network drop (Railway closed the socket) — retry after
+            // a short back-off rather than killing the whole job.
+            const backoff = Math.min(3000 * consecutiveErrors, 15000);
+            console.warn(`[proofread] Poll attempt failed (${consecutiveErrors}/${MAX_CONSECUTIVE_ERRORS}), retrying in ${backoff}ms:`, err?.message);
+            setTimeout(poll, backoff);
+          });
       };
 
       // First poll after 2 s (small files finish fast)

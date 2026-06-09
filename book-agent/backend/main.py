@@ -211,15 +211,94 @@ async def websocket_status_endpoint(websocket: WebSocket, job_id: str):
 # In-memory job stores (use Redis/DB in production)
 # ─────────────────────────────────────────────────────────────────────────────
 
-_proofread_jobs: dict[str, dict] = {}
-_cover_jobs:     dict[str, dict] = {}
-_scan_jobs: dict[str, dict] = {}
+_cover_jobs:      dict[str, dict] = {}
+_scan_jobs:       dict[str, dict] = {}
 _editor_sessions: dict[str, dict] = {}
-_translate_jobs: dict[str, dict] = {}
-_layout_jobs: dict[str, dict] = {}
+_translate_jobs:  dict[str, dict] = {}
+_layout_jobs:     dict[str, dict] = {}
 
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "output")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Disk-backed proofread job store
+# ─────────────────────────────────────────────────────────────────────────────
+# Railway runs multiple instances behind a load balancer. An in-memory dict
+# is per-process, so a status poll that lands on a different instance than the
+# one running the job gets a 404. Writing job state to a JSON file in the
+# shared OUTPUT_DIR means every instance can read it regardless of which
+# instance handled the upload.
+#
+# Thread safety: writes use an atomic rename (write tmp → rename) so a
+# concurrent reader never sees a half-written file.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_JOBS_DIR = os.path.join(OUTPUT_DIR, "jobs")
+os.makedirs(_JOBS_DIR, exist_ok=True)
+
+_proofread_write_lock = threading.Lock()   # serialise writes from the bg thread
+
+
+def _job_path(job_id: str) -> str:
+    return os.path.join(_JOBS_DIR, f"proof_{job_id}.json")
+
+
+def _write_job(job_id: str, data: dict) -> None:
+    """Atomically write job state to disk."""
+    path = _job_path(job_id)
+    tmp  = path + ".tmp"
+    with _proofread_write_lock:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False)
+        os.replace(tmp, path)   # atomic on POSIX
+
+
+def _read_job(job_id: str) -> dict | None:
+    path = _job_path(job_id)
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return None
+
+
+def _update_job(job_id: str, updates: dict) -> None:
+    """Read-modify-write a job record on disk (thread-safe via the write lock)."""
+    with _proofread_write_lock:
+        path = _job_path(job_id)
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                existing = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            existing = {}
+        existing.update(updates)
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(existing, f, ensure_ascii=False)
+        os.replace(tmp, path)
+
+
+class _DiskJobProxy:
+    """
+    Drop-in replacement for the old _proofread_jobs dict.
+    Proxies __getitem__, __setitem__, and .get() through on-disk JSON files
+    so every Railway instance sees the same job state.
+    """
+    def __getitem__(self, job_id: str) -> dict:
+        job = _read_job(job_id)
+        if job is None:
+            raise KeyError(job_id)
+        return job
+
+    def __setitem__(self, job_id: str, value: dict) -> None:
+        _write_job(job_id, value)
+
+    def get(self, job_id: str, default=None):
+        result = _read_job(job_id)
+        return result if result is not None else default
+
+
+_proofread_jobs = _DiskJobProxy()
 
 MAX_FILE_SIZE = 150 * 1024 * 1024  # 150 MB
 STREAM_CHUNK  = 1 * 1024 * 1024    # 1 MB read chunks
@@ -423,16 +502,16 @@ def _run_proofread_job(job_id: str, tmp_path: str, filename: str, ext: str) -> N
     The tmp upload file is deleted here after extraction.
     """
     try:
-        _proofread_jobs[job_id]["stage"] = "extracting"
+        _update_job(job_id, {"stage": "extracting"})
         sync_broadcast(job_id, {"type": "progress", "job_id": job_id, "stage": "extracting", "progress": 10, "message": "Extracting text..."})
         
         original_text = extract_text(tmp_path, filename)
         if not original_text.strip():
-            _proofread_jobs[job_id].update({"stage": "error", "error": "Document appears to be empty or is an image-based PDF with no text layer."})
+            _update_job(job_id, {"stage": "error", "error": "Document appears to be empty or is an image-based PDF with no text layer."})
             sync_broadcast(job_id, {"type": "error", "job_id": job_id, "message": "Document appears to be empty."})
             return
 
-        _proofread_jobs[job_id]["stage"] = "proofreading"
+        _update_job(job_id, {"stage": "proofreading"})
         sync_broadcast(job_id, {"type": "progress", "job_id": job_id, "stage": "proofreading", "progress": 40, "message": "Proofreading initiated..."})
         
         result = proofread_text(original_text)
@@ -449,6 +528,24 @@ def _run_proofread_job(job_id: str, tmp_path: str, filename: str, ext: str) -> N
         else:
             save_corrected_txt(result["corrected_text"], corrected_path)
 
+        # BUG E fix: never store corrected_text in memory — only store the file
+        # path and lightweight metadata. This prevents the status endpoint from
+        # serialising a 100KB+ payload, which Railway's proxy kills mid-stream.
+        metadata_result = {
+            "job_id": job_id,
+            "original_filename": filename,
+            "grammar_fixes": result["grammar_fixes"],
+            "punctuation_fixes": result["punctuation_fixes"],
+            "style_suggestions": result["style_suggestions"],
+            "corrections_summary": result["corrections_summary"],
+            "grammar_details": result.get("grammar_details", []),
+            "punctuation_details": result.get("punctuation_details", []),
+            "style_details": result.get("style_details", []),
+            "skipped_chunks": result.get("skipped_chunks", []),
+            "download_url": f"/proofread/{job_id}/download",
+            # corrected_text intentionally omitted — fetch via /download endpoint
+        }
+
         payload = {
             "stage": "done",
             "original_filename": filename,
@@ -457,28 +554,15 @@ def _run_proofread_job(job_id: str, tmp_path: str, filename: str, ext: str) -> N
             "corrected_path": corrected_path,
             "ext": out_ext,
             "original_ext": ext,
-            "result": {
-                "job_id": job_id,
-                "original_filename": filename,
-                "corrected_text": result["corrected_text"],
-                "grammar_fixes": result["grammar_fixes"],
-                "punctuation_fixes": result["punctuation_fixes"],
-                "style_suggestions": result["style_suggestions"],
-                "corrections_summary": result["corrections_summary"],
-                "grammar_details": result.get("grammar_details", []),
-                "punctuation_details": result.get("punctuation_details", []),
-                "style_details": result.get("style_details", []),
-                "skipped_chunks": result.get("skipped_chunks", []),
-                "download_url": f"/proofread/{job_id}/download",
-            },
+            "result": metadata_result,
         }
         
-        _proofread_jobs[job_id].update(payload)
-        sync_broadcast(job_id, {"type": "complete", "job_id": job_id, "result": payload["result"]})
+        _update_job(job_id, payload)
+        sync_broadcast(job_id, {"type": "complete", "job_id": job_id, "result": metadata_result})
 
     except Exception as exc:
         logger.error("Background proofread failed for '%s': %s\n%s", filename, exc, traceback.format_exc())
-        _proofread_jobs[job_id].update({"stage": "error", "error": str(exc)})
+        _update_job(job_id, {"stage": "error", "error": str(exc)})
         sync_broadcast(job_id, {"type": "error", "job_id": job_id, "message": str(exc)})
     finally:
         if os.path.exists(tmp_path):
@@ -525,15 +609,23 @@ async def proofread_upload(file: UploadFile = File(...)):
 
 
 @app.get("/proofread/{job_id}/status")
-def proofread_status(job_id: str):
-    """Poll for background proofread progress. stage: queued|extracting|proofreading|done|error"""
+async def proofread_status(job_id: str):
+    """
+    Poll for background proofread progress. stage: queued|extracting|proofreading|done|error
+    BUG B fix: async def so FastAPI handles this on the event loop rather than
+    occupying a threadpool worker, preventing Railway's 100s proxy timeout when
+    the threadpool is saturated by the background proofreading job.
+    BUG A+C fix: result never contains corrected_text — only lightweight metadata
+    (counts, summary, download URL). Corrected text is served via /download as a
+    file stream, sidestepping Railway's response-size and gzip-corruption limits.
+    """
     job = _proofread_jobs.get(job_id)
     if not job:
         raise HTTPException(404, "Proofread job not found.")
     stage = job.get("stage", "unknown")
     resp: dict = {"job_id": job_id, "stage": stage}
     if stage == "done":
-        resp["result"] = job["result"]
+        resp["result"] = job["result"]  # corrected_text is NOT in job["result"]
     elif stage == "error":
         resp["error"] = job.get("error", "Unknown error")
     return resp
