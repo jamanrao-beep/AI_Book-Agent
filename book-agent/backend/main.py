@@ -619,6 +619,8 @@ def download_proofread(job_id: str):
 
     if ext == ".docx":
         media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    elif ext == ".pdf":
+        media_type = "application/pdf"
     else:
         media_type = "text/plain"
 
