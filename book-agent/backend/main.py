@@ -56,10 +56,12 @@ app = FastAPI(
 # echoes the origin back on both preflight (OPTIONS) and actual requests.
 # ─────────────────────────────────────────────────────────────────────────────
 
-ALLOWED_ORIGINS = [
+ALLOWED_ORIGINS = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "").split(",") if o.strip()] or [
     "https://ai-book-agent-23.vercel.app",  # production frontend
     "http://localhost:3000",                 # local dev
     "http://localhost:3001",                 # alternate local dev port
+    "http://localhost:3002",                 # fallback Next.js port
+    "http://localhost:3003",                 # fallback Next.js port
 ]
 
 app.add_middleware(
@@ -251,6 +253,7 @@ class BookRequest(BaseModel):
     words_per_page: int = 250
     user_id: Optional[str] = "default"
     writing_style: Optional[str] = ""
+    language: Optional[str] = "English"   # ← NEW: output language for the book
 
 
 @app.get("/")
@@ -269,13 +272,21 @@ async def generate_book(req: BookRequest, bg: BackgroundTasks):
     if req.words_per_page < 100 or req.words_per_page > 1000:
         raise HTTPException(400, "words_per_page must be between 100 and 1000")
 
+    lang = (req.language or "English").strip()
+
+    # Merge language into writing_style so the existing openai_client
+    # language-instruction pipeline picks it up automatically.
+    base_style  = (req.writing_style or "").strip()
+    merged_style = f"{base_style} — Write the entire book in {lang}." if base_style else f"Write the entire book in {lang}."
+
     db = SessionLocal()
     book = Book(
         title=req.title,
         num_pages=req.num_pages,
         words_per_page=req.words_per_page,
         user_id=req.user_id,
-        writing_style=req.writing_style or "",
+        writing_style=merged_style,
+        language=lang,
         status="pending",
     )
     db.add(book)
@@ -305,6 +316,7 @@ def get_status(book_id: int):
         "book_id": book.id,
         "title": book.title,
         "status": book.status,
+        "language": book.language or "English",
         "pdf_url": book.pdf_url,
         "docx_url": book.docx_url,
         "created_at": str(book.created_at),
@@ -368,6 +380,26 @@ def list_books():
         }
         for b in books
     ]
+
+
+@app.post("/book/{book_id}/cancel")
+def cancel_book(book_id: int):
+    """
+    E8: Signal a running book generation job to stop after the current section.
+    The agent checks is_cancelled after every section and exits cleanly.
+    """
+    db = SessionLocal()
+    try:
+        book = db.query(Book).filter(Book.id == book_id).first()
+        if not book:
+            raise HTTPException(404, f"Book {book_id} not found")
+        if book.status in ("done", "failed", "cancelled"):
+            return {"book_id": book_id, "status": book.status, "message": "Job already finished — nothing to cancel."}
+        book.is_cancelled = True
+        db.commit()
+        return {"book_id": book_id, "status": "cancel_requested", "message": "Cancellation signal sent. Job will stop after the current section."}
+    finally:
+        db.close()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -870,6 +902,7 @@ async def design_cover_endpoint(
                 "original_filename": filename,
                 "concept": result["concept"],
                 "download_url": f"/design-cover/{job_id}/download",
+                "image_generation_warning": result["concept"].get("_dalle_note"),
             }
 
         # ── ZIP bundle ────────────────────────────────────────────────────────

@@ -19,6 +19,10 @@ class Book(Base):
     created_at     = Column(DateTime, default=datetime.utcnow)
     user_id        = Column(String(200), nullable=True)
     writing_style  = Column(String(200), nullable=True, default="")
+    language       = Column(String(100), nullable=True, default="English")   # ← NEW
+    # E8: cancel support + heartbeat for long-running jobs
+    is_cancelled   = Column(Boolean, default=False, nullable=False)
+    last_heartbeat = Column(DateTime, nullable=True)
 
 class BookSegment(Base):
     __tablename__ = "book_segments"
