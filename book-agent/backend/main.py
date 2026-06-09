@@ -545,6 +545,11 @@ def _run_proofread_job(job_id: str, tmp_path: str, filename: str, ext: str) -> N
         else:
             save_corrected_txt(result["corrected_text"], corrected_path)
 
+        # Always save a plain-text sidecar so the ?format=txt preview endpoint
+        # can serve it without re-reading a DOCX or PDF.
+        txt_path = os.path.join(OUTPUT_DIR, f"corrected_{job_id}.txt")
+        save_corrected_txt(result["corrected_text"], txt_path)
+
         # BUG E fix: never store corrected_text in memory — only store the file
         # path and lightweight metadata. This prevents the status endpoint from
         # serialising a 100KB+ payload, which Railway's proxy kills mid-stream.
@@ -569,6 +574,7 @@ def _run_proofread_job(job_id: str, tmp_path: str, filename: str, ext: str) -> N
             "original_text": original_text,
             "original_title": title,
             "corrected_path": corrected_path,
+            "txt_path": txt_path,
             "ext": out_ext,
             "original_ext": ext,
             "result": metadata_result,
@@ -727,7 +733,7 @@ async def proofread_document(file: UploadFile = File(...)):
 
 
 @app.get("/proofread/{job_id}/download")
-def download_proofread(job_id: str):
+async def download_proofread(job_id: str, format: str = ""):
     job = _proofread_jobs.get(job_id)
     if not job:
         raise HTTPException(404, "Proofreading job not found. It may have expired — re-upload to proofread again.")
@@ -735,6 +741,25 @@ def download_proofread(job_id: str):
     path = job["corrected_path"]
     if not os.path.exists(path):
         raise HTTPException(404, "Corrected file not found on disk.")
+
+    # ?format=txt — frontend requests plain text for the in-page preview tab.
+    # Read the stored corrected text and return it as UTF-8 plain text so the
+    # browser can display it directly without triggering a file download.
+    if format == "txt":
+        # pyrefly: ignore [missing-import]
+        from fastapi.responses import PlainTextResponse
+        txt_path = job.get("txt_path")
+        if txt_path and os.path.exists(txt_path):
+            with open(txt_path, "r", encoding="utf-8", errors="replace") as f:
+                return PlainTextResponse(f.read())
+        # Fallback: read corrected_text stored in the job result dict
+        corrected = (job.get("result") or {}).get("corrected_text", "")
+        if not corrected:
+            # Last resort: if the saved file is a .txt, read it directly
+            if path.endswith(".txt"):
+                with open(path, "r", encoding="utf-8", errors="replace") as f:
+                    corrected = f.read()
+        return PlainTextResponse(corrected or "")
 
     ext = job["ext"]
     original_name = os.path.splitext(job["original_filename"])[0]

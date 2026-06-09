@@ -56,6 +56,7 @@ export default function ProofreadPage() {
   const [applyPunctuation, setApplyPunctuation] = useState(true);
   const [applyStyle, setApplyStyle] = useState(true);
   const [pdfGenerating, setPdfGenerating] = useState(false);
+  const [correctedTextLoading, setCorrectedTextLoading] = useState(false);
   const [pdfError, setPdfError] = useState("");
   const [docxGenerating, setDocxGenerating] = useState(false);
   const [docxError, setDocxError] = useState("");
@@ -138,6 +139,24 @@ export default function ProofreadPage() {
       setResult(res.data);
       setActiveTab("summary");
       setExpandedErrors(new Set());
+
+      // Fetch corrected text from the download endpoint (it is not in the
+      // status payload — we stripped it to stay under Railway's response limit).
+      if (res.data.download_url) {
+        setCorrectedTextLoading(true);
+        try {
+          const baseURL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+          const textRes = await fetch(`${baseURL}${res.data.download_url}?format=txt`);
+          if (textRes.ok) {
+            const text = await textRes.text();
+            setResult((prev) => prev ? { ...prev, corrected_text: text } : prev);
+          }
+        } catch (_) {
+          // Non-fatal — corrected text tab will stay empty but download still works
+        } finally {
+          setCorrectedTextLoading(false);
+        }
+      }
     } catch (err: unknown) {
       // Extract the most useful error message from axios errors
       let message = "Proofreading failed. Make sure the backend is running.";
@@ -1034,20 +1053,30 @@ export default function ProofreadPage() {
 
               {/* Corrected text tab */}
               {activeTab === "corrected" && (
-                <pre
-                  style={{
-                    fontSize: "13px",
-                    color: "#cbd5e1",
-                    lineHeight: "1.9",
-                    whiteSpace: "pre-wrap",
-                    wordBreak: "break-word",
-                    fontFamily: "'DM Mono', monospace",
-                    maxHeight: "500px",
-                    overflowY: "auto",
-                  }}
-                >
-                  {result.corrected_text}
-                </pre>
+                correctedTextLoading ? (
+                  <div style={{ color: "#64748b", fontSize: "14px", padding: "24px 0", textAlign: "center" }}>
+                    Loading corrected text…
+                  </div>
+                ) : result.corrected_text ? (
+                  <pre
+                    style={{
+                      fontSize: "13px",
+                      color: "#cbd5e1",
+                      lineHeight: "1.9",
+                      whiteSpace: "pre-wrap",
+                      wordBreak: "break-word",
+                      fontFamily: "'DM Mono', monospace",
+                      maxHeight: "500px",
+                      overflowY: "auto",
+                    }}
+                  >
+                    {result.corrected_text}
+                  </pre>
+                ) : (
+                  <div style={{ color: "#64748b", fontSize: "14px", padding: "24px 0", textAlign: "center" }}>
+                    Corrected text preview unavailable — use the Download button above to get the full corrected document.
+                  </div>
+                )
               )}
 
               {/* Grammar / Punctuation / Style detail tabs */}
