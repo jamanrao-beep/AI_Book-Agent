@@ -21,7 +21,7 @@ import logging
 import zipfile
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Callable
 
 # pyrefly: ignore [missing-import]
 from openai import OpenAI
@@ -703,7 +703,7 @@ def _call_openai_with_retry(
 # Main proofreading entry point (UPGRADED SWARM)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def proofread_text(text: str) -> dict:
+def proofread_text(text: str, progress_callback: Optional[Callable[[int, int], None]] = None) -> dict:
     """
     Run AI proofreading on text. Handles long documents by chunking.
     
@@ -778,6 +778,13 @@ def proofread_text(text: str) -> dict:
                 
                 succeeded = True
                 
+                # Report per-chunk progress to the caller (e.g. _run_proofread_job)
+                if progress_callback:
+                    try:
+                        progress_callback(i + 1, len(chunks))
+                    except Exception:
+                        pass
+
                 # Update memory for the next chunk
                 rolling_memory = f"Previous context: {all_corrected[-1][-300:]}"
                 break
@@ -797,6 +804,11 @@ def proofread_text(text: str) -> dict:
             all_corrected.append(chunk)
             skipped_chunks.append(i + 1)
             logger.error("Chunk %d/%d permanently skipped — original text preserved.", i + 1, len(chunks))
+            if progress_callback:
+                try:
+                    progress_callback(i + 1, len(chunks))
+                except Exception:
+                    pass
 
     combined_summary = " ".join(s for s in summaries if s)
     if len(chunks) > 1:

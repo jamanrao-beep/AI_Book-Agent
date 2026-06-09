@@ -511,10 +511,27 @@ def _run_proofread_job(job_id: str, tmp_path: str, filename: str, ext: str) -> N
             sync_broadcast(job_id, {"type": "error", "job_id": job_id, "message": "Document appears to be empty."})
             return
 
-        _update_job(job_id, {"stage": "proofreading"})
+        _update_job(job_id, {"stage": "proofreading", "chunks_done": 0, "chunks_total": 0})
         sync_broadcast(job_id, {"type": "progress", "job_id": job_id, "stage": "proofreading", "progress": 40, "message": "Proofreading initiated..."})
-        
-        result = proofread_text(original_text)
+
+        def _chunk_progress(done: int, total: int) -> None:
+            pct = 40 + int((done / total) * 55)
+            _update_job(job_id, {
+                "stage": "proofreading",
+                "chunks_done": done,
+                "chunks_total": total,
+            })
+            sync_broadcast(job_id, {
+                "type": "progress",
+                "job_id": job_id,
+                "stage": "proofreading",
+                "progress": pct,
+                "chunks_done": done,
+                "chunks_total": total,
+                "message": f"Proofreading chunk {done}/{total}…",
+            })
+
+        result = proofread_text(original_text, progress_callback=_chunk_progress)
 
         out_ext = ext if ext in {".docx", ".pdf"} else ".txt"
         corrected_filename = f"corrected_{job_id}{out_ext}"
@@ -623,9 +640,14 @@ async def proofread_status(job_id: str):
     if not job:
         raise HTTPException(404, "Proofread job not found.")
     stage = job.get("stage", "unknown")
-    resp: dict = {"job_id": job_id, "stage": stage}
+    resp: dict = {
+        "job_id": job_id,
+        "stage": stage,
+        "chunks_done": job.get("chunks_done", 0),
+        "chunks_total": job.get("chunks_total", 0),
+    }
     if stage == "done":
-        resp["result"] = job["result"]  # corrected_text is NOT in job["result"]
+        resp["result"] = job["result"]
     elif stage == "error":
         resp["error"] = job.get("error", "Unknown error")
     return resp

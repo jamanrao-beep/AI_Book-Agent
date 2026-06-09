@@ -28,7 +28,7 @@ interface ProofResult {
   grammar_fixes: number;
   punctuation_fixes: number;
   style_suggestions: number;
-  corrected_text: string;
+  corrected_text?: string;
   grammar_details?: ErrorDetail[];
   punctuation_details?: ErrorDetail[];
   style_details?: ErrorDetail[];
@@ -45,6 +45,7 @@ export default function ProofreadPage() {
   const [loading, setLoading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [chunkProgress, setChunkProgress] = useState<{ done: number; total: number } | null>(null);
   const [result, setResult] = useState<ProofResult | null>(null);
   const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState<TabType>("summary");
@@ -114,6 +115,7 @@ export default function ProofreadPage() {
     setLoading(true);
     setUploadProgress(0);
     setElapsedSeconds(0);
+    setChunkProgress(null);
     setError("");
     // Reset selections to all-on for each new upload
     setApplyGrammar(true);
@@ -128,7 +130,11 @@ export default function ProofreadPage() {
     }, 1000);
 
     try {
-      const res = await proofreadDocument(file, (pct) => setUploadProgress(pct));
+      const res = await proofreadDocument(
+        file,
+        (pct) => setUploadProgress(pct),
+        (done, total) => setChunkProgress({ done, total }),
+      );
       setResult(res.data);
       setActiveTab("summary");
       setExpandedErrors(new Set());
@@ -301,9 +307,11 @@ export default function ProofreadPage() {
     if (uploadProgress < 100) return `Uploading… ${uploadProgress}%`;
     const mins = Math.floor(elapsedSeconds / 60);
     const secs = elapsedSeconds % 60;
-    const elapsed = mins > 0
-      ? `${mins}m ${secs}s`
-      : `${secs}s`;
+    const elapsed = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+    if (chunkProgress && chunkProgress.total > 1) {
+      const chunkPct = Math.round((chunkProgress.done / chunkProgress.total) * 100);
+      return `Proofreading chunk ${chunkProgress.done} of ${chunkProgress.total} (${chunkPct}%) — ${elapsed} elapsed. Please keep this tab open.`;
+    }
     return `Analysing document… ${elapsed} elapsed. Large files can take 10–20 min — please keep this tab open.`;
   })();
 

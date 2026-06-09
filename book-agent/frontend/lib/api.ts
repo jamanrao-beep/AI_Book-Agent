@@ -146,6 +146,7 @@ export const downloadDOCX = (id: number) =>
 export const proofreadDocument = (
   file: File,
   onUploadProgress?: (pct: number) => void,
+  onChunkProgress?: (done: number, total: number) => void,
 ): Promise<{ data: ProofreadResult }> => {
   const form = new FormData();
   form.append("file", file);
@@ -186,11 +187,21 @@ export const proofreadDocument = (
         API.get<{
           job_id: string;
           stage: string;
+          chunks_done?: number;
+          chunks_total?: number;
           result?: ProofreadResult;
           error?: string;
         }>(`/proofread/${jobId}/status`, { timeout: POLL_TIMEOUT_MS })
           .then(({ data: status }) => {
             consecutiveErrors = 0; // reset on success
+            if (
+              onChunkProgress &&
+              typeof status.chunks_done === "number" &&
+              typeof status.chunks_total === "number" &&
+              status.chunks_total > 0
+            ) {
+              onChunkProgress(status.chunks_done, status.chunks_total);
+            }
             if (status.stage === "done" && status.result) {
               resolve({ data: status.result });
             } else if (status.stage === "error") {
