@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"), timeout=300.0)
 MODEL  = "gpt-4o"
 
 # ── Language / script detection ───────────────────────────────────────────────
@@ -209,7 +209,7 @@ CRITICAL PROSE DIRECTIVES:
 
 Write only the prose content:"""
 
-    max_toks = min(4096, int(word_count * 1.5) + 200)
+    max_toks = max(2048, int(word_count * 1.5) + 200)
     
     for attempt in range(3):
         try:

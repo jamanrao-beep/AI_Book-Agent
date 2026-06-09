@@ -29,7 +29,7 @@ from openai import OpenAI
 from dotenv import load_dotenv
 
 load_dotenv()
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"), timeout=300.0)
 MODEL = "gpt-4o"
 
 logger = logging.getLogger("editorial_ai")
@@ -461,19 +461,21 @@ def _chunk_text(text: str, max_chars: int = 60000) -> list[str]:
     while start < len(text):
         end = min(start + max_chars, len(text))
         if end < len(text):
-            # Prefer splitting at paragraph boundary
+            # Prefer splitting at paragraph boundary (\n\n)
+            # Include the \n\n in the current chunk so the next chunk starts clean.
             newline = text.rfind("\n\n", start, end)
             if newline > start + max_chars // 4:
-                end = newline
+                end = newline + 2   # consume both newline chars
             else:
-                # Fall back to sentence boundary
-                sent = max(
-                    text.rfind(". ", start, end),
-                    text.rfind("। ", start, end),   # Devanagari danda
-                    text.rfind("\n",  start, end),
-                )
+                # Fall back to sentence boundary (". " or Devanagari danda "। " or "\n")
+                # Advance end past the delimiter so it is NOT repeated in the next chunk.
+                sent_dot   = text.rfind(". ",  start, end)
+                sent_danda = text.rfind("। ", start, end)
+                sent_nl    = text.rfind("\n",  start, end)
+                sent = max(sent_dot, sent_danda, sent_nl)
                 if sent > start + max_chars // 4:
-                    end = sent + 1
+                    # +2 to include the delimiter character and the trailing space/newline
+                    end = sent + 2 if sent in (sent_dot, sent_danda) else sent + 1
         chunks.append(text[start:end])
         start = end
         
@@ -616,8 +618,9 @@ def _call_openai_with_retry(
                         context, MAX_OUTPUT_TOKENS,
                     )
                     max_out = MAX_OUTPUT_TOKENS
-                    if attempt <= max_retries:
-                        raise ValueError(f"Response truncated (finish_reason=length) for {context}")
+                    # Always retry on truncation (not just on non-final attempts),
+                    # otherwise we fall through and parse a truncated JSON response.
+                    raise ValueError(f"Response truncated (finish_reason=length) for {context}")
                 else:
                     logger.warning(
                         "Response truncated even at ceiling (%d) for %s — extracting partial text",
@@ -649,6 +652,7 @@ def _call_openai_with_retry(
             logger.warning("Attempt %d/%d failed for %s: %s", attempt, max_retries + 1, context, e)
             
             if attempt <= max_retries:
+                time.sleep(2.0 * attempt)
                 # On retry: ask for ONLY corrected_text to reduce output size
                 stripped_system = (
                     "You are a proofreader. Return ONLY this JSON with no other keys:\n"
@@ -784,6 +788,8 @@ def proofread_text(text: str) -> dict:
                     attempt_no, context, e,
                     " — retrying…" if attempt_no < 3 else " — skipping chunk, keeping original text.",
                 )
+                if attempt_no < 3:
+                    time.sleep(3.0 * attempt_no)
 
         if not succeeded:
             # All 3 outer attempts failed — include the raw original so the
@@ -804,7 +810,7 @@ def proofread_text(text: str) -> dict:
         )
 
     return {
-        "corrected_text": "\n".join(all_corrected),
+        "corrected_text": "".join(all_corrected),
         "grammar_fixes": total_grammar,
         "punctuation_fixes": total_punct,
         "style_suggestions": total_style,
@@ -812,6 +818,7 @@ def proofread_text(text: str) -> dict:
         "grammar_details": all_grammar_details[:20],
         "punctuation_details": all_punctuation_details[:20],
         "style_details": all_style_details[:20],
+        "skipped_chunks": skipped_chunks,
     }
 
 
@@ -833,7 +840,9 @@ def apply_selective_corrections(
         return original_text
 
     system_prompt = _build_selective_system_prompt(apply_grammar, apply_punctuation, apply_style)
-    chunks = _chunk_text(original_text)
+    is_legacy_deva = _has_legacy_devanagari(original_text)
+    chunk_size = 8000 if is_legacy_deva else 60000
+    chunks = _chunk_text(original_text, max_chars=chunk_size)
     all_corrected = []
 
     for i, chunk in enumerate(chunks):
@@ -853,7 +862,9 @@ def apply_selective_corrections(
             )
             all_corrected.append(chunk)
 
-    return "\n".join(all_corrected)
+    # Join with empty string — each chunk already ends with its own
+    # whitespace/newlines from the split boundary, so no separator needed.
+    return "".join(all_corrected)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

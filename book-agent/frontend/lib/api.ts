@@ -286,7 +286,9 @@ export const designLayout = (
 
   return API.post<LayoutResult>("/design-layout", form, {
     // No Content-Type header — axios sets multipart/form-data with boundary automatically
-    timeout: 120000,
+    // Large Hindi books are split into many small chunks; each chunk can take
+    // ~30–60 s, and a 200-page book may have 20–30 chunks → allow up to 1 hour.
+    timeout: 3600000,
     onUploadProgress: onUploadProgress
       ? (e) => {
         if (e.total) {

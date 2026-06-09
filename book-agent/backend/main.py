@@ -155,16 +155,23 @@ class ConnectionManager:
 
     async def broadcast(self, job_id: str, message: dict):
         """Pushes JSON payloads to all clients tracking this specific job_id."""
-        if job_id in self.active_connections:
-            dead_connections = []
-            for connection in self.active_connections[job_id]:
-                try:
-                    await connection.send_json(message)
-                except Exception:
-                    dead_connections.append(connection)
-            
-            for dead in dead_connections:
-                self.disconnect(dead, job_id)
+        # Take a snapshot of current connections under the lock so we don't
+        # hold the lock during async sends, and avoid races with disconnect().
+        with self.lock:
+            connections = list(self.active_connections.get(job_id, []))
+        
+        if not connections:
+            return
+        
+        dead_connections = []
+        for connection in connections:
+            try:
+                await connection.send_json(message)
+            except Exception:
+                dead_connections.append(connection)
+        
+        for dead in dead_connections:
+            self.disconnect(dead, job_id)
 
 manager = ConnectionManager()
 _global_event_loop = None
@@ -461,6 +468,7 @@ def _run_proofread_job(job_id: str, tmp_path: str, filename: str, ext: str) -> N
                 "grammar_details": result.get("grammar_details", []),
                 "punctuation_details": result.get("punctuation_details", []),
                 "style_details": result.get("style_details", []),
+                "skipped_chunks": result.get("skipped_chunks", []),
                 "download_url": f"/proofread/{job_id}/download",
             },
         }
@@ -559,7 +567,8 @@ async def proofread_document(file: UploadFile = File(...)):
         )
 
         job_id = uuid.uuid4().hex
-        corrected_filename = f"corrected_{job_id}{ext}"
+        corrected_ext = ext if ext in {".docx", ".pdf"} else ".txt"
+        corrected_filename = f"corrected_{job_id}{corrected_ext}"
         corrected_path = os.path.join(OUTPUT_DIR, corrected_filename)
 
         if ext == ".docx":
@@ -573,7 +582,7 @@ async def proofread_document(file: UploadFile = File(...)):
             "original_text": original_text,
             "original_title": os.path.splitext(filename)[0],
             "corrected_path": corrected_path,
-            "ext": ext,
+            "ext": corrected_ext,
         }
 
         return {
