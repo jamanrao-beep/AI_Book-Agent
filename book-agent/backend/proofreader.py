@@ -39,9 +39,57 @@ logger = logging.getLogger("editorial_ai")
 # Text extraction helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
+import re as _re
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CID glyph-reference cleaner
+# ─────────────────────────────────────────────────────────────────────────────
+# PDFs that use custom-encoded fonts produce (cid:NNN) tokens when text is
+# extracted via pdfplumber / pypdf because the glyph IDs have no Unicode
+# mapping. We replace the most common ones with their proper characters so the
+# proofreader receives clean text instead of literal "(cid:127)".
+# ─────────────────────────────────────────────────────────────────────────────
+
+_CID_MAP: dict[int, str] = {
+    # Bullets / list markers
+    127: "•",   # common bullet glyph
+    183: "•",
+    149: "•",
+    164: "•",
+    # Dashes
+    150: "–",   # en dash
+    151: "—",   # em dash
+    # Quotes
+    145: "‘",   # left single quote
+    146: "’",   # right single quote / apostrophe
+    147: "“",   # left double quote
+    148: "”",   # right double quote
+    # Ellipsis / misc
+    133: "…",   # ellipsis
+    160: " ",   # non-breaking space → regular space
+    173: "-",        # soft hyphen → hyphen
+    # Arrows
+    224: "→",
+    225: "←",
+    226: "↑",
+    227: "↓",
+}
+
+_CID_PATTERN = _re.compile(r"\(cid:(\d+)\)")
+
+def _clean_cid(text: str) -> str:
+    """Replace (cid:NNN) tokens with their Unicode equivalents where known,
+    or with a bullet • for unknown IDs (they are almost always list markers
+    or decorative glyphs that belong to a custom symbol font)."""
+    def _replace(m: _re.Match) -> str:
+        cid = int(m.group(1))
+        return _CID_MAP.get(cid, "•")   # default → bullet
+    return _CID_PATTERN.sub(_replace, text)
+
+
 def extract_text_from_txt(path: str) -> str:
     with open(path, "r", encoding="utf-8", errors="replace") as f:
-        return f.read()
+        return _clean_cid(f.read())
 
 
 def extract_text_from_docx(path: str) -> str:
@@ -101,7 +149,7 @@ def extract_text_from_docx(path: str) -> str:
         else:
             lines.append(raw_text)
 
-    return "\n".join(lines)
+    return _clean_cid("\n".join(lines))
 
 
 def extract_text_from_pdf(path: str) -> str:
@@ -114,7 +162,7 @@ def extract_text_from_pdf(path: str) -> str:
             if t:
                 text.append(t)
                 
-    result = "\n".join(text)
+    result = _clean_cid("\n".join(text))
     if not result.strip():
         raise ValueError(
             "This PDF appears to be scanned or image-based — no text layer was found. "
