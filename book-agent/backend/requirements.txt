@@ -13,3 +13,4 @@ pypdf
 pymupdf
 pdf2image
 Pillow
+sentence_transformers
