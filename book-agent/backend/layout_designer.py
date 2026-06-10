@@ -1888,7 +1888,7 @@ def generate_layout_concept(
                 {"role": "user",   "content": user_msg},
             ],
             temperature=0.7,
-            max_tokens=1500,
+            max_tokens=2500,  # 25-field JSON needs headroom; 1500 caused frequent truncation
         )
         raw = response.choices[0].message.content.strip()
         raw = raw.replace("```json", "").replace("```", "").strip()
@@ -3234,9 +3234,10 @@ def render_layout_pdf(
 
                     # ── FIX 2: Inline image references within a paragraph ──────
                     # Replace ![cap](path) inside body text with a [Figure N] reference.
-                    _inline_fig_counter = [getattr(_inline_fig_counter, 'val', 0) if False else 0]
+                    _inline_fig_counter = [0]  # reset per section; increments via _inline_fig_counter[0] += 1
                     def _inline_img_ref(im: re.Match) -> str:  # type: ignore[type-arg]
-                        cap = im.group(1) or "Figure"
+                        _inline_fig_counter[0] += 1
+                        cap = im.group(1) or f"Figure {_inline_fig_counter[0]}"
                         return f"<i>[{cap}]</i>"
                     safe = _IMG_MD_INLINE.sub(_inline_img_ref, safe)
 
@@ -3823,13 +3824,8 @@ def render_layout_docx(
                 pPr_el.append(ol)
             ol.set(_qn_h("w:val"), "0")   # 0 = Heading 1 outline level
 
-        _ensure_heading1_style(
-            doc,
-            font_name=_FONT_MAP.get(concept["chapter_font"], ("Times New Roman", False))[0]
-                      if "_FONT_MAP" in dir() else "Times New Roman",
-            size_pt=float(concept.get("chapter_font_size", 22)),
-            color_hex=concept["chapter_title_color"],
-        )
+        # _ensure_heading1_style is called below, after _FONT_MAP is defined.
+        _pending_ensure_h1 = True
 
         def add_chapter_heading(text: str, font_name: str, size_pt: float,
                                 bold: bool, italic: bool, color_hex: str,
@@ -4002,6 +3998,25 @@ def render_layout_docx(
         def docx_font(rl_name: str) -> tuple[str, bool]:
             """Return (word_font_name, is_italic)."""
             return _FONT_MAP.get(rl_name, ("Times New Roman", False))
+
+        # Now _FONT_MAP is defined — apply heading styles to the style gallery
+        if _pending_ensure_h1:
+            ch_fn_h1, _ = docx_font(concept["chapter_font"])
+            _ensure_heading1_style(
+                doc,
+                font_name=ch_fn_h1,
+                size_pt=float(concept.get("chapter_font_size", 22)),
+                color_hex=concept["chapter_title_color"],
+            )
+            _ensure_heading_styles(
+                doc,
+                body_font_name=_FONT_MAP.get(concept["body_font"], ("Times New Roman", False))[0],
+                chapter_font_name=ch_fn_h1,
+                chapter_size_pt=float(concept.get("chapter_font_size", 22)),
+                body_size_pt=float(concept.get("body_font_size", 11)),
+                accent_hex=concept.get("accent_color", "#555555"),
+                chapter_hex=concept.get("chapter_title_color", "#111111"),
+            )
 
         body_fn, body_italic = docx_font(concept["body_font"])
         ch_fn,   ch_italic   = docx_font(concept["chapter_font"])

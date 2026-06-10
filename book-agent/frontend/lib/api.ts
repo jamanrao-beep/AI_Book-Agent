@@ -352,8 +352,6 @@ export const designLayout = (
   form.append("page_width_mm", String(Math.max(50, Math.min(600, params.pageWidthMm || 210))));
   form.append("page_height_mm", String(Math.max(50, Math.min(600, params.pageHeightMm || 297))));
 
-  const _s = (v?: string) => { if (v && v.trim()) form.append; return v?.trim() ?? ""; };
-
   if (params.bookTitle) form.append("book_title", params.bookTitle.trim());
   if (params.designInstructions) form.append("design_instructions", params.designInstructions.trim());
   if (params.bookType) form.append("book_type", params.bookType.trim());

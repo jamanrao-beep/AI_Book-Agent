@@ -1903,8 +1903,10 @@ async def design_layout_endpoint(
 
 
 @app.get("/layout/{job_id}/status")
-def layout_status(job_id: str):
-    """Poll this endpoint for layout-design progress."""
+async def layout_status(job_id: str):
+    """Poll this endpoint for layout-design progress.
+    async def so FastAPI handles it on the event loop rather than blocking
+    a threadpool worker — prevents Railway's 100s proxy timeout under load."""
     job = _layout_jobs.get(job_id)
     if not job:
         raise HTTPException(404, "Layout job not found.")
@@ -1935,7 +1937,7 @@ def layout_status(job_id: str):
 
 
 @app.get("/layout/{job_id}/download/pdf")
-def download_layout_pdf(job_id: str):
+async def download_layout_pdf(job_id: str):
     job = _layout_jobs.get(job_id)
     if not job or job.get("stage") != "done":
         raise HTTPException(404, "Layout job not complete or not found.")
@@ -1948,7 +1950,7 @@ def download_layout_pdf(job_id: str):
 
 
 @app.get("/layout/{job_id}/download/docx")
-def download_layout_docx(job_id: str):
+async def download_layout_docx(job_id: str):
     job = _layout_jobs.get(job_id)
     if not job or job.get("stage") != "done":
         raise HTTPException(404, "Layout job not complete or not found.")
