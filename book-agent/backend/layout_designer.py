@@ -5543,7 +5543,7 @@ def design_layout(
 
         # ── Footer overrides ─────────────────────────────────────────────────────
         concept["footer_left_text"]     = footer_left_text if footer_left_text is not None else (book_title or "")
-        concept["footer_middle_text"]   = footer_middle_text if footer_middle_text is not None else ""
+        concept["footer_middle_text"]   = footer_middle_text if footer_middle_text is not None else concept.get("footer_middle_text", "")
         concept["footer_right_pagenum"] = footer_right_pagenum if footer_right_pagenum is not None else True
 
         # ── Advanced layout overrides ────────────────────────────────────────────

@@ -1663,6 +1663,7 @@ def _run_layout_job(
     show_page_numbers: Optional[bool] = None,
     # Footer overrides
     footer_left_text: Optional[str] = None,
+    footer_middle_text: Optional[str] = None,
     footer_right_pagenum: Optional[bool] = True,
     # Advanced layout overrides
     mirror_margins: Optional[bool] = None,
@@ -1717,6 +1718,7 @@ def _run_layout_job(
             show_drop_cap=show_drop_cap,
             show_page_numbers=show_page_numbers,
             footer_left_text=footer_left_text,
+            footer_middle_text=footer_middle_text,
             footer_right_pagenum=footer_right_pagenum,
             mirror_margins=mirror_margins,
             gutter_mm=gutter_mm,
@@ -1784,6 +1786,7 @@ async def design_layout_endpoint(
     show_page_numbers: Optional[str] = Form(default=None),
     # Footer overrides
     footer_left_text: Optional[str] = Form(default=None),
+    footer_middle_text: Optional[str] = Form(default=None),
     footer_right_pagenum: Optional[str] = Form(default="true"),
     # Advanced layout overrides
     mirror_margins: Optional[str] = Form(default=None),
@@ -1874,6 +1877,7 @@ async def design_layout_endpoint(
             show_page_numbers=_bool_or_none(show_page_numbers),
             # Footer
             footer_left_text=footer_left_text.strip() if footer_left_text and footer_left_text.strip() else None,
+            footer_middle_text=footer_middle_text.strip() if footer_middle_text and footer_middle_text.strip() else None,
             footer_right_pagenum=_bool_or_none(footer_right_pagenum) if footer_right_pagenum else True,
             # Advanced
             mirror_margins=_bool_or_none(mirror_margins),

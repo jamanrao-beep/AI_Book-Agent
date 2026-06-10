@@ -157,7 +157,7 @@ export const proofreadDocument = (
     form,
     {
       // No Content-Type header — axios sets multipart/form-data + boundary automatically
-      timeout: 7200000,
+      timeout: 3600000,
       onUploadProgress: onUploadProgress
         ? (e) => {
           if (e.total) {
@@ -179,7 +179,7 @@ export const proofreadDocument = (
       // doesn't stall the entire job. Railway silently closes sockets on large
       // responses; axios reports ERR_NETWORK immediately (not a timeout), so we
       // catch it and retry rather than rejecting the whole promise.
-      const POLL_TIMEOUT_MS = 180_000; // 60 s per individual poll request
+      const POLL_TIMEOUT_MS = 60_000; // 60 s per individual poll request
       const MAX_CONSECUTIVE_ERRORS = 10; // give up after 10 back-to-back failures
       let consecutiveErrors = 0;
 
@@ -297,38 +297,112 @@ export interface LayoutResult {
   book_type: string;
 }
 
+// All layout design parameters — every field maps 1:1 to a backend Form param.
+export interface LayoutDesignParams {
+  // Core
+  pageWidthMm: number;
+  pageHeightMm: number;
+  bookTitle?: string;
+  designInstructions?: string;
+  bookType?: string;
+  visualTemplate?: string;
+  // Typography
+  bodyFont?: string;
+  chapterFont?: string;
+  bodyFontSize?: string;
+  chapterFontSize?: string;
+  lineSpacing?: string;
+  // Margins
+  marginTopMm?: string;
+  marginBottomMm?: string;
+  marginLeftMm?: string;
+  marginRightMm?: string;
+  // Appearance
+  showDropCap?: boolean | null;
+  showPageNumbers?: boolean | null;
+  // Footer (3-slot)
+  footerLeftText?: string;
+  footerMiddleText?: string;
+  footerRightPagenum?: boolean;
+  // Advanced layout
+  mirrorMargins?: boolean | null;
+  gutterMm?: string;
+  paragraphSpacingMm?: string;
+  indentMm?: string;
+  colorMode?: string;
+  bleedMm?: string;
+  chapterStart?: string;
+  pageNumberStart?: string;
+  pageNumberStyle?: string;
+  headerCustomText?: string;
+  headingDesign?: string;
+  sectionBreaks?: boolean | null;
+  // Front / Back matter (JSON array strings)
+  frontMatter?: string;
+  backMatter?: string;
+}
+
 export const designLayout = (
   file: File,
-  bookTitle: string = "",
-  designInstructions: string = "",
-  bookType: string = "",
-  visualTemplate: string = "",
-  pageWidthMm: number = 127.0,  // Dynamic parameter (Defaults to 5 inches)
-  pageHeightMm: number = 203.2, // Dynamic parameter (Defaults to 8 inches)
-  onUploadProgress?: (pct: number) => void
+  params: LayoutDesignParams,
+  onUploadProgress?: (pct: number) => void,
 ) => {
   const form = new FormData();
   form.append("file", file);
-  form.append("book_title", bookTitle);
-  form.append("design_instructions", designInstructions);
-  form.append("book_type", bookType);
-  form.append("visual_template", visualTemplate);
+  form.append("page_width_mm", String(Math.max(50, Math.min(600, params.pageWidthMm || 210))));
+  form.append("page_height_mm", String(Math.max(50, Math.min(600, params.pageHeightMm || 297))));
 
-  // ── PASS DIMENSIONS DYNAMICALLY TO BACKEND ──
-  form.append("page_width_mm", pageWidthMm.toString());
-  form.append("page_height_mm", pageHeightMm.toString());
+  const _s = (v?: string) => { if (v && v.trim()) form.append; return v?.trim() ?? ""; };
+
+  if (params.bookTitle) form.append("book_title", params.bookTitle.trim());
+  if (params.designInstructions) form.append("design_instructions", params.designInstructions.trim());
+  if (params.bookType) form.append("book_type", params.bookType.trim());
+  if (params.visualTemplate) form.append("visual_template", params.visualTemplate.trim());
+
+  // Typography
+  if (params.bodyFont) form.append("body_font", params.bodyFont.trim());
+  if (params.chapterFont) form.append("chapter_font", params.chapterFont.trim());
+  if (params.bodyFontSize) form.append("body_font_size", params.bodyFontSize.trim());
+  if (params.chapterFontSize) form.append("chapter_font_size", params.chapterFontSize.trim());
+  if (params.lineSpacing) form.append("line_spacing", params.lineSpacing.trim());
+
+  // Margins
+  if (params.marginTopMm) form.append("margin_top_mm", params.marginTopMm.trim());
+  if (params.marginBottomMm) form.append("margin_bottom_mm", params.marginBottomMm.trim());
+  if (params.marginLeftMm) form.append("margin_left_mm", params.marginLeftMm.trim());
+  if (params.marginRightMm) form.append("margin_right_mm", params.marginRightMm.trim());
+
+  // Booleans
+  if (params.showDropCap !== null && params.showDropCap !== undefined) form.append("show_drop_cap", String(params.showDropCap));
+  if (params.showPageNumbers !== null && params.showPageNumbers !== undefined) form.append("show_page_numbers", String(params.showPageNumbers));
+  if (params.mirrorMargins !== null && params.mirrorMargins !== undefined) form.append("mirror_margins", String(params.mirrorMargins));
+  if (params.sectionBreaks !== null && params.sectionBreaks !== undefined) form.append("section_breaks", String(params.sectionBreaks));
+
+  // Footer
+  if (params.footerLeftText) form.append("footer_left_text", params.footerLeftText.trim());
+  if (params.footerMiddleText) form.append("footer_middle_text", params.footerMiddleText.trim());
+  form.append("footer_right_pagenum", String(params.footerRightPagenum ?? true));
+
+  // Advanced
+  if (params.gutterMm) form.append("gutter_mm", params.gutterMm.trim());
+  if (params.paragraphSpacingMm) form.append("paragraph_spacing_mm", params.paragraphSpacingMm.trim());
+  if (params.indentMm) form.append("indent_mm", params.indentMm.trim());
+  if (params.colorMode) form.append("color_mode", params.colorMode.trim());
+  if (params.bleedMm) form.append("bleed_mm", params.bleedMm.trim());
+  if (params.chapterStart) form.append("chapter_start", params.chapterStart.trim());
+  if (params.pageNumberStart) form.append("page_number_start", params.pageNumberStart.trim());
+  if (params.pageNumberStyle) form.append("page_number_style", params.pageNumberStyle.trim());
+  if (params.headerCustomText) form.append("header_custom_text", params.headerCustomText.trim());
+  if (params.headingDesign) form.append("heading_design", params.headingDesign.trim());
+
+  // Front/Back matter (JSON arrays)
+  if (params.frontMatter) form.append("front_matter", params.frontMatter);
+  if (params.backMatter) form.append("back_matter", params.backMatter);
 
   return API.post<LayoutResult>("/design-layout", form, {
-    // No Content-Type header — axios sets multipart/form-data with boundary automatically
-    // Large Hindi books are split into many small chunks; each chunk can take
-    // ~30–60 s, and a 200-page book may have 20–30 chunks → allow up to 1snd half hour.
-    timeout: 4800000,
+    timeout: 3600000,
     onUploadProgress: onUploadProgress
-      ? (e) => {
-        if (e.total) {
-          onUploadProgress(Math.round((e.loaded * 100) / e.total));
-        }
-      }
+      ? (e) => { if (e.total) onUploadProgress(Math.round((e.loaded * 100) / e.total)); }
       : undefined,
   });
 };
