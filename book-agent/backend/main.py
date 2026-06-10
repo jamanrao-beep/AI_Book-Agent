@@ -697,18 +697,14 @@ async def proofread_document(file: UploadFile = File(...)):
         else:
             save_corrected_txt(result["corrected_text"], corrected_path)
 
-        _proofread_jobs[job_id] = {
-            "original_filename": filename,
-            "original_text": original_text,
-            "original_title": os.path.splitext(filename)[0],
-            "corrected_path": corrected_path,
-            "ext": corrected_ext,
-        }
+        # Save plain-text sidecar for ?format=txt preview endpoint
+        txt_path = os.path.join(OUTPUT_DIR, f"corrected_{job_id}.txt")
+        save_corrected_txt(result["corrected_text"], txt_path)
 
-        return {
+        legacy_title = os.path.splitext(filename)[0]
+        metadata_result = {
             "job_id": job_id,
             "original_filename": filename,
-            "corrected_text": result["corrected_text"],
             "grammar_fixes": result["grammar_fixes"],
             "punctuation_fixes": result["punctuation_fixes"],
             "style_suggestions": result["style_suggestions"],
@@ -716,8 +712,20 @@ async def proofread_document(file: UploadFile = File(...)):
             "grammar_details": result.get("grammar_details", []),
             "punctuation_details": result.get("punctuation_details", []),
             "style_details": result.get("style_details", []),
+            "skipped_chunks": result.get("skipped_chunks", []),
             "download_url": f"/proofread/{job_id}/download",
         }
+        _proofread_jobs[job_id] = {
+            "stage": "done",
+            "original_filename": filename,
+            "original_text": original_text,
+            "original_title": legacy_title,
+            "corrected_path": corrected_path,
+            "txt_path": txt_path,
+            "ext": corrected_ext,
+            "result": metadata_result,
+        }
+        return metadata_result
 
     except HTTPException:
         raise  # re-raise clean HTTP errors as-is
@@ -791,7 +799,7 @@ class SelectiveDOCXRequest(BaseModel):
 
 
 @app.post("/proofread/{job_id}/generate-pdf")
-def generate_selective_pdf(job_id: str, req: SelectivePDFRequest):
+async def generate_selective_pdf(job_id: str, req: SelectivePDFRequest):
     """
     Re-run proofreading on the original uploaded text using only the correction
     types the user selected (grammar / punctuation / style), then return a PDF.
@@ -812,12 +820,13 @@ def generate_selective_pdf(job_id: str, req: SelectivePDFRequest):
 
     original_title = job.get("original_title", "Corrected Document")
 
-    # Apply only the selected correction types
-    selective_text = apply_selective_corrections(
+    # Apply only the selected correction types (run in thread — can take minutes)
+    selective_text = await asyncio.to_thread(
+        apply_selective_corrections,
         original_text,
-        apply_grammar=req.apply_grammar,
-        apply_punctuation=req.apply_punctuation,
-        apply_style=req.apply_style,
+        req.apply_grammar,
+        req.apply_punctuation,
+        req.apply_style,
     )
 
     # Generate a fresh PDF
@@ -833,9 +842,6 @@ def generate_selective_pdf(job_id: str, req: SelectivePDFRequest):
         apply_style=req.apply_style,
     )
 
-    # Store the path so the download endpoint can serve it
-    job[f"selective_pdf_{job_id}"] = pdf_path
-
     return FileResponse(
         pdf_path,
         media_type="application/pdf",
@@ -843,7 +849,7 @@ def generate_selective_pdf(job_id: str, req: SelectivePDFRequest):
     )
 
 @app.post("/proofread/{job_id}/generate-docx")
-def generate_selective_docx(job_id: str, req: SelectiveDOCXRequest):
+async def generate_selective_docx(job_id: str, req: SelectiveDOCXRequest):
     """
     Re-run proofreading on the original uploaded text using only the correction
     types the user selected (grammar / punctuation / style), then return a DOCX.
@@ -864,14 +870,15 @@ def generate_selective_docx(job_id: str, req: SelectiveDOCXRequest):
  
     original_title = job.get("original_title", "Corrected Document")
  
-    # Apply only the selected correction types
-    selective_text = apply_selective_corrections(
+    # Apply only the selected correction types (run in thread — can take minutes)
+    selective_text = await asyncio.to_thread(
+        apply_selective_corrections,
         original_text,
-        apply_grammar=req.apply_grammar,
-        apply_punctuation=req.apply_punctuation,
-        apply_style=req.apply_style,
+        req.apply_grammar,
+        req.apply_punctuation,
+        req.apply_style,
     )
- 
+
     # Generate a fresh DOCX
     docx_filename = f"selective_{job_id}.docx"
     docx_path = os.path.join(OUTPUT_DIR, docx_filename)

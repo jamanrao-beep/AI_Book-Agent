@@ -176,7 +176,7 @@ def extract_text_from_rtf(path: str) -> str:
     # pyrefly: ignore [missing-import]
     from striprtf.striprtf import rtf_to_text
     with open(path, "r", encoding="utf-8", errors="replace") as f:
-        return rtf_to_text(f.read())
+        return _clean_cid(rtf_to_text(f.read()))
 
 
 def extract_text_from_zip(path: str) -> str:
@@ -205,7 +205,7 @@ def extract_text_from_zip(path: str) -> str:
 
 def extract_text_from_md(path: str) -> str:
     with open(path, "r", encoding="utf-8", errors="ignore") as f:
-        return f.read()
+        return _clean_cid(f.read())
 
 
 def extract_text(path: str, filename: str) -> str:

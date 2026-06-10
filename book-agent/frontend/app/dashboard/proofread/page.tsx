@@ -145,7 +145,7 @@ export default function ProofreadPage() {
       if (res.data.download_url) {
         setCorrectedTextLoading(true);
         try {
-          const baseURL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+          const baseURL = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/+$/, "");
           const textRes = await fetch(`${baseURL}${res.data.download_url}?format=txt`);
           if (textRes.ok) {
             const text = await textRes.text();
