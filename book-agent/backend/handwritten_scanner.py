@@ -54,7 +54,8 @@ SUPPORTED_UPLOAD_EXTS = SUPPORTED_IMAGE_EXTS | {".pdf", ".docx", ".zip"}
 PAGES_PER_BATCH = 1
 
 # Max output tokens per transcription call.
-TRANSCRIPTION_MAX_TOKENS = 16384
+# Using 32768 (max for gpt-4o) to ensure dense handwriting is NEVER silently truncated.
+TRANSCRIPTION_MAX_TOKENS = 32768
 
 # Number of parallel workers for transcription. 
 TRANSCRIPTION_WORKERS = 8
@@ -64,10 +65,11 @@ MAX_RETRIES = 3
 RETRY_BASE_DELAY = 2.0  
 
 # Structuring: max chars per chunk fed to GPT-4o.
-STRUCTURE_CHUNK_SIZE = 20_000
+# Larger = fewer chunks = fewer chapter-boundary stitching errors.
+STRUCTURE_CHUNK_SIZE = 40_000
 
 # Max tokens for the structuring / chapter-assembly call.
-STRUCTURE_MAX_TOKENS = 10_000
+STRUCTURE_MAX_TOKENS = 16384
 
 # PDF render zoom. 3.0 ≈ 225 DPI (better for dense writing).
 PDF_RENDER_ZOOM = 3.0
@@ -260,6 +262,20 @@ _DOCX_LATIN_FALLBACK: dict[str, str] = {
 }
 
 
+def _is_latin_char(ch: str) -> bool:
+    """Return True for Latin / punctuation characters, False for Devanagari / whitespace."""
+    cp = ord(ch)
+    if ch.isspace():
+        return False
+    if 0x0900 <= cp <= 0x097F:
+        return False   # Devanagari
+    if 0x0020 <= cp <= 0x024F:
+        return True    # Basic Latin + Latin Extended
+    if 0x2000 <= cp <= 0x206F:
+        return True    # General Punctuation
+    return False
+
+
 def _mixed_font_html(safe_escaped_text: str, deva_font: str) -> str:
     """Return ReportLab XML markup with dual-font tags for Latin runs."""
     latin_font = _LATIN_FALLBACK.get(deva_font)
@@ -284,18 +300,6 @@ def _mixed_font_html(safe_escaped_text: str, deva_font: str) -> str:
                 .replace("&quot;", '"')
                 .replace("&#39;",  "'")
         )
-
-        def _is_latin_char(ch: str) -> bool:
-            cp = ord(ch)
-            if ch.isspace():
-                return False
-            if 0x0900 <= cp <= 0x097F:
-                return False   
-            if 0x0020 <= cp <= 0x024F:
-                return True    
-            if 0x2000 <= cp <= 0x206F:
-                return True    
-            return False
 
         runs: list[tuple[bool, str]] = []
         if frag_plain:
@@ -358,8 +362,10 @@ def _enhance_image_for_ocr(path: str, intensity: str = "normal") -> str:
         sharpness = ImageEnhance.Sharpness(img)
         img = sharpness.enhance(sharpness_multiplier)
         
-        # Save to a temporary optimized file
-        enhanced_path = path.replace(".", f"_{intensity}_enhanced.")
+        # Save to a temporary optimized file — use Path so dots in parent
+        # directories (e.g. /home/user.name/page.png) are never corrupted.
+        p = Path(path)
+        enhanced_path = str(p.with_name(f"{p.stem}_{intensity}_enhanced.png"))
         img.save(enhanced_path, format="PNG")
         
         return enhanced_path
@@ -528,50 +534,49 @@ def collect_images(file_path: str, filename: str, scratch_dir: str) -> list[str]
         image_paths = []
         try:
             with zipfile.ZipFile(file_path, "r") as zf:
-                members = sorted([
+                # Sort ALL members together so the final page order matches the
+                # original ZIP ordering (images and embedded PDFs/DOCXs interleaved).
+                all_members = sorted([
                     m for m in zf.namelist()
-                    if Path(m).suffix.lower() in SUPPORTED_IMAGE_EXTS
-                    and not m.startswith("__MACOSX")
+                    if not m.startswith("__MACOSX")
                     and not os.path.basename(m).startswith(".")
+                    and Path(m).suffix.lower() in (SUPPORTED_IMAGE_EXTS | {".pdf", ".docx"})
                 ])
-                
-                for i, member in enumerate(members):
-                    member_ext = Path(member).suffix.lower()
-                    dest = os.path.join(scratch_dir, f"img_{i:04d}{member_ext}")
-                    with zf.open(member) as src, open(dest, "wb") as dst:
-                        shutil.copyfileobj(src, dst)
-                    image_paths.append(dest)
 
-                pdf_members = [m for m in zf.namelist()
-                               if Path(m).suffix.lower() in {".pdf", ".docx"}
-                               and not m.startswith("__MACOSX")]
-                               
-                for member in pdf_members:
+                img_counter = 0
+                for member in all_members:
                     member_ext = Path(member).suffix.lower()
-                    tmp = os.path.join(scratch_dir, f"inner_{uuid.uuid4().hex}{member_ext}")
-                    with zf.open(member) as src, open(tmp, "wb") as dst:
-                        shutil.copyfileobj(src, dst)
-                        
-                    sub_dir = os.path.join(scratch_dir, f"sub_{uuid.uuid4().hex}")
-                    os.makedirs(sub_dir, exist_ok=True)
-                    
-                    if member_ext == ".pdf":
-                        image_paths.extend(_pdf_to_images(tmp, sub_dir))
-                    else:
-                        image_paths.extend(_docx_to_images(tmp, sub_dir))
-                        
-                    os.remove(tmp)
+
+                    if member_ext in SUPPORTED_IMAGE_EXTS:
+                        dest = os.path.join(scratch_dir, f"img_{img_counter:04d}{member_ext}")
+                        img_counter += 1
+                        with zf.open(member) as src, open(dest, "wb") as dst:
+                            shutil.copyfileobj(src, dst)
+                        image_paths.append(dest)
+
+                    elif member_ext in {".pdf", ".docx"}:
+                        tmp = os.path.join(scratch_dir, f"inner_{uuid.uuid4().hex}{member_ext}")
+                        with zf.open(member) as src, open(tmp, "wb") as dst:
+                            shutil.copyfileobj(src, dst)
+
+                        sub_dir = os.path.join(scratch_dir, f"sub_{uuid.uuid4().hex}")
+                        os.makedirs(sub_dir, exist_ok=True)
+
+                        if member_ext == ".pdf":
+                            image_paths.extend(_pdf_to_images(tmp, sub_dir))
+                        else:
+                            image_paths.extend(_docx_to_images(tmp, sub_dir))
+
+                        os.remove(tmp)
 
             seen: set[str] = set()
             ordered: list[str] = []
-            
             for p in image_paths:
                 if p not in seen:
                     seen.add(p)
                     ordered.append(p)
-                    
             return ordered
-            
+
         except Exception as e:
             print(f"  ⚠️  ZIP file processing failed. Error details: {e}")
             raise
@@ -612,29 +617,48 @@ def _api_call_with_retry(fn, *args, **kwargs):
 
 # Upgraded Prompt to handle complex physical layouts and multi-lingual text
 TRANSCRIPTION_SYSTEM = """You are an Enterprise-Grade Handwriting & Physical Document Layout AI.
-Your job is to read handwritten text from page images and produce a faithful, clean transcription.
+Your job is to read handwritten text from page images and produce a faithful, COMPLETE transcription.
 
 CRITICAL RULES:
-1. LAYOUT PREDICTION (READING ORDER): If the page has multiple columns, sidebars, or text wrapped around diagrams, you MUST read the text in logical human reading order (generally Top to Bottom, Left to Right within columns). Do not mix column text horizontally.
-2. MULTI-LINGUAL PRESERVATION: The text may contain mixed languages (e.g. English and Hindi). Transcribe each exactly as written in its native script. Do not translate.
-3. ILLEGIBILITY: If a word is truly illegible, write [illegible]. Do NOT hallucinate or guess wildly.
-4. FORMATTING: Produce plain text paragraphs. Maintain natural paragraph breaks. Do NOT add markdown fences, headers, or commentary.
-5. BLANK PAGES: If the page has no text, output strictly: [PAGE: no text]
+1. COMPLETENESS: Transcribe ALL text you can see on the page — do NOT stop early or summarize. If the page is dense, keep going until every word is captured.
+2. LAYOUT PREDICTION (READING ORDER): If the page has multiple columns, sidebars, or text wrapped around diagrams, you MUST read the text in logical human reading order (generally Top to Bottom, Left to Right within columns). Do not mix column text horizontally.
+3. MULTI-LINGUAL PRESERVATION: The text may contain mixed languages (e.g. English and Hindi). Transcribe each exactly as written in its native script. Do not translate.
+4. ILLEGIBILITY: If a word is truly illegible, write [illegible]. Do NOT hallucinate or guess wildly.
+5. FORMATTING: Produce plain text paragraphs. Maintain natural paragraph breaks. Do NOT add markdown fences, headers, or commentary.
+6. BLANK PAGES: If the page has no text, output strictly: [PAGE: no text]
+7. NO TRUNCATION: If you are running out of space, continue transcribing — never add "..." or stop mid-sentence.
 """
 
 def _is_hallucinating(text: str) -> bool:
-    """Detects if the OCR fell into an infinite repeating loop (common failure on faded text)."""
-    if len(text) < 50:
+    """Detects if the OCR fell into an infinite repeating loop (common failure on faded text).
+    
+    Conservative threshold: only flags clear machine-loop failures, NOT legitimate
+    repetitive text like poetry, prayers, lists, or rhetorical repetition.
+    """
+    if len(text) < 100:
         return False
         
-    # Check for repeating patterns (e.g., "the the the the the")
     words = text.split()
-    if len(words) > 15:
-        # If the same word makes up more than 40% of a long text, it's a hallucination loop
+    # Require at least 30 words before checking — short responses can't be loops
+    if len(words) > 30:
         from collections import Counter
-        most_common = Counter(words).most_common(1)[0]
-        if most_common[1] > len(words) * 0.4:
+        most_common_word, most_common_count = Counter(words).most_common(1)[0]
+        # Only flag if >60% of words are the same AND it's a common function word pattern
+        # (real hallucinations loop on "the the the" or "और और और", not content words)
+        if most_common_count > len(words) * 0.60:
             return True
+    
+    # Secondary check: detect pure phrase-level looping (e.g., "hello world hello world hello world")
+    # Split text into 4-word ngrams and check if any repeats excessively
+    if len(words) >= 20:
+        ngram_size = 4
+        ngrams = [" ".join(words[i:i+ngram_size]) for i in range(len(words) - ngram_size + 1)]
+        from collections import Counter
+        if ngrams:
+            top_ngram, top_count = Counter(ngrams).most_common(1)[0]
+            # If a 4-word phrase appears more than 25% of possible positions, it's looping
+            if top_count > len(ngrams) * 0.25:
+                return True
             
     return False
 
@@ -666,7 +690,7 @@ def _transcribe_single_batch(batch: list[str], batch_start: int) -> list[dict]:
         else:
             api_content[0]["text"] = f"Transcribe the handwritten text from the following {n_sent} page image(s). Separate each page's content with the marker ---PAGE_BREAK--- on its own line."
 
-        batch_results: list[dict] = [{}] * len(batch)
+        batch_results: list[dict] = [{} for _ in range(len(batch))]
 
         for slot in failed_indices:
             batch_results[slot] = {
@@ -712,11 +736,15 @@ def _transcribe_single_batch(batch: list[str], batch_start: int) -> list[dict]:
                     }
 
                 for slot in successful_indices[len(gpt_pages):]:
+                    # The model returned fewer splits than pages sent — retry this page solo
+                    print(f"  ⚠️  Page {batch_start + slot + 1} not returned in batch split — queuing solo retry")
                     batch_results[slot] = {
                         "page_num": batch_start + slot + 1,
-                        "text": "[transcription incomplete for this page]",
+                        "text": "[transcription incomplete - will retry]",
                         "has_content": False,
-                        "hallucination_flag": False
+                        "hallucination_flag": False,
+                        "_needs_solo_retry": True,
+                        "_img_path": batch[slot],
                     }
 
             except Exception as e:
@@ -728,10 +756,15 @@ def _transcribe_single_batch(batch: list[str], batch_start: int) -> list[dict]:
                         "hallucination_flag": False
                     }
                     
-        # Cleanup temp enhanced files
+        # Cleanup temp enhanced files — only delete files that are NOT originals
+        # (enhanced_path == path when PIL is missing, so we skip those).
+        original_paths = set(batch)
         for p in temp_paths:
-            if os.path.exists(p) and p not in batch:
-                os.remove(p)
+            if os.path.exists(p) and p not in original_paths:
+                try:
+                    os.remove(p)
+                except Exception:
+                    pass
 
         return batch_results
 
@@ -788,6 +821,32 @@ def transcribe_images(image_paths: list[str], book_title: str = "") -> list[dict
     for batch_start in sorted(results_by_start.keys()):
         all_results.extend(results_by_start[batch_start])
 
+    # ── Solo retry pass: re-transcribe any pages that were missed in batch splits ──
+    needs_retry = [r for r in all_results if r.get("_needs_solo_retry")]
+    if needs_retry:
+        print(f"  🔁 Solo retry pass: {len(needs_retry)} page(s) missed in batch splits")
+        for r in needs_retry:
+            img_path = r.get("_img_path", "")
+            page_num = r["page_num"]
+            if not img_path or not os.path.exists(img_path):
+                r["text"] = "[transcription failed — image unavailable for retry]"
+                r["has_content"] = False
+                continue
+            try:
+                solo_result = _transcribe_single_batch([img_path], page_num - 1)
+                if solo_result and solo_result[0].get("has_content"):
+                    r.update(solo_result[0])
+                    r.pop("_needs_solo_retry", None)
+                    r.pop("_img_path", None)
+                    print(f"    ✅ Solo retry succeeded for page {page_num}")
+                else:
+                    r["text"] = "[transcription failed after solo retry]"
+                    r["has_content"] = False
+            except Exception as e:
+                print(f"    ⚠️  Solo retry failed for page {page_num}: {e}")
+                r["text"] = "[transcription failed after solo retry]"
+                r["has_content"] = False
+
     content_count = sum(1 for r in all_results if r["has_content"])
     print(f"  📝  Transcription complete: {content_count}/{total} pages have content")
     return all_results
@@ -803,45 +862,91 @@ Your strict mission:
 2. If there is an [illegible] marker, use the context of the surrounding sentences to deduce what the word likely was. If you cannot confidently guess, leave it as [illegible].
 3. DO NOT paraphrase, summarize, or change the style. Only fix OCR artifacts.
 4. Preserve the original language perfectly (especially Hindi/Devanagari if present).
+5. Keep ALL the content — do not skip, summarize, or drop any pages.
+6. Return the healed text separated by ---PAGE_BREAK--- between pages, in the same order.
 """
 
+# How many content pages to heal per API call.
+# Smaller = more API calls but more reliable healing of boundaries.
+HEALER_CHUNK_PAGES = 20
+
 def heal_transcription_context(pages: list[dict]) -> list[dict]:
-    print("  🩹 Initiating Context Healer Agent to fix page boundaries and illegible words...")
+    """
+    Chunk-aware Context Healer: heals page boundaries in groups of HEALER_CHUNK_PAGES.
+    This avoids the single-call char limit that silently truncated large books.
+    Each chunk has a 2-page overlap with the previous chunk so cross-boundary
+    sentence breaks at chunk edges are also repaired.
+    """
+    print("  🩹 Initiating Context Healer Agent (chunked mode) to fix page boundaries…")
     
-    content_pages = [p for p in pages if p["has_content"]]
-    if not content_pages:
+    content_indices = [i for i, p in enumerate(pages) if p["has_content"]]
+    if not content_indices:
         return pages
 
-    compiled_text = "\n\n---PAGE_BREAK---\n\n".join(
-        [f"[PAGE {p['page_num']}]\n{p['text']}" for p in content_pages]
-    )
+    # Work on a copy so we don't mutate in-place until we're sure healing succeeded
+    healed_pages = [dict(p) for p in pages]
 
-    try:
-        response = client.chat.completions.create(
-            model=MODEL,
-            messages=[
-                {"role": "system", "content": HEALER_SYSTEM_PROMPT},
-                {"role": "user", "content": f"Heal this raw OCR text:\n\n{compiled_text[:60000]}"} 
-            ],
-            max_tokens=10000,
-            temperature=0.1 
-        )
-        healed_raw = response.choices[0].message.content.strip()
+    # Process in overlapping chunks of HEALER_CHUNK_PAGES
+    chunk_size = HEALER_CHUNK_PAGES
+    overlap = 2  # pages of overlap between chunks to catch cross-chunk boundaries
+
+    i = 0
+    chunk_num = 0
+    total_chunks = max(1, (len(content_indices) + chunk_size - 1) // chunk_size)
+
+    while i < len(content_indices):
+        chunk_end = min(i + chunk_size, len(content_indices))
+        chunk_content_indices = content_indices[i:chunk_end]
+        chunk_num += 1
         
-        healed_pages = []
-        raw_splits = healed_raw.split("---PAGE_BREAK---")
+        # Build the text block for this chunk
+        chunk_blocks = []
+        for idx in chunk_content_indices:
+            p = healed_pages[idx]
+            chunk_blocks.append(f"[PAGE {p['page_num']}]\n{p['text']}")
         
-        for i, split_text in enumerate(raw_splits):
-            if i < len(content_pages):
-                clean_text = re.sub(r'\[PAGE \d+\]\n?', '', split_text).strip()
-                content_pages[i]["text"] = clean_text
-                
-        print("  ✅ Context Healer successfully stitched page boundaries.")
-        return pages 
+        compiled_text = "\n\n---PAGE_BREAK---\n\n".join(chunk_blocks)
         
-    except Exception as e:
-        print(f"  ⚠️ Healer agent failed, falling back to raw parallel transcription: {e}")
-        return pages
+        try:
+            response = _api_call_with_retry(
+                client.chat.completions.create,
+                model=MODEL,
+                messages=[
+                    {"role": "system", "content": HEALER_SYSTEM_PROMPT},
+                    {"role": "user", "content": (
+                        f"Heal this raw OCR text (chunk {chunk_num}/{total_chunks}).\n"
+                        f"There are {len(chunk_content_indices)} pages. Return ALL of them separated by ---PAGE_BREAK---.\n\n"
+                        f"{compiled_text}"
+                    )},
+                ],
+                max_tokens=32768,
+                temperature=0.05,
+            )
+            healed_raw = (response.choices[0].message.content or "").strip()
+
+            # Split on the page break marker
+            raw_splits = healed_raw.split("---PAGE_BREAK---")
+
+            for j, split_text in enumerate(raw_splits):
+                if j >= len(chunk_content_indices):
+                    break
+                original_idx = chunk_content_indices[j]
+                # Strip [PAGE N] header that the healer may have echoed back
+                clean_text = re.sub(r'^\s*\[PAGE\s+\d+\]\s*\n?', '', split_text.strip()).strip()
+                if clean_text:  # only update if we got content back
+                    healed_pages[original_idx]["text"] = clean_text
+
+            print(f"  ✅ Healer chunk {chunk_num}/{total_chunks} done ({len(chunk_content_indices)} pages)")
+
+        except Exception as e:
+            print(f"  ⚠️  Healer chunk {chunk_num} failed, keeping raw transcription for those pages: {e}")
+            # Don't update — keep original transcription for this chunk
+
+        # Advance, but keep `overlap` pages in the next chunk to heal cross-chunk boundaries
+        i = chunk_end - overlap if chunk_end < len(content_indices) else chunk_end
+
+    print(f"  ✅ Context Healer complete ({total_chunks} chunk(s) processed).")
+    return healed_pages
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Post-processing: structure the transcribed text into a clean book
@@ -854,7 +959,8 @@ You receive raw transcribed text (possibly from handwritten pages) and must:
 3. Fix clear run-on sentences caused by page breaks mid-sentence
 4. Preserve the author's original voice, language, and style — do NOT paraphrase or rewrite
 5. Preserve the original language (do not translate)
-6. Return structured JSON only
+6. Include ALL the text — do not summarize, skip, or drop any content. Every word of the input must appear in the output.
+7. Return structured JSON only
 
 Return ONLY valid JSON with no preamble, no markdown fences:
 {
@@ -966,10 +1072,12 @@ def structure_transcription(pages: list[dict], book_title: str = "") -> dict:
         except Exception as exc:
             print(f"  ⚠️  Structuring chunk {chunk_idx + 1} failed. Using flat fallback.")
             chapter_counter += 1
+            # Strip [Page N] markers that would appear in the final PDF/DOCX
+            clean_fallback = re.sub(r'\[Page\s+\d+\]\s*\n?', '', chunk_text).strip()
             all_chapters.append({
                 "chapter_number": chapter_counter,
                 "title": f"Part {chapter_counter}",
-                "content": chunk_text,
+                "content": clean_fallback,
             })
 
     if not all_chapters:
@@ -1039,15 +1147,22 @@ def generate_scanned_pdf(structure: dict, output_path: str) -> str:
             canvas.rect(0, 0, w, 9*mm, fill=1, stroke=0)
             
             canvas.setFillColor(white)
+            # Use the unicode-capable body font if available so Devanagari/other
+            # scripts in the title aren't silently dropped by Helvetica.
+            footer_font = body_font_base if has_unicode and body_font_base != "Helvetica" else header_font
+            canvas.setFont(footer_font, 7.5)
+            title_str = structure.get("title", "Manuscript")
+            canvas.drawString(MARGIN, 3*mm, title_str)
             canvas.setFont(header_font, 7.5)
-            canvas.drawString(MARGIN, 3*mm, structure.get("title", "Manuscript"))
             canvas.drawRightString(w - MARGIN, 3*mm, f"Page {doc.page}")
             
             canvas.restoreState()
 
+        cover_title_font = _unicode_body_font("Helvetica-Bold", has_unicode)
+
         S = lambda name, **kw: ParagraphStyle(name, **kw)
         
-        cover_title = S("ct", fontName="Helvetica-Bold", fontSize=30, textColor=white,
+        cover_title = S("ct", fontName=cover_title_font, fontSize=30, textColor=white,
                         leading=38, alignment=TA_CENTER, spaceAfter=8, wordWrap="LTR")
                         
         cover_sub   = S("cs", fontName="Helvetica",      fontSize=12, textColor=HexColor("#94a3b8"),
@@ -1361,14 +1476,14 @@ def scan_handwritten_book(
         transcribed = transcribe_images(images, book_title)
 
         if progress_callback: 
-            progress_callback("healing", 65, "AI Healer stitching broken sentences and fixing illegible words...")
+            progress_callback("healing", 60, "AI Healer stitching broken sentences and fixing illegible words…")
             
         healed_transcription = heal_transcription_context(transcribed)
 
         content_pages = sum(1 for p in healed_transcription if p["has_content"])
         
         if progress_callback: 
-            progress_callback("structuring", 75, f"Structuring {content_pages}/{total_pages} pages into chapters…")
+            progress_callback("structuring", 78, f"Structuring {content_pages}/{total_pages} pages into chapters…")
 
         structure = structure_transcription(healed_transcription, book_title)
         
@@ -1376,7 +1491,7 @@ def scan_handwritten_book(
             structure["title"] = book_title
 
         if progress_callback: 
-            progress_callback("assembling", 85, "Generating PDF and DOCX (Applying Unicode layout)…")
+            progress_callback("assembling", 90, "Generating PDF and DOCX (Applying Unicode layout)…")
 
         safe_title = "".join(c for c in structure["title"] if c.isalnum() or c in (" ", "-", "_")).strip() or "manuscript"
         pdf_path  = os.path.join(output_dir, f"{safe_title}_{job_id}.pdf")

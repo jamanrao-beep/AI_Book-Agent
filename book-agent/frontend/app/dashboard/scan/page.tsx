@@ -1,5 +1,5 @@
 "use client";
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import {
     ArrowLeft,
@@ -39,7 +39,7 @@ interface ScanResult {
 }
 
 interface ProgressState {
-    stage: "idle" | "collecting" | "transcribing" | "structuring" | "assembling" | "done" | "error";
+    stage: "idle" | "collecting" | "transcribing" | "healing" | "structuring" | "assembling" | "done" | "error";
     pct: number;
     message: string;
 }
@@ -48,6 +48,7 @@ const STAGE_META: Record<string, { label: string; color: string; icon: string }>
     idle: { label: "Ready", color: "#94a3b8", icon: "⊙" },
     collecting: { label: "Extracting", color: "#a78bfa", icon: "◈" },
     transcribing: { label: "Transcribing", color: "#60a5fa", icon: "✍" },
+    healing: { label: "Healing", color: "#f472b6", icon: "🩹" },
     structuring: { label: "Structuring", color: "#f59e0b", icon: "⚙" },
     assembling: { label: "Assembling", color: "#fb923c", icon: "📐" },
     done: { label: "Complete", color: "#34d399", icon: "✓" },
@@ -57,8 +58,8 @@ const STAGE_META: Record<string, { label: string; color: string; icon: string }>
 export default function ScanPage() {
     const router = useRouter();
     const fileInputRef = useRef<HTMLInputElement>(null);
-    const multiInputRef = useRef<HTMLInputElement>(null);
     const pollRef = useRef<NodeJS.Timeout | null>(null);
+    const wsRef = useRef<WebSocket | null>(null);
 
     const [files, setFiles] = useState<File[]>([]);
     const [bookTitle, setBookTitle] = useState("");
@@ -105,41 +106,48 @@ export default function ScanPage() {
         if (files.length === 0) return;
         setError("");
         setResult(null);
-        setProgress({ stage: "collecting", pct: 5, message: "Uploading files…" });
+        setProgress({ stage: "collecting", pct: 2, message: "Uploading files…" });
+
+        // AbortController for the upload itself (5 min timeout)
+        const controller = new AbortController();
+        const uploadTimeout = setTimeout(() => controller.abort(), 5 * 60 * 1000);
 
         try {
             const form = new FormData();
 
-            // If single non-image file (PDF, DOCX, ZIP), send as 'file'
-            if (files.length === 1 && ["pdf", "docx", "zip"].includes(files[0].name.split(".").pop()?.toLowerCase() || "")) {
-                form.append("file", files[0]);
-            } else if (files.length === 1) {
-                // Single image
+            if (files.length === 1) {
                 form.append("file", files[0]);
             } else {
-                // Multiple images → send as multi-file
                 files.forEach(f => form.append("files", f));
             }
 
             if (bookTitle.trim()) form.append("book_title", bookTitle.trim());
 
-            setProgress({ stage: "transcribing", pct: 15, message: "Starting transcription…" });
+            setProgress({ stage: "collecting", pct: 5, message: "Uploading…" });
 
             const res = await fetch(`${API_BASE}/scan-handwritten`, {
                 method: "POST",
                 body: form,
+                signal: controller.signal,
             });
+
+            clearTimeout(uploadTimeout);
 
             if (!res.ok) {
                 const err = await res.json().catch(() => ({ detail: "Unknown server error" }));
                 throw new Error(err.detail || `Server error ${res.status}`);
             }
 
-            const data: ScanResult = await res.json();
-            setProgress({ stage: "done", pct: 100, message: "Complete!" });
-            setResult(data);
+            const data: { job_id: string; status: string } = await res.json();
+
+            setProgress({ stage: "transcribing", pct: 10, message: "Job started — connecting to progress feed…" });
+            startProgressTracking(data.job_id);
+
         } catch (err: unknown) {
-            const msg = err instanceof Error ? err.message : "Scan failed. Make sure the backend is running.";
+            clearTimeout(uploadTimeout);
+            const msg = err instanceof Error
+                ? (err.name === "AbortError" ? "Upload timed out. Try a smaller batch or faster connection." : err.message)
+                : "Scan failed. Make sure the backend is running.";
             setError(msg);
             setProgress({ stage: "error", pct: 0, message: msg });
         }
@@ -151,7 +159,88 @@ export default function ScanPage() {
         return ["jpg", "jpeg", "png", "webp", "bmp", "tiff", "tif", "gif"].includes(ext);
     });
     const stageMeta = STAGE_META[progress.stage] || STAGE_META.idle;
-    const isLoading = ["collecting", "transcribing", "structuring", "assembling"].includes(progress.stage);
+    const isLoading = ["collecting", "transcribing", "healing", "structuring", "assembling"].includes(progress.stage);
+
+    // ── Cleanup on unmount — prevent WS/interval leaks if user navigates away ──
+    useEffect(() => {
+        return () => {
+            if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+            if (wsRef.current) { try { wsRef.current.close(); } catch (_) { } wsRef.current = null; }
+        };
+    }, []);
+
+    // ── Real-time progress via WebSocket with polling fallback ──
+    const startProgressTracking = (jobId: string) => {
+        // Try WebSocket first
+        let ws: WebSocket | null = null;
+        let wsConnected = false;
+        let pollInterval: NodeJS.Timeout | null = null;
+
+        const stopAll = () => {
+            if (ws) { try { ws.close(); } catch (_) { } ws = null; wsRef.current = null; }
+            if (pollInterval) { clearInterval(pollInterval); pollInterval = null; pollRef.current = null; }
+        };
+
+        const applyUpdate = (data: { stage?: string; pct?: number; message?: string; result?: ScanResult; error?: string }) => {
+            if (data.stage && data.stage !== "done" && data.stage !== "error") {
+                setProgress({
+                    stage: data.stage as ProgressState["stage"],
+                    pct: data.pct ?? 0,
+                    message: data.message ?? "",
+                });
+            } else if (data.stage === "done" && data.result) {
+                stopAll();
+                setProgress({ stage: "done", pct: 100, message: "Complete!" });
+                setResult(data.result);
+            } else if (data.stage === "error" || data.error) {
+                stopAll();
+                const msg = data.message ?? data.error ?? "Scan failed.";
+                setError(msg);
+                setProgress({ stage: "error", pct: 0, message: msg });
+            }
+        };
+
+        // Polling fallback (used if WS unavailable or as safety net)
+        const startPolling = () => {
+            if (pollInterval) return;
+            pollInterval = setInterval(async () => {
+                try {
+                    const r = await fetch(`${API_BASE}/scan-handwritten/${jobId}/status`);
+                    if (!r.ok) return;
+                    const data = await r.json();
+                    applyUpdate({ stage: data.stage, pct: data.pct, message: data.message, result: data.result, error: data.error });
+                } catch (_) { /* network blip — keep polling */ }
+            }, 3000);
+            // Fix 11: store the interval in the ref immediately after creation
+            pollRef.current = pollInterval;
+        };
+
+        try {
+            const wsUrl = API_BASE.replace(/^http/, "ws") + `/ws/status/${jobId}`;
+            ws = new WebSocket(wsUrl);
+            wsRef.current = ws;
+
+            ws.onopen = () => { wsConnected = true; };
+            ws.onmessage = (e) => {
+                try {
+                    const msg = JSON.parse(e.data);
+                    if (msg.type === "progress") applyUpdate({ stage: msg.stage, pct: msg.progress, message: msg.message });
+                    // Fix 15: WS "complete" payload shape: {type:"complete", job_id, result: {job_id, title, ...}}
+                    // msg.result IS the correct shape (no extra .result wrapper needed).
+                    // Polling path sends data.result which is also the correct shape.
+                    else if (msg.type === "complete") applyUpdate({ stage: "done", pct: 100, result: msg.result?.result ?? msg.result });
+                    else if (msg.type === "error") applyUpdate({ stage: "error", error: msg.message });
+                } catch (_) { }
+            };
+            ws.onerror = () => { if (!wsConnected) startPolling(); };
+            ws.onclose = () => { if (!wsConnected) startPolling(); };
+
+            // Always run polling alongside WS as a safety net for missed messages
+            startPolling();
+        } catch (_) {
+            startPolling();
+        }
+    };
 
     return (
         <div style={{ minHeight: "100vh", background: "#0a0c18", fontFamily: "'DM Sans', sans-serif", color: "#e2e8f0" }}>

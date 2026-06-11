@@ -212,7 +212,40 @@ async def websocket_status_endpoint(websocket: WebSocket, job_id: str):
 # ─────────────────────────────────────────────────────────────────────────────
 
 _cover_jobs:      dict[str, dict] = {}
-_scan_jobs:       dict[str, dict] = {}
+class _ScanJobProxy:
+    """Disk-backed job store for scan jobs — survives Railway load-balancer routing."""
+    def _path(self, job_id: str) -> str:
+        return os.path.join(_JOBS_DIR, f"scan_{job_id}.json")
+
+    def __getitem__(self, job_id: str) -> dict:
+        try:
+            with open(self._path(job_id), "r", encoding="utf-8") as f:
+                return json.load(f)
+        except FileNotFoundError:
+            raise KeyError(job_id)
+
+    def __setitem__(self, job_id: str, value: dict) -> None:
+        tmp = self._path(job_id) + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(value, f, ensure_ascii=False)
+        os.replace(tmp, self._path(job_id))
+
+    def get(self, job_id: str, default=None):
+        try:
+            with open(self._path(job_id), "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            return default
+
+    def __contains__(self, job_id: str) -> bool:
+        return os.path.exists(self._path(job_id))
+
+    def update_job(self, job_id: str, updates: dict) -> None:
+        existing = self.get(job_id) or {}
+        existing.update(updates)
+        self[job_id] = existing
+
+_scan_jobs = _ScanJobProxy()
 _editor_sessions: dict[str, dict] = {}
 # _translate_jobs: disk-backed so Railway load-balancer can route any poll
 # to any instance and still find the job. Uses the same _JOBS_DIR as proofread.
@@ -1179,6 +1212,78 @@ def download_cover_doc(job_id: str):
 SCAN_ALLOWED_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff", ".tif", ".gif", ".pdf", ".docx", ".zip"}
 
 
+def _run_scan_job(
+    job_id: str,
+    file_path: str,
+    filename: str,
+    book_title: str,
+    staged_paths: list,
+) -> None:
+    """
+    Background thread worker for handwritten scanning with WebSocket real-time broadcast.
+    Mirrors the pattern used by translation and layout jobs.
+    staged_paths: extra temp files to clean up after (used in multi-upload ZIP bundling).
+    """
+    def progress(stage: str, pct: int, message: str) -> None:
+        _scan_jobs.update_job(job_id, {"stage": stage, "pct": pct, "message": message})
+        sync_broadcast(job_id, {
+            "type": "progress",
+            "job_id": job_id,
+            "stage": stage,
+            "progress": pct,
+            "message": message,
+        })
+
+    try:
+        result = scan_handwritten_book(
+            file_path=file_path,
+            filename=filename,
+            output_dir=OUTPUT_DIR,
+            book_title=book_title,
+            progress_callback=progress,
+        )
+
+        payload = {
+            "stage": "done",
+            "pct": 100,
+            "message": "Transcription complete!",
+            "pdf_path": result["pdf_path"],
+            "docx_path": result["docx_path"],
+            "title": result["title"],
+            "result": result,
+        }
+        _scan_jobs.update_job(job_id, payload)
+        sync_broadcast(job_id, {
+            "type": "complete",
+            "job_id": job_id,
+            "result": {
+                "job_id": job_id,
+                "title": result["title"],
+                "language": result["language"],
+                "total_pages": result["total_pages"],
+                "content_pages": result["content_pages"],
+                "total_words": result["total_words"],
+                "chapters": result["chapters"],
+                "chapter_titles": result["chapter_titles"],
+                "pdf_url": f"/scan-handwritten/{job_id}/download/pdf",
+                "docx_url": f"/scan-handwritten/{job_id}/download/docx",
+            },
+        })
+
+    except Exception as e:
+        logger.error("Scan job failed for '%s': %s\n%s", filename, e, traceback.format_exc())
+        _scan_jobs.update_job(job_id, {"stage": "error", "pct": 0, "message": str(e)})
+        sync_broadcast(job_id, {"type": "error", "job_id": job_id, "message": str(e)})
+
+    finally:
+        for p in staged_paths + [file_path]:
+            if p and os.path.exists(p):
+                try:
+                    os.remove(p)
+                except Exception:
+                    pass
+
+
 @app.post("/scan-handwritten")
 async def scan_handwritten(
     file: Optional[UploadFile] = File(default=None),
@@ -1192,9 +1297,11 @@ async def scan_handwritten(
     - Single file: image (jpg/png/webp/bmp/tiff/gif), PDF scan, DOCX with images, or ZIP of images
     - Multiple files: list of image files (multi-upload)
 
-    Returns job metadata + download URLs for PDF and DOCX.
+    Returns job_id immediately. Poll /scan-handwritten/{job_id}/status or connect via
+    WebSocket ws://.../ws/status/{job_id} for real-time progress.
+    Download URLs become active when stage == "done".
     """
-    import tempfile, zipfile as _zipfile
+    import zipfile as _zipfile
 
     # Normalise: single file vs multiple
     all_uploads: list[UploadFile] = []
@@ -1212,70 +1319,85 @@ async def scan_handwritten(
         if ext not in SCAN_ALLOWED_EXTS:
             raise HTTPException(400, f"Unsupported file type '{ext}'. Accepted: images, .pdf, .docx, .zip")
 
+    job_id = uuid.uuid4().hex
+    staged_paths: list[str] = []
+
     # If multiple image files, stream each to a temp file then bundle into ZIP
     if len(all_uploads) > 1:
-        zip_job_id = uuid.uuid4().hex
-        zip_tmp = os.path.join(OUTPUT_DIR, f"upload_pages_{zip_job_id}.zip")
-        staged: list[str] = []   # temp files to clean up
+        zip_tmp = os.path.join(OUTPUT_DIR, f"upload_pages_{job_id}.zip")
         try:
             with _zipfile.ZipFile(zip_tmp, "w", _zipfile.ZIP_DEFLATED) as zf:
                 for i, upload in enumerate(all_uploads):
                     fname = upload.filename or f"page_{i:04d}.jpg"
                     ext_i = os.path.splitext(fname)[1].lower() or ".jpg"
-                    tmp_i = os.path.join(OUTPUT_DIR, f"mup_{zip_job_id}_{i}{ext_i}")
-                    staged.append(tmp_i)
-                    await _stream_upload_to_disk(upload, tmp_i)  # honours MAX_FILE_SIZE
+                    tmp_i = os.path.join(OUTPUT_DIR, f"mup_{job_id}_{i}{ext_i}")
+                    staged_paths.append(tmp_i)
+                    await _stream_upload_to_disk(upload, tmp_i)
                     zf.write(tmp_i, arcname=fname)
-            result = scan_handwritten_book(
-                file_path=zip_tmp,
-                filename=f"pages_{zip_job_id}.zip",
-                output_dir=OUTPUT_DIR,
-                book_title=book_title,
-            )
-        finally:
-            for p in staged:
+            file_path = zip_tmp
+            filename = f"pages_{job_id}.zip"
+        except Exception:
+            for p in staged_paths:
                 if os.path.exists(p):
                     try: os.remove(p)
                     except Exception: pass
-            if os.path.exists(zip_tmp):
-                os.remove(zip_tmp)
+            raise
     else:
-        # Single file upload — stream to disk
         upload = all_uploads[0]
         filename = upload.filename or "document"
         ext = os.path.splitext(filename)[1].lower()
-        tmp_path = os.path.join(OUTPUT_DIR, f"upload_{uuid.uuid4().hex}{ext}")
-        try:
-            await _stream_upload_to_disk(upload, tmp_path)
-            result = scan_handwritten_book(
-                file_path=tmp_path,
-                filename=filename,
-                output_dir=OUTPUT_DIR,
-                book_title=book_title,
-            )
-        finally:
-            if os.path.exists(tmp_path):
-                os.remove(tmp_path)
+        file_path = os.path.join(OUTPUT_DIR, f"upload_{job_id}{ext}")
+        await _stream_upload_to_disk(upload, file_path)
 
-    job_id = result["job_id"]
     _scan_jobs[job_id] = {
-        "pdf_path": result["pdf_path"],
-        "docx_path": result["docx_path"],
-        "title": result["title"],
+        "stage": "queued",
+        "pct": 0,
+        "message": "Upload received — starting shortly…",
+        "result": None,
     }
 
-    return {
+    threading.Thread(
+        target=_run_scan_job,
+        args=(job_id, file_path, filename, book_title, staged_paths),
+        daemon=True,
+    ).start()
+
+    return {"job_id": job_id, "status": "started"}
+
+
+@app.get("/scan-handwritten/{job_id}/status")
+async def scan_status(job_id: str):
+    """Poll for scan progress. stage: queued|collecting|transcribing|healing|structuring|assembling|done|error"""
+    job = _scan_jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, "Scan job not found.")
+
+    stage = job.get("stage", "unknown")
+    resp: dict = {
         "job_id": job_id,
-        "title": result["title"],
-        "language": result["language"],
-        "total_pages": result["total_pages"],
-        "content_pages": result["content_pages"],
-        "total_words": result["total_words"],
-        "chapters": result["chapters"],
-        "chapter_titles": result["chapter_titles"],
-        "pdf_url": f"/scan-handwritten/{job_id}/download/pdf",
-        "docx_url": f"/scan-handwritten/{job_id}/download/docx",
+        "stage": stage,
+        "pct": job.get("pct", 0),
+        "message": job.get("message", ""),
     }
+
+    if stage == "done" and job.get("result"):
+        r = job["result"]
+        resp["result"] = {
+            "job_id": job_id,
+            "title": r["title"],
+            "language": r["language"],
+            "total_pages": r["total_pages"],
+            "content_pages": r["content_pages"],
+            "total_words": r["total_words"],
+            "chapters": r["chapters"],
+            "chapter_titles": r["chapter_titles"],
+            "pdf_url": f"/scan-handwritten/{job_id}/download/pdf",
+            "docx_url": f"/scan-handwritten/{job_id}/download/docx",
+        }
+    elif stage == "error":
+        resp["error"] = job.get("message", "Unknown error")
+
+    return resp
 
 
 @app.get("/scan-handwritten/{job_id}/download/pdf")
@@ -1283,8 +1405,10 @@ def download_scan_pdf(job_id: str):
     job = _scan_jobs.get(job_id)
     if not job:
         raise HTTPException(404, "Scan job not found. Re-upload to scan again.")
-    path = job["pdf_path"]
-    if not os.path.exists(path):
+    if job.get("stage") != "done":
+        raise HTTPException(400, f"Scan not complete yet (stage: {job.get('stage', 'unknown')}).")
+    path = job.get("pdf_path", "")
+    if not path or not os.path.exists(path):
         raise HTTPException(404, "PDF file not found on disk.")
     title = job.get("title", "manuscript")
     safe = "".join(c for c in title if c.isalnum() or c in (" ", "-", "_")).strip()
@@ -1296,8 +1420,10 @@ def download_scan_docx(job_id: str):
     job = _scan_jobs.get(job_id)
     if not job:
         raise HTTPException(404, "Scan job not found. Re-upload to scan again.")
-    path = job["docx_path"]
-    if not os.path.exists(path):
+    if job.get("stage") != "done":
+        raise HTTPException(400, f"Scan not complete yet (stage: {job.get('stage', 'unknown')}).")
+    path = job.get("docx_path", "")
+    if not path or not os.path.exists(path):
         raise HTTPException(404, "DOCX file not found on disk.")
     title = job.get("title", "manuscript")
     safe = "".join(c for c in title if c.isalnum() or c in (" ", "-", "_")).strip()
