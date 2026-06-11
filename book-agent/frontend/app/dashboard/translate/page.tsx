@@ -1,5 +1,5 @@
 "use client";
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import {
     ArrowLeft,
@@ -52,8 +52,7 @@ interface TranslationResult {
     total_words: number;
     chapters: number;
     chapter_titles: string[];
-    pdf_url: string;
-    docx_url: string;
+    // pdf_url and docx_url are not used — downloads are constructed from job_id
 }
 
 interface ProgressState {
@@ -87,9 +86,22 @@ function LanguageSelect({
     const [open, setOpen] = useState(false);
     const [search, setSearch] = useState("");
     const filtered = LANGUAGES.filter(l => l.toLowerCase().includes(search.toLowerCase()));
+    const wrapRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        if (!open) return;
+        const handler = (e: MouseEvent) => {
+            if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
+                setOpen(false);
+                setSearch("");
+            }
+        };
+        document.addEventListener("mousedown", handler);
+        return () => document.removeEventListener("mousedown", handler);
+    }, [open]);
 
     return (
-        <div style={{ position: "relative" }}>
+        <div ref={wrapRef} style={{ position: "relative" }}>
             <p style={{ fontSize: "11px", fontWeight: "700", letterSpacing: "0.08em", textTransform: "uppercase", color: "#475569", marginBottom: "8px" }}>
                 {label}
             </p>
@@ -167,8 +179,10 @@ export default function TranslatePage() {
     const router = useRouter();
     const fileInputRef = useRef<HTMLInputElement>(null);
     const pollRef = useRef<NodeJS.Timeout | null>(null);
+    const elapsedRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
     const [file, setFile] = useState<File | null>(null);
+    const [elapsedSecs, setElapsedSecs] = useState(0);
     const [dragging, setDragging] = useState(false);
     const [sourceLang, setSourceLang] = useState(""); // empty = auto-detect
     const [targetLang, setTargetLang] = useState("");
@@ -197,22 +211,42 @@ export default function TranslatePage() {
     };
 
     const poll = (jobId: string) => {
+        let consecutiveErrors = 0;
+        const MAX_ERRORS = 8;
         pollRef.current = setInterval(async () => {
+            // T-10: per-poll AbortController so a dropped Railway response
+            // doesn't create accumulating inflight requests over time.
+            const ctrl = new AbortController();
+            const timer = setTimeout(() => ctrl.abort(), 20_000); // 20s per poll
             try {
-                const r = await fetch(`${API_BASE}/translate/${jobId}/status`);
+                const r = await fetch(`${API_BASE}/translate/${jobId}/status`, { signal: ctrl.signal });
+                clearTimeout(timer);
                 if (!r.ok) return;
+                consecutiveErrors = 0;
                 const data = await r.json();
                 setProgress({ stage: data.stage, pct: data.pct, message: data.message });
                 if (data.stage === "done") {
                     clearInterval(pollRef.current!);
+                    if (elapsedRef.current) clearInterval(elapsedRef.current);
                     setResult(data.result);
                 }
                 if (data.stage === "error") {
                     clearInterval(pollRef.current!);
+                    if (elapsedRef.current) clearInterval(elapsedRef.current);
                     setError(data.message || "Translation failed.");
                 }
-            } catch { /* network hiccup — keep polling */ }
-        }, 1500);
+            } catch (e: unknown) {
+                clearTimeout(timer);
+                consecutiveErrors++;
+                if (consecutiveErrors >= MAX_ERRORS) {
+                    clearInterval(pollRef.current!);
+                    const msg = e instanceof Error ? e.message : "Network error";
+                    setError(`Lost connection after ${MAX_ERRORS} retries: ${msg}`);
+                    setProgress(p => ({ ...p, stage: "error" }));
+                }
+                // else: transient drop — keep polling
+            }
+        }, 3000); // 3s interval (was 1.5s — reduces request accumulation)
     };
 
     const handleSubmit = async () => {
@@ -221,21 +255,36 @@ export default function TranslatePage() {
         setResult(null);
         setProgress({ stage: "extracting", pct: 5, message: "Uploading file…" });
 
+        // TR-11: AbortController on the upload POST — Railway can silently drop
+        // the response for large files; without a timeout fetch hangs forever.
+        const uploadCtrl = new AbortController();
+        const uploadTimer = setTimeout(() => uploadCtrl.abort(), 120_000); // 2 min upload limit
         try {
             const form = new FormData();
             form.append("file", file);
             form.append("target_language", targetLang);
             if (sourceLang) form.append("source_language", sourceLang);
 
-            const res = await fetch(`${API_BASE}/translate`, { method: "POST", body: form });
+            const res = await fetch(`${API_BASE}/translate`, {
+                method: "POST",
+                body: form,
+                signal: uploadCtrl.signal,
+            });
+            clearTimeout(uploadTimer);
             if (!res.ok) {
                 const err = await res.json().catch(() => ({}));
                 throw new Error(err.detail || `Server error ${res.status}`);
             }
             const data = await res.json();
-            setProgress({ stage: "translating", pct: 20, message: "Translation in progress…" });
+            // F-10: set initial state from what backend reports; poll will drive stage changes
+            setProgress({ stage: "extracting", pct: 5, message: "Translation pipeline started…" });
+            // F-11: start elapsed time counter
+            setElapsedSecs(0);
+            if (elapsedRef.current) clearInterval(elapsedRef.current);
+            elapsedRef.current = setInterval(() => setElapsedSecs(s => s + 1), 1000);
             poll(data.job_id);
         } catch (e: unknown) {
+            clearTimeout(uploadTimer);
             const msg = e instanceof Error ? e.message : "Unknown error";
             setError(msg);
             setProgress({ stage: "error", pct: 0, message: msg });
@@ -244,6 +293,8 @@ export default function TranslatePage() {
 
     const reset = () => {
         if (pollRef.current) clearInterval(pollRef.current);
+        if (elapsedRef.current) clearInterval(elapsedRef.current);
+        setElapsedSecs(0);
         setFile(null);
         setSourceLang("");
         setTargetLang("");
@@ -397,8 +448,10 @@ export default function TranslatePage() {
                                 <div style={{ height: "3px", background: "rgba(255,255,255,0.06)", borderRadius: "3px", overflow: "hidden" }}>
                                     <div style={{ height: "100%", width: `${progress.pct}%`, background: `linear-gradient(90deg, #38bdf8, ${stageMeta.color})`, borderRadius: "3px", transition: "width 0.8s ease", boxShadow: `0 0 8px ${stageMeta.color}66` }} />
                                 </div>
-                                <p style={{ fontSize: "11px", color: "#1e293b", marginTop: "10px" }}>
-                                    Large books can take several minutes — please keep this tab open.
+                                <p style={{ fontSize: "11px", color: "#334155", marginTop: "10px" }}>
+                                    {elapsedSecs > 0
+                                        ? `${elapsedSecs >= 60 ? `${Math.floor(elapsedSecs / 60)}m ${elapsedSecs % 60}s` : `${elapsedSecs}s`} elapsed — large books take 10–40 min, please keep this tab open.`
+                                        : "Large books can take 10–40 min — please keep this tab open."}
                                 </p>
                             </div>
                         )}

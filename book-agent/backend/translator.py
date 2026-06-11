@@ -65,7 +65,7 @@ from reportlab.pdfbase.ttfonts import TTFont
 _client = openai.OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 _MODEL  = "gpt-4o"
 _CHUNK_CHARS = 12_000
-MAX_RETRIES = 4
+MAX_RETRIES = 8
 RETRY_BASE_DELAY = 2.0
 
 SUPPORTED_UPLOAD_EXTS = {".pdf", ".docx", ".zip"}
@@ -78,9 +78,18 @@ _FONTS_DIR  = os.path.join(_SCRIPT_DIR, "fonts")
 
 _FONT_URLS: dict[str, str] = {
     "NotoSerifDevanagari-Regular.ttf": "https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/NotoSerifDevanagari/NotoSerifDevanagari-Regular.ttf",
-    "NotoSerifDevanagari-Bold.ttf": "https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/NotoSerifDevanagari/NotoSerifDevanagari-Bold.ttf",
-    "NotoSansDevanagari-Regular.ttf": "https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/NotoSansDevanagari/NotoSansDevanagari-Regular.ttf",
-    "NotoSansDevanagari-Bold.ttf": "https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/NotoSansDevanagari/NotoSansDevanagari-Bold.ttf",
+    "NotoSerifDevanagari-Bold.ttf":    "https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/NotoSerifDevanagari/NotoSerifDevanagari-Bold.ttf",
+    "NotoSansDevanagari-Regular.ttf":  "https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/NotoSansDevanagari/NotoSansDevanagari-Regular.ttf",
+    "NotoSansDevanagari-Bold.ttf":     "https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/NotoSansDevanagari/NotoSansDevanagari-Bold.ttf",
+    "NotoNaskhArabic-Regular.ttf":     "https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/NotoNaskhArabic/NotoNaskhArabic-Regular.ttf",
+    "NotoNaskhArabic-Bold.ttf":        "https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/NotoNaskhArabic/NotoNaskhArabic-Bold.ttf",
+    "NotoSerifHebrew-Regular.ttf":     "https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/NotoSerifHebrew/NotoSerifHebrew-Regular.ttf",
+    "NotoSerifThai-Regular.ttf":       "https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/NotoSerifThai/NotoSerifThai-Regular.ttf",
+    "NotoSerifBengali-Regular.ttf":    "https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/NotoSerifBengali/NotoSerifBengali-Regular.ttf",
+    "NotoSerifTamil-Regular.ttf":      "https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/NotoSerifTamil/NotoSerifTamil-Regular.ttf",
+    "NotoSansGujarati-Regular.ttf":    "https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/NotoSansGujarati/NotoSansGujarati-Regular.ttf",
+    "NotoSansGurmukhi-Regular.ttf":    "https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/NotoSansGurmukhi/NotoSansGurmukhi-Regular.ttf",
+    "NotoSerifCyrillic-Regular.ttf":   "https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/NotoSerifDisplay/NotoSerifDisplay-Regular.ttf",
 }
 
 _NOTO_FONT_FILES = {
@@ -88,13 +97,41 @@ _NOTO_FONT_FILES = {
     "NotoSerifDevanagari-Bold": "NotoSerifDevanagari-Bold.ttf",
     "NotoSansDevanagari":       "NotoSansDevanagari-Regular.ttf",
     "NotoSansDevanagari-Bold":  "NotoSansDevanagari-Bold.ttf",
+    "NotoNaskhArabic":          "NotoNaskhArabic-Regular.ttf",
+    "NotoNaskhArabic-Bold":     "NotoNaskhArabic-Bold.ttf",
+    "NotoSerifHebrew":          "NotoSerifHebrew-Regular.ttf",
+    "NotoSerifThai":            "NotoSerifThai-Regular.ttf",
+    "NotoSerifBengali":         "NotoSerifBengali-Regular.ttf",
+    "NotoSerifTamil":           "NotoSerifTamil-Regular.ttf",
+    "NotoSansGujarati":         "NotoSansGujarati-Regular.ttf",
+    "NotoSansGurmukhi":         "NotoSansGurmukhi-Regular.ttf",
+    "NotoSerifCyrillic":        "NotoSerifCyrillic-Regular.ttf",
 }
 
+# Script range → (rl_font_name, word_font_name)
+_SCRIPT_FONT_MAP: list[tuple[int, int, str, str]] = [
+    (0x0600, 0x06FF, "NotoNaskhArabic",     "Noto Naskh Arabic"),
+    (0x0590, 0x05FF, "NotoSerifHebrew",     "Noto Serif Hebrew"),
+    (0x0900, 0x097F, "NotoSerifDevanagari", "Noto Serif Devanagari"),
+    (0x0980, 0x09FF, "NotoSerifBengali",    "Noto Serif Bengali"),
+    (0x0A80, 0x0AFF, "NotoSansGujarati",    "Noto Sans Gujarati"),
+    (0x0A00, 0x0A7F, "NotoSansGurmukhi",    "Noto Sans Gurmukhi"),
+    (0x0B80, 0x0BFF, "NotoSerifTamil",      "Noto Serif Tamil"),
+    (0x0E00, 0x0E7F, "NotoSerifThai",       "Noto Serif Thai"),
+    (0x0400, 0x04FF, "NotoSerifCyrillic",   "Times New Roman"),
+    # CJK: for PDF we have no reliable TTFont-compatible CJK font to download;
+    # use the best registered Noto as a graceful fallback rather than crashing.
+    # For DOCX, Word on Windows/Mac has SimSun/MS Gothic/Malgun built in.
+    (0x4E00, 0x9FFF, "",  "SimSun"),       # Chinese Simplified
+    (0x3040, 0x30FF, "",  "MS Gothic"),    # Japanese
+    (0xAC00, 0xD7AF, "",  "Malgun Gothic"), # Korean
+]
+
 _SYSTEM_FONT_DIRS = [
-    "/usr/share/fonts/truetype/noto", 
-    "/usr/share/fonts/noto", 
-    "/usr/share/fonts", 
-    "C:/Windows/Fonts", 
+    "/usr/share/fonts/truetype/noto",
+    "/usr/share/fonts/noto",
+    "/usr/share/fonts",
+    "C:/Windows/Fonts",
     "/Library/Fonts"
 ]
 
@@ -104,20 +141,20 @@ _FONT_LOCK         = threading.Lock()
 
 def _find_font_on_system(filename: str) -> Optional[str]:
     local = os.path.join(_FONTS_DIR, filename)
-    if os.path.isfile(local): 
+    if os.path.isfile(local):
         return local
     for d in _SYSTEM_FONT_DIRS:
         p = os.path.join(d, filename)
-        if os.path.isfile(p): 
+        if os.path.isfile(p):
             return p
     return None
 
 def _download_font(filename: str) -> Optional[str]:
     url = _FONT_URLS.get(filename)
-    if not url: 
+    if not url:
         return None
     dest = os.path.join(_FONTS_DIR, filename)
-    if os.path.isfile(dest): 
+    if os.path.isfile(dest):
         return dest
     try:
         os.makedirs(_FONTS_DIR, exist_ok=True)
@@ -125,37 +162,74 @@ def _download_font(filename: str) -> Optional[str]:
         with urllib.request.urlopen(req, timeout=30) as resp, open(dest, "wb") as f:
             f.write(resp.read())
         return dest
-    except Exception: 
+    except Exception:
         return None
 
 def _ensure_unicode_fonts() -> None:
     global _FONTS_REGISTERED, _REGISTERED_FONTS
-    if _FONTS_REGISTERED: 
+    if _FONTS_REGISTERED:
         return
     with _FONT_LOCK:
-        if _FONTS_REGISTERED: 
+        if _FONTS_REGISTERED:
             return
         try:
             for rl_name, filename in _NOTO_FONT_FILES.items():
                 path = _find_font_on_system(filename) or _download_font(filename)
                 if path:
-                    pdfmetrics.registerFont(TTFont(rl_name, path))
-                    _REGISTERED_FONTS.add(rl_name)
-        except Exception: 
+                    try:
+                        pdfmetrics.registerFont(TTFont(rl_name, path))
+                        _REGISTERED_FONTS.add(rl_name)
+                    except Exception:
+                        pass
+        except Exception:
             pass
-        finally: 
+        finally:
             _FONTS_REGISTERED = True
 
 def _has_non_latin(text: str) -> bool:
-    return any(ord(c) >= 0x0900 for c in text if not unicodedata.category(c).startswith("Z"))
+    return any(ord(c) >= 0x0250 for c in text
+               if not unicodedata.category(c).startswith("Z")
+               and not unicodedata.category(c).startswith("P"))
 
-def _unicode_body_font(rl_name: str, has_unicode: bool) -> str:
-    if not has_unicode: 
+def _detect_dominant_script(text: str) -> tuple[str, str]:
+    """Return (pdf_rl_font, word_font) for the dominant non-Latin script.
+    rl_font may be "" for CJK (no reliable TTFont-compatible download exists);
+    callers must handle empty string by falling back to best available font."""
+    counts: dict[int, int] = {}
+    for ch in text:
+        cp = ord(ch)
+        if cp < 0x0250:
+            continue
+        for i, (lo, hi, _, _) in enumerate(_SCRIPT_FONT_MAP):
+            if lo <= cp <= hi:
+                counts[i] = counts.get(i, 0) + 1
+    if not counts:
+        return ("", "")
+    idx = max(counts, key=counts.get)
+    _, _, rl_name, word_name = _SCRIPT_FONT_MAP[idx]
+    return (rl_name, word_name)
+
+def _best_pdf_font(text: str) -> str:
+    """Best ReportLab font for the dominant script. Never Helvetica for non-Latin."""
+    _ensure_unicode_fonts()
+    if not _has_non_latin(text):
+        return "Helvetica"
+    rl_name, _ = _detect_dominant_script(text)
+    if rl_name and rl_name in _REGISTERED_FONTS:
         return rl_name
-    for candidate in ["NotoSerifDevanagari", "NotoSansDevanagari"]:
-        if candidate in _REGISTERED_FONTS: 
+    for candidate in ["NotoSerifDevanagari", "NotoNaskhArabic", "NotoSerifThai",
+                      "NotoSerifBengali", "NotoSerifTamil", "NotoSerifCyrillic",
+                      "NotoSansDevanagari"]:
+        if candidate in _REGISTERED_FONTS:
             return candidate
-    return rl_name
+    return "Courier"
+
+def _best_word_font(text: str) -> str:
+    """Best Word font for the dominant script."""
+    if not _has_non_latin(text):
+        return "Calibri"
+    _, word_name = _detect_dominant_script(text)
+    return word_name if word_name else "Calibri"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -208,7 +282,8 @@ Strict Guidelines:
 2. Adapt idioms into natural equivalents in the target language.
 3. You MUST rigidly follow the provided Translation Glossary Map for names and nouns.
 4. Maintain paragraph breaks exactly as presented.
-5. If a PREVIOUS CHUNK CONTEXT is provided, use it ONLY to understand the immediate preceding context for continuity. Do NOT translate it."""
+5. If a PREVIOUS CHUNK CONTEXT is provided, use it ONLY to understand the immediate preceding context for continuity. Do NOT translate it.
+6. Output ONLY the translated text. No preamble, no "Here is the translation:", no commentary. Begin immediately with the first translated word."""
 
 CRITIC_SYSTEM_PROMPT = """You are a ruthless Cultural Editor and Localization Expert. 
 Compare the original book section with its newly translated version.
@@ -227,19 +302,37 @@ Ensure:
 1. EVERY original paragraph is present. 
 2. Glossary terms were applied.
 
-Output ONLY the final, beautifully translated book content. Do not include commentary."""
+CRITICAL OUTPUT RULES:
+- Output ONLY the final translated book content. Nothing else.
+- Do NOT output any commentary, notes, explanations, or preamble whatsoever.
+- Do NOT start with phrases like "Note:", "I have ensured", "Here is the", "Translation:".
+- Begin IMMEDIATELY with the first word of the translated content."""
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 3. TEXT EXTRACTION & STRUCTURING
 # ─────────────────────────────────────────────────────────────────────────────
+_CID_PATTERN = re.compile(r"\(cid:(\d+)\)")
+_CID_MAP: dict[int, str] = {
+    127: "\u2022", 183: "\u2022", 149: "\u2022", 164: "\u2022",
+    150: "\u2013", 151: "\u2014",
+    145: "\u2018", 146: "\u2019",
+    147: "\u201c", 148: "\u201d",
+    133: "\u2026", 160: " ", 173: "-",
+}
+
+def _clean_cid(text: str) -> str:
+    """Replace PDF (cid:NNN) glyph refs with proper Unicode chars.
+    Without this, GPT-4o translates literal '(cid:127)' as text."""
+    return _CID_PATTERN.sub(lambda m: _CID_MAP.get(int(m.group(1)), "\u2022"), text)
+
 def _extract_pdf(path: str) -> str:
     parts: list[str] = []
     with pdfplumber.open(path) as pdf:
         for page in pdf.pages:
             txt = page.extract_text() or ""
             if txt.strip(): 
-                parts.append(txt.strip())
+                parts.append(_clean_cid(txt.strip()))
     return "\n\n".join(parts)
 
 def _extract_docx(path: str) -> str:
@@ -247,9 +340,16 @@ def _extract_docx(path: str) -> str:
     lines: list[str] = []
     for para in doc.paragraphs:
         text = para.text.strip()
-        if text:
-            lines.append(text)
-    return "\n".join(lines)
+        if not text:
+            continue
+        style_name = (para.style.name or "").lower()
+        is_heading = any(h in style_name for h in (
+            "heading 1", "heading1", "title", "chapter", "h1",
+        ))
+        if is_heading and not _CHAPTER_RE.match(text):
+            text = "Chapter: " + text
+        lines.append(text)
+    return _clean_cid("\n\n".join(lines))
 
 def _extract_zip(zip_path: str, scratch_dir: str) -> tuple[str, str]:
     with zipfile.ZipFile(zip_path, "r") as zf:
@@ -289,8 +389,19 @@ def extract_book_text(file_path: str, filename: str, scratch_dir: str) -> tuple[
 
 _CHAPTER_RE = re.compile(
     r"^(?:"
+    # Latin: Chapter 1, Part II, Section 3, Unit IV, Ch. 5
     r"(?:chapter|ch\.?|part|section|unit)\s+[\dIVXivx]+[:\.\s].*"
     r"|[\dIVX]+[\.]\s+[A-Z].{2,}"
+    # Hindi/Devanagari: अध्याय, भाग, खंड + digit or Devanagari numeral
+    r"|(?:अध्याय|भाग|खंड|पाठ|प्रकरण|सर्ग)\s*[\d\u0966-\u096F].*"
+    # Arabic: الفصل, الجزء, القسم
+    r"|(?:الفصل|الجزء|القسم)\s+.*"
+    # Chinese: 第X章/节/部
+    r"|第[一二三四五六七八九十百\d]+[章节部篇].*"
+    # Russian: Глава, Часть
+    r"|(?:Глава|Часть)\s+[\dIVXivx]+.*"
+    # Injected by _extract_docx for DOCX heading styles
+    r"|Chapter:\s+.+"
     r")",
     re.IGNORECASE | re.MULTILINE,
 )
@@ -305,14 +416,16 @@ def _parse_structure(text: str, title_hint: str = "") -> dict:
         chapters = [{"title": "Full Text", "body": text}]
     else:
         preamble = text[: splits[0].start()].strip()
+        if preamble:
+            chapters.append({"title": "Introduction", "body": preamble})
         for idx, m in enumerate(splits):
             ch_title = m.group(0).strip()
             start = m.end()
             end = splits[idx + 1].start() if idx + 1 < len(splits) else len(text)
             body = text[start:end].strip()
-            if idx == 0 and preamble: 
-                body = preamble + "\n\n" + body
-            chapters.append({"title": ch_title, "body": body})
+            # TR-7: always keep the chapter so it appears in the output;
+            # an empty body will be caught in _translate_chapter and skipped gracefully
+            chapters.append({"title": ch_title, "body": body or ""})
 
     return {"title": title, "chapters": chapters}
 
@@ -338,7 +451,8 @@ def _extract_automated_glossary(text_sample: str, target_lang: str) -> dict:
         resp = _api_call_with_retry(
             _client.chat.completions.create, 
             model=_MODEL, 
-            temperature=0.2, 
+            temperature=0.2,
+            max_tokens=2048,
             response_format={"type": "json_object"},
             messages=[
                 {"role": "system", "content": GLOSSARY_EXTRACTOR_PROMPT},
@@ -386,13 +500,14 @@ def _translate_chunk_swarm(
     user_content += f"ORIGINAL TO TRANSLATE:\n{text_chunk}"
     
     resp1 = _api_call_with_retry(
-        _client.chat.completions.create, 
-        model=_MODEL, 
+        _client.chat.completions.create,
+        model=_MODEL,
         messages=[
-            {"role": "system", "content": TRANSLATOR_SYSTEM_PROMPT}, 
+            {"role": "system", "content": TRANSLATOR_SYSTEM_PROMPT},
             {"role": "user", "content": user_content}
-        ], 
-        temperature=0.3
+        ],
+        temperature=0.3,
+        max_tokens=4096,
     )
     initial_translation = resp1.choices[0].message.content.strip()
 
@@ -404,13 +519,14 @@ def _translate_chunk_swarm(
     )
     
     resp2 = _api_call_with_retry(
-        _client.chat.completions.create, 
-        model=_MODEL, 
+        _client.chat.completions.create,
+        model=_MODEL,
         messages=[
-            {"role": "system", "content": CRITIC_SYSTEM_PROMPT}, 
+            {"role": "system", "content": CRITIC_SYSTEM_PROMPT},
             {"role": "user", "content": critic_user}
-        ], 
-        temperature=0.2
+        ],
+        temperature=0.2,
+        max_tokens=1024,  # critique is short; 1024 is plenty and keeps cost low
     )
     critic_feedback = resp2.choices[0].message.content.strip()
 
@@ -424,17 +540,21 @@ def _translate_chunk_swarm(
         )
         
         resp3 = _api_call_with_retry(
-            _client.chat.completions.create, 
-            model=_MODEL, 
+            _client.chat.completions.create,
+            model=_MODEL,
             messages=[
-                {"role": "system", "content": TRANSLATOR_SYSTEM_PROMPT}, 
+                {"role": "system", "content": TRANSLATOR_SYSTEM_PROMPT},
                 {"role": "user", "content": refine_user}
-            ], 
-            temperature=0.3
+            ],
+            temperature=0.3,
+            max_tokens=4096,
         )
         refined_translation = resp3.choices[0].message.content.strip()
 
-    # --- Phase 3: Reconciler ---
+    # --- Phase 3: Reconciler (skipped when critic says PASSED) ---
+    if "PASSED" in critic_feedback.upper() and len(refined_translation) > 20:
+        return refined_translation
+
     rec_user = (
         f"ORIGINAL:\n{text_chunk}\n\n"
         f"CURRENT DRAFT:\n{refined_translation}\n\n"
@@ -449,7 +569,8 @@ def _translate_chunk_swarm(
             {"role": "system", "content": RECONCILER_SYSTEM_PROMPT}, 
             {"role": "user", "content": rec_user}
         ], 
-        temperature=0.1
+        temperature=0.1,
+        max_tokens=4096,
     )
     
     return resp4.choices[0].message.content.strip()
@@ -462,7 +583,11 @@ def _translate_chapter(
     glossary_map: dict
 ) -> dict:
     translated_title = _translate_title(chapter["title"], target_language, source_language)
-    
+
+    # TR-9: skip translation entirely for empty chapters
+    if not chapter["body"].strip():
+        return {"title": translated_title, "body": ""}
+
     paragraphs = chapter["body"].split("\n\n")
     chunks: list[str] = []
     current: list[str] = []
@@ -497,9 +622,10 @@ def _translate_chapter(
         )
         translated_parts.append(translated_text)
         
-        # NEW: Extract the last ~200 words of this chunk to pass to the next iteration
-        words = chunk.split()
-        previous_chunk_tail = " ".join(words[-200:]) if len(words) > 200 else chunk
+        # T-9: use the TRANSLATED tail as overlap, not the source chunk.
+        # Source-language overlap confuses the model (it skips translating "previous context").
+        t_words = translated_text.split()
+        previous_chunk_tail = " ".join(t_words[-200:]) if len(t_words) > 200 else translated_text
         
         rolling_memory = f"Book: '{book_title}'. Last translated stylistic line: {translated_text[-250:]}"
 
@@ -516,8 +642,7 @@ def _build_pdf(book: dict, target_language: str, output_path: str) -> None:
     _ensure_unicode_fonts()
     
     all_text = book["title"] + " ".join([ch["body"] for ch in book["chapters"]])
-    has_unicode = _has_non_latin(all_text)
-    body_font = _unicode_body_font("Helvetica", has_unicode)
+    body_font = _best_pdf_font(all_text)
     
     doc = SimpleDocTemplate(
         output_path, 
@@ -580,14 +705,28 @@ def _build_pdf(book: dict, target_language: str, output_path: str) -> None:
     ]
 
     for ch in book["chapters"]:
-        story.append(Paragraph(ch["title"], ch_head))
+        import unicodedata as _ud
+        ch_title_safe = (_ud.normalize("NFC", (ch.get("title") or "").strip())
+                         .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+        story.append(Paragraph(ch_title_safe or "&nbsp;", ch_head))
         story.append(HRFlowable(width="100%", thickness=0.5, color=HexColor("#CBD5E1")))
         story.append(Spacer(1, 0.3*cm))
         
         for para in ch["body"].split("\n\n"):
-            if para.strip():
-                safe = para.strip().replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-                story.append(Paragraph(safe, body))
+            raw = para.strip()
+            if not raw:
+                continue
+            # TR-5: NFC-normalise so ReportLab's font shaper gets composed forms
+            import unicodedata as _ud
+            raw = _ud.normalize("NFC", raw)
+            # TR-6: full XML escape — &, <, >, " and strip any AI-injected HTML tags
+            safe = (raw
+                    .replace("&", "&amp;")
+                    .replace("<", "&lt;")
+                    .replace(">", "&gt;")
+                    .replace('"', "&quot;")
+                    .replace("'", "&#39;"))
+            story.append(Paragraph(safe, body))
                 
         story.append(PageBreak())
         
@@ -598,8 +737,7 @@ def _build_docx(book: dict, target_language: str, output_path: str) -> None:
     doc = Document()
     
     all_text = book["title"] + " ".join([ch["body"] for ch in book["chapters"]])
-    has_unicode = _has_non_latin(all_text)
-    word_font = "Noto Serif Devanagari" if has_unicode else "Calibri"
+    word_font = _best_word_font(all_text)
 
     def apply_font(run, font_name):
         run.font.name = font_name
@@ -629,17 +767,33 @@ def _build_docx(book: dict, target_language: str, output_path: str) -> None:
     doc.add_page_break()
 
     for ch in book["chapters"]:
-        h = doc.add_heading(ch["title"], level=1)
-        apply_font(h.runs[0], word_font)
-        
+        ch_title = (ch.get("title") or "").strip()
+        h = doc.add_heading(ch_title or " ", level=1)
+        # TR-3: guard against empty heading (zero runs → IndexError)
+        if h.runs:
+            apply_font(h.runs[0], word_font)
+        else:
+            run_h = h.add_run(ch_title or " ")
+            apply_font(run_h, word_font)
+
         for para in ch["body"].split("\n\n"):
-            if para.strip():
-                p = doc.add_paragraph(para.strip())
-                p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-                for r in p.runs: 
-                    r.font.size = Pt(11)
-                    apply_font(r, word_font)
-                    
+            cleaned = para.strip()
+            if not cleaned:
+                continue
+            # TR-5: NFC-normalize so ReportLab/Word don't choke on decomposed glyphs
+            import unicodedata as _ud
+            cleaned = _ud.normalize("NFC", cleaned)
+            p = doc.add_paragraph()
+            p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+            # TR-4: add_paragraph with text creates one run; add it manually
+            # so we can apply font immediately, handling embedded \n as line breaks
+            for line_idx, line in enumerate(cleaned.split("\n")):
+                if line_idx > 0:
+                    p.add_run().add_break()
+                run_p = p.add_run(line)
+                run_p.font.size = Pt(11)
+                apply_font(run_p, word_font)
+
         doc.add_page_break()
         
     doc.save(output_path)
@@ -686,7 +840,7 @@ def translate_book(
         translated_chapters = []
 
         for idx, chapter in enumerate(structure["chapters"]):
-            pct = 30 + int((idx / n_chapters) * 55)
+            pct = 30 + int((idx / max(n_chapters, 1)) * 55)  # TR-8: guard ZeroDivisionError
             _progress("translating", pct, f'Translating chapter {idx + 1}/{n_chapters}: "{chapter["title"][:60]}"…')
             translated_chapters.append(
                 _translate_chapter(

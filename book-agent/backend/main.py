@@ -214,7 +214,42 @@ async def websocket_status_endpoint(websocket: WebSocket, job_id: str):
 _cover_jobs:      dict[str, dict] = {}
 _scan_jobs:       dict[str, dict] = {}
 _editor_sessions: dict[str, dict] = {}
-_translate_jobs:  dict[str, dict] = {}
+# _translate_jobs: disk-backed so Railway load-balancer can route any poll
+# to any instance and still find the job. Uses the same _JOBS_DIR as proofread.
+class _TranslateJobProxy:
+    """Disk-backed job store for translation jobs (mirrors _DiskJobProxy)."""
+    def _path(self, job_id: str) -> str:
+        return os.path.join(_JOBS_DIR, f"trans_{job_id}.json")
+
+    def __getitem__(self, job_id: str) -> dict:
+        try:
+            with open(self._path(job_id), "r", encoding="utf-8") as f:
+                return json.load(f)
+        except FileNotFoundError:
+            raise KeyError(job_id)
+
+    def __setitem__(self, job_id: str, value: dict) -> None:
+        tmp = self._path(job_id) + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(value, f, ensure_ascii=False)
+        os.replace(tmp, self._path(job_id))
+
+    def get(self, job_id: str, default=None):
+        try:
+            with open(self._path(job_id), "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            return default
+
+    def __contains__(self, job_id: str) -> bool:
+        return os.path.exists(self._path(job_id))
+
+    def update_job(self, job_id: str, updates: dict) -> None:
+        existing = self.get(job_id) or {}
+        existing.update(updates)
+        self[job_id] = existing
+
+_translate_jobs = _TranslateJobProxy()
 _layout_jobs:     dict[str, dict] = {}
 
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "output")
@@ -296,6 +331,9 @@ class _DiskJobProxy:
     def get(self, job_id: str, default=None):
         result = _read_job(job_id)
         return result if result is not None else default
+
+    def __contains__(self, job_id: str) -> bool:
+        return os.path.exists(_job_path(job_id))
 
 
 _proofread_jobs = _DiskJobProxy()
@@ -1483,7 +1521,7 @@ def _run_translation_job(job_id: str, file_path: str, filename: str,
                          target_language: str, source_language: str) -> None:
     """Background thread worker for translation with WebSocket real-time broadcast."""
     def progress(stage: str, pct: int, message: str) -> None:
-        _translate_jobs[job_id].update({"stage": stage, "pct": pct, "message": message})
+        _translate_jobs.update_job(job_id, {"stage": stage, "pct": pct, "message": message})
         sync_broadcast(job_id, {
             "type": "progress",
             "job_id": job_id,
@@ -1511,11 +1549,11 @@ def _run_translation_job(job_id: str, file_path: str, filename: str,
             "docx_path": result["docx_path"],
             "title": result["title"],
         }
-        _translate_jobs[job_id].update(payload)
+        _translate_jobs.update_job(job_id, payload)
         sync_broadcast(job_id, {"type": "complete", "job_id": job_id, "result": payload["result"]})
         
     except Exception as e:
-        _translate_jobs[job_id].update({
+        _translate_jobs.update_job(job_id, {
             "stage": "error",
             "pct": 0,
             "message": str(e),
@@ -1572,7 +1610,7 @@ async def translate_book_endpoint(
 
 
 @app.get("/translate/{job_id}/status")
-def translate_status(job_id: str):
+async def translate_status(job_id: str):
     """Poll this endpoint for translation progress."""
     job = _translate_jobs.get(job_id)
     if not job:
@@ -1603,7 +1641,7 @@ def translate_status(job_id: str):
 
 
 @app.get("/translate/{job_id}/download/pdf")
-def download_translate_pdf(job_id: str):
+async def download_translate_pdf(job_id: str):
     job = _translate_jobs.get(job_id)
     if not job or job.get("stage") != "done":
         raise HTTPException(404, "Translation not complete or job not found.")
@@ -1616,7 +1654,7 @@ def download_translate_pdf(job_id: str):
 
 
 @app.get("/translate/{job_id}/download/docx")
-def download_translate_docx(job_id: str):
+async def download_translate_docx(job_id: str):
     job = _translate_jobs.get(job_id)
     if not job or job.get("stage") != "done":
         raise HTTPException(404, "Translation not complete or job not found.")
