@@ -1,7 +1,9 @@
 # pyrefly: ignore [missing-import]
 from fastapi import FastAPI, BackgroundTasks, HTTPException, UploadFile, File, Form
 # pyrefly: ignore [missing-import]
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
+# pyrefly: ignore [missing-import]
+from fastapi.requests import Request
 # pyrefly: ignore [missing-import]
 from fastapi.middleware.cors import CORSMiddleware
 # pyrefly: ignore [missing-import]
@@ -13,12 +15,24 @@ import os, sys, uuid, zipfile, shutil, threading, logging, traceback, json
 import asyncio
 # pyrefly: ignore [missing-import]
 from fastapi import WebSocket, WebSocketDisconnect
+# pyrefly: ignore [missing-import]
+from contextlib import asynccontextmanager
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger("editorial_ai")
+
+# H2 FIX: Define lifespan before app so FastAPI() can reference it
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Captures the main ASGI event loop on boot to allow background thread broadcasting."""
+    global _global_event_loop
+    _global_event_loop = asyncio.get_running_loop()
+    logger.info("🚀 Enterprise ASGI Event Loop captured for background task broadcasting.")
+    yield
+
 from handwritten_scanner import scan_handwritten_book, SUPPORTED_IMAGE_EXTS, SUPPORTED_UPLOAD_EXTS
 from book_editor import (
     extract_book_text, parse_book_structure,
@@ -48,6 +62,7 @@ app = FastAPI(
     title="Editorial AI — Book Writing + Proofreading + Cover Design",
     description="Generate full books, proofread documents, and design covers using OpenAI GPT-4o",
     version="4.1.0",
+    lifespan=lifespan,
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -81,12 +96,6 @@ app.add_middleware(
 # OPTIONS preflight gets a 200 response with the correct headers attached
 # by the CORSMiddleware above.
 # ─────────────────────────────────────────────────────────────────────────────
-
-# pyrefly: ignore [missing-import]
-from fastapi.requests import Request
-# pyrefly: ignore [missing-import]
-from fastapi.responses import JSONResponse
-
 
 @app.options("/{rest_of_path:path}")
 async def preflight_handler(rest_of_path: str, request: Request):
@@ -176,13 +185,6 @@ class ConnectionManager:
 manager = ConnectionManager()
 _global_event_loop = None
 
-@app.on_event("startup")
-async def startup_event():
-    """Captures the main ASGI event loop on boot to allow background thread broadcasting."""
-    global _global_event_loop
-    _global_event_loop = asyncio.get_running_loop()
-    logger.info("🚀 Enterprise ASGI Event Loop captured for background task broadcasting.")
-
 def sync_broadcast(job_id: str, message: dict):
     """
     Safely bridges synchronous background threads to the async WebSocket publisher 
@@ -212,6 +214,43 @@ async def websocket_status_endpoint(websocket: WebSocket, job_id: str):
 # ─────────────────────────────────────────────────────────────────────────────
 
 _cover_jobs:      dict[str, dict] = {}
+
+class _LayoutJobProxy:
+    """Disk-backed job store for layout jobs — survives Railway load-balancer routing.
+    Mirrors _ScanJobProxy exactly so all job types are consistent.
+    Previously _layout_jobs was a plain dict[str,dict] which meant any Railway
+    instance re-route on status poll would return 404.
+    """
+    def _path(self, job_id: str) -> str:
+        return os.path.join(_JOBS_DIR, f"layout_{job_id}.json")
+
+    def __getitem__(self, job_id: str) -> dict:
+        try:
+            with open(self._path(job_id), "r", encoding="utf-8") as f:
+                return json.load(f)
+        except FileNotFoundError:
+            raise KeyError(job_id)
+
+    def __setitem__(self, job_id: str, value: dict) -> None:
+        tmp = self._path(job_id) + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(value, f, ensure_ascii=False)
+        os.replace(tmp, self._path(job_id))
+
+    def get(self, job_id: str, default=None):
+        try:
+            with open(self._path(job_id), "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            return default
+
+    def __contains__(self, job_id: str) -> bool:
+        return os.path.exists(self._path(job_id))
+
+    def update_job(self, job_id: str, updates: dict) -> None:
+        existing = self.get(job_id) or {}
+        existing.update(updates)
+        self[job_id] = existing
 class _ScanJobProxy:
     """Disk-backed job store for scan jobs — survives Railway load-balancer routing."""
     def _path(self, job_id: str) -> str:
@@ -283,7 +322,17 @@ class _TranslateJobProxy:
         self[job_id] = existing
 
 _translate_jobs = _TranslateJobProxy()
-_layout_jobs:     dict[str, dict] = {}
+_layout_jobs = _LayoutJobProxy()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Global job concurrency limiter
+# ─────────────────────────────────────────────────────────────────────────────
+# Without this, each upload spawns an unbounded background thread that runs 8
+# parallel OpenAI calls. Two concurrent users = 16 simultaneous API calls,
+# all hitting rate limits, all backing off, all blocking each other.
+# This semaphore caps the number of *active heavy jobs* (scan/translate/layout)
+# at 2 at once. A 3rd upload queues until a slot opens.
+_HEAVY_JOB_SEMAPHORE = threading.Semaphore(2)
 
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "output")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -794,6 +843,7 @@ async def proofread_document(file: UploadFile = File(...)):
             "corrected_path": corrected_path,
             "txt_path": txt_path,
             "ext": corrected_ext,
+            "original_ext": ext,   # H3 FIX: was missing — caused KeyError in downstream code
             "result": metadata_result,
         }
         return metadata_result
@@ -1234,54 +1284,57 @@ def _run_scan_job(
             "message": message,
         })
 
-    try:
-        result = scan_handwritten_book(
-            file_path=file_path,
-            filename=filename,
-            output_dir=OUTPUT_DIR,
-            book_title=book_title,
-            progress_callback=progress,
-        )
+    # Queue if the server is already busy — update status so frontend knows
+    _scan_jobs.update_job(job_id, {"stage": "queued", "pct": 0, "message": "Waiting for a free processing slot…"})
+    with _HEAVY_JOB_SEMAPHORE:
+        try:
+            result = scan_handwritten_book(
+                file_path=file_path,
+                filename=filename,
+                output_dir=OUTPUT_DIR,
+                book_title=book_title,
+                progress_callback=progress,
+            )
 
-        payload = {
-            "stage": "done",
-            "pct": 100,
-            "message": "Transcription complete!",
-            "pdf_path": result["pdf_path"],
-            "docx_path": result["docx_path"],
-            "title": result["title"],
-            "result": result,
-        }
-        _scan_jobs.update_job(job_id, payload)
-        sync_broadcast(job_id, {
-            "type": "complete",
-            "job_id": job_id,
-            "result": {
-                "job_id": job_id,
+            payload = {
+                "stage": "done",
+                "pct": 100,
+                "message": "Transcription complete!",
+                "pdf_path": result["pdf_path"],
+                "docx_path": result["docx_path"],
                 "title": result["title"],
-                "language": result["language"],
-                "total_pages": result["total_pages"],
-                "content_pages": result["content_pages"],
-                "total_words": result["total_words"],
-                "chapters": result["chapters"],
-                "chapter_titles": result["chapter_titles"],
-                "pdf_url": f"/scan-handwritten/{job_id}/download/pdf",
-                "docx_url": f"/scan-handwritten/{job_id}/download/docx",
-            },
-        })
+                "result": result,
+            }
+            _scan_jobs.update_job(job_id, payload)
+            sync_broadcast(job_id, {
+                "type": "complete",
+                "job_id": job_id,
+                "result": {
+                    "job_id": job_id,
+                    "title": result["title"],
+                    "language": result["language"],
+                    "total_pages": result["total_pages"],
+                    "content_pages": result["content_pages"],
+                    "total_words": result["total_words"],
+                    "chapters": result["chapters"],
+                    "chapter_titles": result["chapter_titles"],
+                    "pdf_url": f"/scan-handwritten/{job_id}/download/pdf",
+                    "docx_url": f"/scan-handwritten/{job_id}/download/docx",
+                },
+            })
 
-    except Exception as e:
-        logger.error("Scan job failed for '%s': %s\n%s", filename, e, traceback.format_exc())
-        _scan_jobs.update_job(job_id, {"stage": "error", "pct": 0, "message": str(e)})
-        sync_broadcast(job_id, {"type": "error", "job_id": job_id, "message": str(e)})
+        except Exception as e:
+            logger.error("Scan job failed for '%s': %s\n%s", filename, e, traceback.format_exc())
+            _scan_jobs.update_job(job_id, {"stage": "error", "pct": 0, "message": str(e)})
+            sync_broadcast(job_id, {"type": "error", "job_id": job_id, "message": str(e)})
 
-    finally:
-        for p in staged_paths + [file_path]:
-            if p and os.path.exists(p):
-                try:
-                    os.remove(p)
-                except Exception:
-                    pass
+        finally:
+            for p in staged_paths + [file_path]:
+                if p and os.path.exists(p):
+                    try:
+                        os.remove(p)
+                    except Exception:
+                        pass
 
 
 @app.post("/scan-handwritten")
@@ -1337,10 +1390,13 @@ async def scan_handwritten(
             file_path = zip_tmp
             filename = f"pages_{job_id}.zip"
         except Exception:
-            for p in staged_paths:
+            # C3 FIX: also clean up zip_tmp which is NOT in staged_paths
+            for p in staged_paths + [zip_tmp]:
                 if os.path.exists(p):
-                    try: os.remove(p)
-                    except Exception: pass
+                    try:
+                        os.remove(p)
+                    except Exception:
+                        pass
             raise
     else:
         upload = all_uploads[0]
@@ -1632,7 +1688,7 @@ def editor_delete_session(session_id: str):
                 p = v.get(path_key, "")
                 if p and os.path.exists(p):
                     try: os.remove(p)
-                    except: pass
+                    except Exception: pass
     return {"deleted": True}
 
 
@@ -1656,41 +1712,43 @@ def _run_translation_job(job_id: str, file_path: str, filename: str,
             "message": message
         })
 
-    try:
-        result = translate_book(
-            file_path=file_path,
-            filename=filename,
-            output_dir=OUTPUT_DIR,
-            target_language=target_language,
-            source_language=source_language,
-            progress_callback=progress,
-        )
-        
-        payload = {
-            "stage": "done",
-            "pct": 100,
-            "message": "Translation complete!",
-            "result": result,
-            "pdf_path": result["pdf_path"],
-            "docx_path": result["docx_path"],
-            "title": result["title"],
-        }
-        _translate_jobs.update_job(job_id, payload)
-        sync_broadcast(job_id, {"type": "complete", "job_id": job_id, "result": payload["result"]})
-        
-    except Exception as e:
-        _translate_jobs.update_job(job_id, {
-            "stage": "error",
-            "pct": 0,
-            "message": str(e),
-        })
-        sync_broadcast(job_id, {"type": "error", "job_id": job_id, "message": str(e)})
-    finally:
-        if os.path.exists(file_path):
-            try:
-                os.remove(file_path)
-            except Exception:
-                pass
+    _translate_jobs.update_job(job_id, {"stage": "queued", "pct": 0, "message": "Waiting for a free processing slot…"})
+    with _HEAVY_JOB_SEMAPHORE:
+        try:
+            result = translate_book(
+                file_path=file_path,
+                filename=filename,
+                output_dir=OUTPUT_DIR,
+                target_language=target_language,
+                source_language=source_language,
+                progress_callback=progress,
+            )
+            
+            payload = {
+                "stage": "done",
+                "pct": 100,
+                "message": "Translation complete!",
+                "result": result,
+                "pdf_path": result["pdf_path"],
+                "docx_path": result["docx_path"],
+                "title": result["title"],
+            }
+            _translate_jobs.update_job(job_id, payload)
+            sync_broadcast(job_id, {"type": "complete", "job_id": job_id, "result": payload["result"]})
+            
+        except Exception as e:
+            _translate_jobs.update_job(job_id, {
+                "stage": "error",
+                "pct": 0,
+                "message": str(e),
+            })
+            sync_broadcast(job_id, {"type": "error", "job_id": job_id, "message": str(e)})
+        finally:
+            if os.path.exists(file_path):
+                try:
+                    os.remove(file_path)
+                except Exception:
+                    pass
 
 
 @app.post("/translate")
@@ -1848,7 +1906,7 @@ def _run_layout_job(
     """Background thread worker for layout design with WebSocket real-time broadcast."""
 
     def progress(stage: str, pct: int, message: str) -> None:
-        _layout_jobs[job_id].update({"stage": stage, "pct": pct, "message": message})
+        _layout_jobs.update_job(job_id, {"stage": stage, "pct": pct, "message": message})
         sync_broadcast(job_id, {
             "type": "progress",
             "job_id": job_id,
@@ -1857,74 +1915,73 @@ def _run_layout_job(
             "message": message
         })
 
-    try:
-        result = design_layout(
-            file_path=file_path,
-            filename=filename,
-            output_dir=OUTPUT_DIR,
-            page_width_mm=page_width_mm,
-            page_height_mm=page_height_mm,
-            book_title=book_title,
-            design_instructions=design_instructions,
-            book_type=book_type,
-            visual_template=visual_template,
-            progress_callback=progress,
-            # pass overrides through
-            body_font=body_font,
-            chapter_font=chapter_font,
-            body_font_size=body_font_size,
-            chapter_font_size=chapter_font_size,
-            line_spacing=line_spacing,
-            margin_top_mm=margin_top_mm,
-            margin_bottom_mm=margin_bottom_mm,
-            margin_left_mm=margin_left_mm,
-            margin_right_mm=margin_right_mm,
-            show_drop_cap=show_drop_cap,
-            show_page_numbers=show_page_numbers,
-            footer_left_text=footer_left_text,
-            footer_middle_text=footer_middle_text,
-            footer_right_pagenum=footer_right_pagenum,
-            mirror_margins=mirror_margins,
-            gutter_mm=gutter_mm,
-            paragraph_spacing_mm=paragraph_spacing_mm,
-            indent_mm=indent_mm,
-            color_mode=color_mode,
-            bleed_mm=bleed_mm,
-            chapter_start=chapter_start,
-            page_number_start=page_number_start,
-            page_number_style=page_number_style,
-            header_custom_text=header_custom_text,
-            heading_design=heading_design,
-            section_breaks=section_breaks,
-            front_matter=front_matter,
-            back_matter=back_matter,
-        )
-        
-        payload = {
-            "stage": "done",
-            "pct": 100,
-            "message": "Layout design complete!",
-            "result": result,
-            "pdf_path": result["pdf_path"],
-            "docx_path": result["docx_path"],
-            "title": result["title"],
-            "book_type": result.get("book_type", "auto"),
-            "book_type_label": result.get("book_type_label", "Auto (AI chosen)"),
-        }
-        _layout_jobs[job_id].update(payload)
-        sync_broadcast(job_id, {"type": "complete", "job_id": job_id, "result": payload["result"]})
-        
-    except Exception as e:
-        _layout_jobs[job_id].update(
-            {"stage": "error", "pct": 0, "message": str(e)}
-        )
-        sync_broadcast(job_id, {"type": "error", "job_id": job_id, "message": str(e)})
-    finally:
-        if os.path.exists(file_path):
-            try:
-                os.remove(file_path)
-            except Exception:
-                pass
+    _layout_jobs.update_job(job_id, {"stage": "queued", "pct": 0, "message": "Waiting for a free processing slot…"})
+    with _HEAVY_JOB_SEMAPHORE:
+        try:
+            result = design_layout(
+                file_path=file_path,
+                filename=filename,
+                output_dir=OUTPUT_DIR,
+                page_width_mm=page_width_mm,
+                page_height_mm=page_height_mm,
+                book_title=book_title,
+                design_instructions=design_instructions,
+                book_type=book_type,
+                visual_template=visual_template,
+                progress_callback=progress,
+                body_font=body_font,
+                chapter_font=chapter_font,
+                body_font_size=body_font_size,
+                chapter_font_size=chapter_font_size,
+                line_spacing=line_spacing,
+                margin_top_mm=margin_top_mm,
+                margin_bottom_mm=margin_bottom_mm,
+                margin_left_mm=margin_left_mm,
+                margin_right_mm=margin_right_mm,
+                show_drop_cap=show_drop_cap,
+                show_page_numbers=show_page_numbers,
+                footer_left_text=footer_left_text,
+                footer_middle_text=footer_middle_text,
+                footer_right_pagenum=footer_right_pagenum,
+                mirror_margins=mirror_margins,
+                gutter_mm=gutter_mm,
+                paragraph_spacing_mm=paragraph_spacing_mm,
+                indent_mm=indent_mm,
+                color_mode=color_mode,
+                bleed_mm=bleed_mm,
+                chapter_start=chapter_start,
+                page_number_start=page_number_start,
+                page_number_style=page_number_style,
+                header_custom_text=header_custom_text,
+                heading_design=heading_design,
+                section_breaks=section_breaks,
+                front_matter=front_matter,
+                back_matter=back_matter,
+            )
+
+            payload = {
+                "stage": "done",
+                "pct": 100,
+                "message": "Layout design complete!",
+                "result": result,
+                "pdf_path": result["pdf_path"],
+                "docx_path": result["docx_path"],
+                "title": result["title"],
+                "book_type": result.get("book_type", "auto"),
+                "book_type_label": result.get("book_type_label", "Auto (AI chosen)"),
+            }
+            _layout_jobs.update_job(job_id, payload)
+            sync_broadcast(job_id, {"type": "complete", "job_id": job_id, "result": payload["result"]})
+
+        except Exception as e:
+            _layout_jobs.update_job(job_id, {"stage": "error", "pct": 0, "message": str(e)})
+            sync_broadcast(job_id, {"type": "error", "job_id": job_id, "message": str(e)})
+        finally:
+            if os.path.exists(file_path):
+                try:
+                    os.remove(file_path)
+                except Exception:
+                    pass
 
 
 @app.post("/design-layout")
@@ -2003,6 +2060,15 @@ async def design_layout_endpoint(
             return None
         return v.strip().lower() in {"true", "1", "yes"}
 
+    # M4 FIX: Wrap json.loads in try/except — invalid JSON would otherwise 500
+    def _parse_json_list(v: Optional[str]) -> Optional[list]:
+        if not v or not v.strip().startswith("["):
+            return None
+        try:
+            return json.loads(v)
+        except json.JSONDecodeError:
+            return None
+
     job_id = uuid.uuid4().hex
     tmp_path = os.path.join(OUTPUT_DIR, f"layout_upload_{job_id}{ext}")
     await _stream_upload_to_disk(file, tmp_path)
@@ -2056,8 +2122,8 @@ async def design_layout_endpoint(
             header_custom_text=header_custom_text.strip() if header_custom_text and header_custom_text.strip() else None,
             heading_design=heading_design.strip() if heading_design and heading_design.strip() else None,
             section_breaks=_bool_or_none(section_breaks),
-            front_matter=json.loads(front_matter) if front_matter and front_matter.strip().startswith("[") else None,
-            back_matter=json.loads(back_matter) if back_matter and back_matter.strip().startswith("[") else None,
+            front_matter=_parse_json_list(front_matter),
+            back_matter=_parse_json_list(back_matter),
         ),
         daemon=True,
     )

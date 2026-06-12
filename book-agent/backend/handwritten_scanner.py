@@ -52,15 +52,24 @@ SUPPORTED_UPLOAD_EXTS = SUPPORTED_IMAGE_EXTS | {".pdf", ".docx", ".zip"}
 # ─────────────────────────────────────────────────────────────────────────────
 
 # How many pages to send per vision API call.
-# 1 = most reliable (no page-break alignment issues), slower.
+# MUST stay at 1 — sending multiple pages relies on GPT-4o splitting on
+# ---PAGE_BREAK--- which it does inconsistently, causing pages to be silently
+# merged or lost. 1 page per call is slower but reliable.
 PAGES_PER_BATCH = 1
 
 # Max output tokens per transcription call.
 # Using 32768 (max for gpt-4o) to ensure dense handwriting is NEVER silently truncated.
 TRANSCRIPTION_MAX_TOKENS = 32768
 
-# Number of parallel workers for transcription. 
-TRANSCRIPTION_WORKERS = 8
+# Number of parallel workers for transcription.
+# Keep at 4 — 8 workers hammers the OpenAI rate limit on standard tiers
+# (gpt-4o Vision is ~100 RPM on Tier 1). 4 workers with retries is safer.
+TRANSCRIPTION_WORKERS = 4
+
+# Global semaphore: hard cap on simultaneous OpenAI calls across ALL workers.
+# Prevents a single large job from exhausting rate limits and causing all
+# workers to 429-backoff simultaneously, stalling the entire pipeline.
+_OPENAI_SEMAPHORE = threading.Semaphore(4)
 
 # Retries on transient API errors (429, 500, 502, 503).
 MAX_RETRIES = 3
@@ -170,7 +179,14 @@ def _download_font(filename: str) -> Optional[str]:
         print(f"  ✅  Downloaded {filename} → {dest}")
         return dest
     except Exception as e:
-        print(f"  ⚠️   Could not download {filename}: {e}")
+        # Surface this prominently — silent font failure = boxes in output
+        print(
+            f"\n  ❌  FONT DOWNLOAD FAILED: {filename}\n"
+            f"      Error: {e}\n"
+            f"      Non-Latin text (Hindi, Arabic, etc.) will render as □□□ in PDF output.\n"
+            f"      Fix: run  apt-get install -y fonts-noto-core  OR\n"
+            f"               place {filename} in ./fonts/\n"
+        )
         if os.path.isfile(dest):
             try:
                 os.remove(dest)
@@ -604,13 +620,17 @@ def collect_images(file_path: str, filename: str, scratch_dir: str) -> list[str]
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _api_call_with_retry(fn, *args, **kwargs):
-    """Call fn(*args, **kwargs) up to MAX_RETRIES times with exponential backoff."""
+    """Call fn(*args, **kwargs) up to MAX_RETRIES times with exponential backoff.
+    Acquires the global semaphore before each attempt so concurrent workers
+    can't collectively exceed the OpenAI rate limit.
+    """
     delay = RETRY_BASE_DELAY
     last_exc = None
     
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            return fn(*args, **kwargs)
+            with _OPENAI_SEMAPHORE:
+                return fn(*args, **kwargs)
         except Exception as e:
             last_exc = e
             err_str = str(e).lower()
@@ -1047,6 +1067,9 @@ def structure_transcription(pages: list[dict], book_title: str = "") -> dict:
     chapter_counter = 0
 
     for chunk_idx, chunk_text in enumerate(text_chunks):
+        # Calculate input word count so we can validate the model didn't drop content
+        input_word_count = len(chunk_text.split())
+
         prompt = (
             f"Book title (if known): {book_title or 'Unknown — infer from content if possible'}\n"
             f"Language: {detected_language}\n"
@@ -1065,6 +1088,15 @@ def structure_transcription(pages: list[dict], book_title: str = "") -> dict:
                 )
 
             response = _api_call_with_retry(_structure_call)
+
+            # Check finish_reason BEFORE parsing — if truncated, go straight to fallback
+            finish_reason = response.choices[0].finish_reason
+            if finish_reason == "length":
+                raise ValueError(
+                    f"Structure response was truncated (finish_reason=length) on chunk {chunk_idx + 1}. "
+                    f"Input had ~{input_word_count} words. Falling back to flat text."
+                )
+
             raw = (response.choices[0].message.content or "").strip()
             raw = raw.replace("```json", "").replace("```", "").strip()
             
@@ -1075,6 +1107,16 @@ def structure_transcription(pages: list[dict], book_title: str = "") -> dict:
                 raise ValueError("No JSON object found in structure response")
                 
             chunk_result = json.loads(raw[s:e])
+
+            # Validate output word count is at least 60% of input — guards against
+            # the model summarising or dropping content silently
+            output_words = sum(len(ch.get("content", "").split()) for ch in chunk_result.get("chapters", []))
+            if output_words < input_word_count * 0.60:
+                raise ValueError(
+                    f"Structure output suspiciously short: {output_words} words out vs "
+                    f"{input_word_count} words in ({output_words/max(input_word_count,1)*100:.0f}%). "
+                    f"Falling back to flat text to avoid data loss."
+                )
 
             for ch in chunk_result.get("chapters", []):
                 chapter_counter += 1
@@ -1091,7 +1133,7 @@ def structure_transcription(pages: list[dict], book_title: str = "") -> dict:
                     detected_language = chunk_result["language"]
 
         except Exception as exc:
-            print(f"  ⚠️  Structuring chunk {chunk_idx + 1} failed. Using flat fallback.")
+            print(f"  ⚠️  Structuring chunk {chunk_idx + 1} failed ({exc}). Using flat fallback to preserve all content.")
             chapter_counter += 1
             # Strip [Page N] markers that would appear in the final PDF/DOCX
             clean_fallback = re.sub(r'\[Page\s+\d+\]\s*\n?', '', chunk_text).strip()

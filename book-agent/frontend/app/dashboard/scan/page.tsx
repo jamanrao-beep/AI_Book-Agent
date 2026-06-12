@@ -211,24 +211,25 @@ export default function ScanPage() {
                     applyUpdate({ stage: data.stage, pct: data.pct, message: data.message, result: data.result, error: data.error });
                 } catch (_) { /* network blip — keep polling */ }
             }, 3000);
-            // Fix 11: store the interval in the ref immediately after creation
+            // M5 FIX: assign ref immediately after creation so stopAll() can always clear it,
+            // even if WS "complete" fires synchronously before the outer function returns.
             pollRef.current = pollInterval;
         };
 
         try {
             const wsUrl = API_BASE.replace(/^http/, "ws") + `/ws/status/${jobId}`;
-            ws = new WebSocket(wsUrl);
-            wsRef.current = ws;
+            // L2 FIX: assign wsRef.current atomically with ws creation so a fast
+            // unmount between new WebSocket() and wsRef.current = ws can't miss it.
+            wsRef.current = ws = new WebSocket(wsUrl);
 
             ws.onopen = () => { wsConnected = true; };
             ws.onmessage = (e) => {
                 try {
                     const msg = JSON.parse(e.data);
                     if (msg.type === "progress") applyUpdate({ stage: msg.stage, pct: msg.progress, message: msg.message });
-                    // Fix 15: WS "complete" payload shape: {type:"complete", job_id, result: {job_id, title, ...}}
-                    // msg.result IS the correct shape (no extra .result wrapper needed).
-                    // Polling path sends data.result which is also the correct shape.
-                    else if (msg.type === "complete") applyUpdate({ stage: "done", pct: 100, result: msg.result?.result ?? msg.result });
+                    // H6 FIX: msg.result is already the correct shape {job_id, title, ...}
+                    // The old msg.result?.result ?? msg.result double-unwrap was accidental.
+                    else if (msg.type === "complete") applyUpdate({ stage: "done", pct: 100, result: msg.result });
                     else if (msg.type === "error") applyUpdate({ stage: "error", error: msg.message });
                 } catch (_) { }
             };
