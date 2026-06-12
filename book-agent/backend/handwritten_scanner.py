@@ -28,7 +28,9 @@ import tempfile
 import traceback
 import threading
 import unicodedata
+import hashlib
 import urllib.request
+from collections import Counter
 from pathlib import Path
 from typing import Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -206,6 +208,8 @@ def _ensure_unicode_fonts() -> None:
 
             if _REGISTERED_FONTS:
                 print(f"  ✅  Unicode fonts ready: {sorted(_REGISTERED_FONTS)}")
+                # FIX: Set fonts strictly to True here when registration loop finishes safely.
+                _FONTS_REGISTERED = True
             else:
                 print(
                     "  ⚠️  WARN: No Unicode/Devanagari fonts could be registered. "
@@ -215,9 +219,9 @@ def _ensure_unicode_fonts() -> None:
                 )
         except Exception as e:
             print(f"  ⚠️   _ensure_unicode_fonts failed: {e}\n{traceback.format_exc()}")
-        finally:
-            _FONTS_REGISTERED = True
 
+# Initialize fonts in the background immediately
+threading.Thread(target=_ensure_unicode_fonts, daemon=True).start()
 
 def _has_non_latin(text: str) -> bool:
     """True if text contains Devanagari or other Indic scripts (U+0900+)."""
@@ -399,7 +403,8 @@ def _image_to_b64(path: str, intensity: str = "normal") -> tuple[str, str, str]:
             print(f"  ⚠️  Unexpected error during image conversion. {e}")
             with open(enhanced_path, "rb") as f:
                 b64_data = base64.b64encode(f.read()).decode()
-            media_type = "image/jpeg"
+            # FIX: Fallback uses actual formatted type of what we just generated
+            media_type = "image/png"
     else:
         if ext == ".png":
             media_type = "image/png"
@@ -438,20 +443,27 @@ def _pdf_to_images(pdf_path: str, out_dir: str) -> list[str]:
         print(f"  📄 Rendered {len(paths)} pages at {PDF_RENDER_ZOOM}x zoom ({int(72 * PDF_RENDER_ZOOM)} DPI)")
         return paths
         
-    except ImportError as e:
-        print(f"  ⚠️  fitz (PyMuPDF) missing, falling back to pdf2image.")
-        # pyrefly: ignore [missing-import]
-        from pdf2image import convert_from_path
-        dpi = int(72 * PDF_RENDER_ZOOM)
-        images = convert_from_path(pdf_path, dpi=dpi)
-        paths = []
-        
-        for i, img in enumerate(images):
-            img_path = os.path.join(out_dir, f"page_{i:04d}.png")
-            img.save(img_path, "PNG")
-            paths.append(img_path)
+    except ImportError:
+        # FIX: Provide descriptive error tracking if fallback is missing
+        print("  ⚠️  fitz (PyMuPDF) missing. Falling back to pdf2image.")
+        try:
+            # pyrefly: ignore [missing-import]
+            from pdf2image import convert_from_path
+            dpi = int(72 * PDF_RENDER_ZOOM)
+            images = convert_from_path(pdf_path, dpi=dpi)
+            paths = []
             
-        return paths
+            for i, img in enumerate(images):
+                img_path = os.path.join(out_dir, f"page_{i:04d}.png")
+                img.save(img_path, "PNG")
+                paths.append(img_path)
+                
+            return paths
+        except ImportError:
+            raise RuntimeError(
+                "Neither PyMuPDF (fitz) nor pdf2image is installed. "
+                "Run: pip install pymupdf  OR  pip install pdf2image"
+            )
         
     except Exception as e:
         print(f"  ⚠️  PDF to images conversion failed completely. Error details: {e}\n{traceback.format_exc()}")
@@ -569,11 +581,14 @@ def collect_images(file_path: str, filename: str, scratch_dir: str) -> list[str]
 
                         os.remove(tmp)
 
-            seen: set[str] = set()
+            # FIX: Hash-based deduplication
+            seen_hashes: set[str] = set()
             ordered: list[str] = []
             for p in image_paths:
-                if p not in seen:
-                    seen.add(p)
+                with open(p, 'rb') as f:
+                    file_hash = hashlib.md5(f.read()).hexdigest()
+                if file_hash not in seen_hashes:
+                    seen_hashes.add(file_hash)
                     ordered.append(p)
             return ordered
 
@@ -641,7 +656,6 @@ def _is_hallucinating(text: str) -> bool:
     words = text.split()
     # Require at least 30 words before checking — short responses can't be loops
     if len(words) > 30:
-        from collections import Counter
         most_common_word, most_common_count = Counter(words).most_common(1)[0]
         # Only flag if >60% of words are the same AND it's a common function word pattern
         # (real hallucinations loop on "the the the" or "और और और", not content words)
@@ -653,7 +667,6 @@ def _is_hallucinating(text: str) -> bool:
     if len(words) >= 20:
         ngram_size = 4
         ngrams = [" ".join(words[i:i+ngram_size]) for i in range(len(words) - ngram_size + 1)]
-        from collections import Counter
         if ngrams:
             top_ngram, top_count = Counter(ngrams).most_common(1)[0]
             # If a 4-word phrase appears more than 25% of possible positions, it's looping
@@ -684,14 +697,8 @@ def _transcribe_single_batch(batch: list[str], batch_start: int) -> list[dict]:
             except Exception as e:
                 failed_indices.append(slot)
 
-        n_sent = len(successful_indices)
-        if n_sent == 1:
-            api_content[0]["text"] = "Transcribe the handwritten text from this page image. Obey layout reading order."
-        else:
-            api_content[0]["text"] = f"Transcribe the handwritten text from the following {n_sent} page image(s). Separate each page's content with the marker ---PAGE_BREAK--- on its own line."
-
         batch_results: list[dict] = [{} for _ in range(len(batch))]
-
+        
         for slot in failed_indices:
             batch_results[slot] = {
                 "page_num": batch_start + slot + 1,
@@ -699,6 +706,16 @@ def _transcribe_single_batch(batch: list[str], batch_start: int) -> list[dict]:
                 "has_content": False,
                 "hallucination_flag": False
             }
+
+        # FIX: Avoid wasted empty calls
+        if not successful_indices:
+            return batch_results
+
+        n_sent = len(successful_indices)
+        if n_sent == 1:
+            api_content[0]["text"] = "Transcribe the handwritten text from this page image. Obey layout reading order."
+        else:
+            api_content[0]["text"] = f"Transcribe the handwritten text from the following {n_sent} page image(s). Separate each page's content with the marker ---PAGE_BREAK--- on its own line."
 
         if successful_indices:
             try:
@@ -815,7 +832,8 @@ def transcribe_images(image_paths: list[str], book_title: str = "") -> list[dict
                 
             completed += 1
             if completed % 20 == 0 or completed == len(batches):
-                print(f"  ✅  {completed}/{len(batches)} batches done ({completed * PAGES_PER_BATCH}/{total} pages)")
+                # FIX: Bound pages log count properly
+                print(f"  ✅  {completed}/{len(batches)} batches done ({min(completed * PAGES_PER_BATCH, total)}/{total} pages)")
 
     all_results: list[dict] = []
     for batch_start in sorted(results_by_start.keys()):
@@ -927,9 +945,12 @@ def heal_transcription_context(pages: list[dict]) -> list[dict]:
             # Split on the page break marker
             raw_splits = healed_raw.split("---PAGE_BREAK---")
 
+            # FIX: Do not overwrite the overlapping chunk data we already healed
+            write_start = overlap if chunk_num > 1 else 0
+            
             for j, split_text in enumerate(raw_splits):
-                if j >= len(chunk_content_indices):
-                    break
+                if j < write_start or j >= len(chunk_content_indices):
+                    continue
                 original_idx = chunk_content_indices[j]
                 # Strip [PAGE N] header that the healer may have echoed back
                 clean_text = re.sub(r'^\s*\[PAGE\s+\d+\]\s*\n?', '', split_text.strip()).strip()
@@ -1110,7 +1131,8 @@ def generate_scanned_pdf(structure: dict, output_path: str) -> str:
 
         _ensure_unicode_fonts()
 
-        all_text = structure.get("title", "") + " ".join(
+        # FIX: proper concatenation spacing
+        all_text = structure.get("title", "") + " " + " ".join(
             ch.get("title", "") + " " + ch.get("content", "")
             for ch in structure.get("chapters", [])
         )
@@ -1262,7 +1284,8 @@ def generate_scanned_docx(structure: dict, output_path: str) -> str:
         from docx.oxml import OxmlElement
         import datetime
 
-        all_text_docx = structure.get("title", "") + " ".join(
+        # FIX: proper concatenation spacing
+        all_text_docx = structure.get("title", "") + " " + " ".join(
             ch.get("title", "") + " " + ch.get("content", "")
             for ch in structure.get("chapters", [])
         )
