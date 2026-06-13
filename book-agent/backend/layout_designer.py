@@ -991,7 +991,11 @@ def _render_fixed_front_pages(
     """
     from reportlab.lib.units import mm
     from reportlab.lib.colors import black, Color
-    from PIL import Image as _PilImage  # pyrefly: ignore [missing-import]
+    try:
+        from PIL import Image as _PilImage  # pyrefly: ignore [missing-import]
+    except ImportError:
+        _PilImage = None  # type: ignore[assignment]
+        logger.warning("⚠️  Pillow (PIL) not installed — logo/image dimensions on front pages will use fallback sizing. Add 'Pillow' to requirements.txt")
 
     c = canvas_obj
     W = page_width_pt
@@ -1038,8 +1042,11 @@ def _render_fixed_front_pages(
     # ── Kavya logo (monochrome) at bottom centre ─────────────────────────────
     try:
         _kbw_bytes = base64.b64decode(_KAVYA_BW_PNG_B64)
-        pil_img    = _PilImage.open(_io.BytesIO(_kbw_bytes))
-        orig_w, orig_h = pil_img.size
+        if _PilImage is not None:
+            pil_img = _PilImage.open(_io.BytesIO(_kbw_bytes))
+            orig_w, orig_h = pil_img.size
+        else:
+            orig_w, orig_h = 1, 1  # fallback 1:1 aspect ratio
         logo_w  = 48 * mm
         logo_h  = logo_w * orig_h / orig_w
         logo_x  = (W - logo_w) / 2
@@ -1077,8 +1084,11 @@ def _render_fixed_front_pages(
 
     try:
         _sdr_bytes = base64.b64decode(_SDR_PNG_B64)
-        pil_sdr    = _PilImage.open(_io.BytesIO(_sdr_bytes))
-        sw, sh     = pil_sdr.size
+        if _PilImage is not None:
+            pil_sdr = _PilImage.open(_io.BytesIO(_sdr_bytes))
+            sw, sh  = pil_sdr.size
+        else:
+            sw, sh  = 1, 1  # fallback 1:1 aspect ratio
         sdr_w      = LOGO_COL_W
         sdr_h      = sdr_w * sh / sw
         sdr_img    = _b64_to_image_reader(_SDR_PNG_B64)
@@ -1118,8 +1128,11 @@ def _render_fixed_front_pages(
     kavya_top_y = y - max(sdr_h, 22 * mm) - 2 * mm
     try:
         _kc_bytes = base64.b64decode(_KAVYA_COLOR_PNG_B64)
-        pil_kc    = _PilImage.open(_io.BytesIO(_kc_bytes))
-        kw, kh    = pil_kc.size
+        if _PilImage is not None:
+            pil_kc = _PilImage.open(_io.BytesIO(_kc_bytes))
+            kw, kh = pil_kc.size
+        else:
+            kw, kh = 1, 1  # fallback 1:1 aspect ratio
         kc_w      = LOGO_COL_W
         kc_h      = kc_w * kh / kw
         kc_img    = _b64_to_image_reader(_KAVYA_COLOR_PNG_B64)
@@ -2266,12 +2279,14 @@ def render_layout_pdf(
         }
         if _hd not in ("italic_elegant",):
             _ch_font_for_style = _BOLD_MAP.get(chapter_font, chapter_font)
+        # _ITALIC_MAP is defined at this scope so it's available throughout
+        # render_layout_pdf (e.g. blockquote_style and epigraph_quote_style below)
+        # regardless of whether _ch_italic is True.
+        _ITALIC_MAP = {
+            "Times-Roman":  "Times-Italic",
+            "Helvetica":    "Helvetica-Oblique",
+        }
         if _ch_italic:
-            # Map to italic variant if available
-            _ITALIC_MAP = {
-                "Times-Roman":  "Times-Italic",
-                "Helvetica":    "Helvetica-Oblique",
-            }
             _ch_font_for_style = _ITALIC_MAP.get(chapter_font, chapter_font)
 
         # For left_bold_clean / numbered: slightly reduce chapter_size for a clean look
@@ -2555,8 +2570,10 @@ def render_layout_pdf(
         # reference publisher layout exactly. They are written to a temp PDF,
         # then merged with the main body PDF at the end.
         import tempfile as _tempfile
-        #pyrefly: ignore [missing-import]
-        from pypdf import PdfReader as _PdfReader, PdfWriter as _PdfWriter  # use module-level if available
+        # Re-use the module-level _PdfReader / _PdfWriter (imported at top with try/except).
+        # Raise early with a clear message if pypdf wasn't available at import time.
+        if not _PYPDF_AVAILABLE:
+            raise ImportError("pypdf is required for PDF merging. Add 'pypdf' to requirements.txt")
         from reportlab.pdfgen import canvas as _rl_canvas  # pyrefly: ignore [missing-import]
 
         with _tempfile.NamedTemporaryFile(suffix="_front.pdf", delete=False) as _tmp_f:
@@ -2623,7 +2640,7 @@ def render_layout_pdf(
             # ReportLab's TableOfContents flowable automatically collects entries
             # from the story's Paragraph objects that carry a notification, then
             # re-renders the TOC page with real page numbers on the second pass.
-            from reportlab.platypus import TableOfContents as _TOC  # pyrefly: ignore [missing-import]
+            from reportlab.platypus.tableofcontents import TableOfContents as _TOC  # pyrefly: ignore [missing-import]
 
             story.append(Paragraph(_safe("Contents"), ch_style))
             story.append(Spacer(1, leading * 0.5))
