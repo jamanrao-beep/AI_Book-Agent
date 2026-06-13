@@ -51,7 +51,11 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 # pyrefly: ignore [missing-import]
 from reportlab.lib.units import cm
 # pyrefly: ignore [missing-import]
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, HRFlowable
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, HRFlowable, Table, TableStyle
+# pyrefly: ignore [missing-import]
+from reportlab.graphics.shapes import Drawing, Rect, String as GString
+# pyrefly: ignore [missing-import]
+from reportlab.graphics import renderPDF
 # pyrefly: ignore [missing-import]
 from reportlab.lib.colors import HexColor, white
 # pyrefly: ignore [missing-import]
@@ -648,6 +652,33 @@ def _xml_escape(text: str) -> str:
             .replace("'", "&#39;"))
 
 
+def _make_publisher_logo(body_font: str) -> Drawing:
+    """
+    Return a ReportLab Drawing that renders a simple publisher logo block.
+    Uses only shapes primitives — no external image file required.
+    Layout: dark slate rectangle with white publisher-mark text centred inside.
+    """
+    W, H = 120, 36
+    d = Drawing(W, H)
+    # Background pill-ish rectangle
+    d.add(Rect(0, 0, W, H, rx=4, ry=4,
+               fillColor=HexColor("#1E293B"), strokeColor=None))
+    # Logo text — "AI PRESS" as a stand-in publisher mark
+    label = GString(W / 2, H / 2 - 5, "AI PRESS",
+                    fontName="Helvetica-Bold",
+                    fontSize=10,
+                    fillColor=HexColor("#F8FAFC"),
+                    textAnchor="middle")
+    d.add(label)
+    sub = GString(W / 2, H / 2 - 16, "Enterprise Edition",
+                  fontName="Helvetica",
+                  fontSize=6,
+                  fillColor=HexColor("#94A3B8"),
+                  textAnchor="middle")
+    d.add(sub)
+    return d
+
+
 def _build_pdf(book: dict, target_language: str, output_path: str,
                source_language: str = "", author: str = "") -> None:
     """
@@ -766,39 +797,78 @@ def _build_pdf(book: dict, target_language: str, output_path: str,
 
     author_line = author.strip() if author.strip() else ""
 
+    # ── Cover page ───────────────────────────────────────────────────────────
     story: list = [
-        Spacer(1, 5.5 * cm),
+        # Publisher logo — top-right feel via centering; sits at top of page
+        Spacer(1, 1.2 * cm),
+        _make_publisher_logo(body_font),
+        Spacer(1, 4.0 * cm),
+        # Title block
         Paragraph(_xml_escape(book["title"]), cover_title_style),
         Spacer(1, 0.4 * cm),
         HRFlowable(width="50%", thickness=1.5, color=HexColor("#334155")),
         Spacer(1, 0.4 * cm),
     ]
 
+    # Author name (rendered only when non-empty)
     if author_line:
         story.append(Paragraph(_xml_escape(author_line), cover_author_style))
         story.append(Spacer(1, 0.3 * cm))
 
+    # Bottom meta block — pushed toward footer with a large spacer
     story += [
-        Spacer(1, 5 * cm),
+        Spacer(1, 4.5 * cm),
         HRFlowable(width="80%", thickness=0.5, color=HexColor("#CBD5E1")),
-        Spacer(1, 0.3 * cm),
+        Spacer(1, 0.35 * cm),
         Paragraph(_xml_escape(lang_banner), cover_label_style),
         Spacer(1, 0.15 * cm),
         Paragraph("Translated by Enterprise AI Swarm", cover_credit_style),
         Spacer(1, 0.15 * cm),
         Paragraph("ISBN: 000-0-000-00000-0", cover_credit_style),
+        Spacer(1, 0.4 * cm),
         PageBreak(),
     ]
 
     # ── Table of Contents page ───────────────────────────────────────────────
+    # TR-3: TOC uses a two-column Table so chapter titles have dotted leaders
+    # with a right-aligned chapter-number column — professional publisher style.
     story.append(Paragraph("Contents", toc_title_style))
     story.append(HRFlowable(width="100%", thickness=0.5, color=HexColor("#CBD5E1")))
-    story.append(Spacer(1, 0.3 * cm))
+    story.append(Spacer(1, 0.4 * cm))
 
+    page_width = A4[0] - doc.leftMargin - doc.rightMargin  # usable text width
+
+    toc_data = []
     for idx, ch in enumerate(book["chapters"], start=1):
         ch_title_raw = (ch.get("title") or "").strip() or f"Chapter {idx}"
-        entry_text = f"{idx}.&nbsp;&nbsp;{_xml_escape(ch_title_raw)}"
-        story.append(Paragraph(entry_text, toc_entry_style))
+        # Left cell: "N.  Chapter Title" with dots filling the gap
+        num_label = f"{idx}."
+        title_para = Paragraph(
+            f"{num_label}&nbsp;&nbsp;{_xml_escape(ch_title_raw)}",
+            toc_entry_style,
+        )
+        # Right cell: placeholder page marker styled in muted colour
+        pg_style = ParagraphStyle(
+            "TocPg",
+            parent=toc_entry_style,
+            alignment=TA_CENTER,
+            textColor=HexColor("#94A3B8"),
+            fontSize=10,
+        )
+        pg_para = Paragraph("· · ·", pg_style)
+        toc_data.append([title_para, pg_para])
+
+    if toc_data:
+        col_widths = [page_width * 0.85, page_width * 0.15]
+        toc_table = Table(toc_data, colWidths=col_widths, hAlign="LEFT")
+        toc_table.setStyle(TableStyle([
+            ("VALIGN",      (0, 0), (-1, -1), "MIDDLE"),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ("TOPPADDING",  (0, 0), (-1, -1), 3),
+            ("LINEBELOW",   (0, 0), (-1, -2),
+             0.25, HexColor("#E2E8F0")),  # thin separator between rows
+        ]))
+        story.append(toc_table)
 
     story.append(PageBreak())
 
@@ -864,8 +934,28 @@ def _build_docx(book: dict, target_language: str, output_path: str,
                    if source_language and target_language
                    else f"Translated into {target_language}")
 
+    # Publisher logo mark — a shaded paragraph that acts as a branded badge
+    def _add_publisher_logo() -> None:
+        """Add a dark-shaded 'AI PRESS' logo block via paragraph shading XML."""
+        p = doc.add_paragraph()
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        r = p.add_run("  AI PRESS  ·  Enterprise Edition  ")
+        r.bold = True
+        r.font.size = Pt(9)
+        r.font.color.rgb = RGBColor(0xF8, 0xFA, 0xFC)
+        apply_font(r, "Calibri")
+        # Apply dark background shading via pPr XML
+        pPr = p._p.get_or_add_pPr()
+        shd = OxmlElement("w:shd")
+        shd.set(qn("w:val"), "clear")
+        shd.set(qn("w:color"), "auto")
+        shd.set(qn("w:fill"), "1E293B")
+        pPr.append(shd)
+
+    _add_publisher_logo()
+
     # Push title down the page with blank paragraphs
-    for _ in range(8):
+    for _ in range(6):
         doc.add_paragraph()
 
     _add_centered(book["title"], bold=True, size_pt=26)
@@ -887,16 +977,40 @@ def _build_docx(book: dict, target_language: str, output_path: str,
     doc.add_page_break()
 
     # ── Table of Contents page ───────────────────────────────────────────────
+    # TR-3: Professional TOC with dotted-leader tab stop so chapter titles
+    # have a visual right-edge marker — standard publisher convention.
     toc_heading = doc.add_heading("Contents", level=1)
     if toc_heading.runs:
         apply_font(toc_heading.runs[0], word_font)
 
+    # Right-edge tab position for the leader: ~15.5 cm from left margin
+    _TOC_TAB_POS_TWIPS = int(15.5 * 1440 / 2.54)  # cm → twips (1 inch = 1440 twips)
+
     for idx, ch in enumerate(book["chapters"], start=1):
         ch_title_raw = _ud.normalize("NFC", (ch.get("title") or "").strip()) or f"Chapter {idx}"
         toc_p = doc.add_paragraph()
+        toc_p.paragraph_format.space_after = Pt(3)
+
+        # Inject a dotted-leader tab stop via XML
+        pPr = toc_p._p.get_or_add_pPr()
+        tabs_el = OxmlElement("w:tabs")
+        tab_el = OxmlElement("w:tab")
+        tab_el.set(qn("w:val"), "right")
+        tab_el.set(qn("w:leader"), "dot")
+        tab_el.set(qn("w:pos"), str(_TOC_TAB_POS_TWIPS))
+        tabs_el.append(tab_el)
+        pPr.append(tabs_el)
+
+        # Chapter number + title run, then tab, then "· · ·" placeholder
         toc_r = toc_p.add_run(f"{idx}.  {ch_title_raw}")
         toc_r.font.size = Pt(11)
         apply_font(toc_r, word_font)
+
+        # Tab character triggers the dotted leader
+        tab_r = toc_p.add_run("\t· · ·")
+        tab_r.font.size = Pt(9)
+        tab_r.font.color.rgb = RGBColor(0x94, 0xA3, 0xB8)
+        apply_font(tab_r, "Calibri")
 
     doc.add_page_break()
 
