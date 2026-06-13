@@ -277,7 +277,7 @@ _FONT_URLS: dict[str, str] = {
     ),
     "EBGaramond-Bold.ttf": (
         "https://github.com/octaviopardo/EBGaramond12/raw/master/fonts/ttf/"
-        "EBGaramond12-Italic.ttf"  # EB Garamond has no true bold; italic used for emphasis
+        "EBGaramond12-Regular.ttf"  # EB Garamond has no true Bold upstream; using Regular as fallback
     ),
     "EBGaramond-Italic.ttf": (
         "https://github.com/octaviopardo/EBGaramond12/raw/master/fonts/ttf/"
@@ -1847,7 +1847,7 @@ def _build_system_prompt(profile: Optional[dict]) -> str:
         return _LAYOUT_SYSTEM_BASE
     return (
         _LAYOUT_SYSTEM_BASE
-        + f"\n\n--- BOOK TYPE GUIDANCE ---\n"
+        + "\n\n--- BOOK TYPE GUIDANCE ---\n"
         + f"This book is a {profile['_label']}.\n"
         + f"{profile['_description']}\n"
         + "Apply these genre conventions unless the user has explicitly overridden a specific value.\n"
@@ -2016,7 +2016,7 @@ def render_layout_pdf(
     try:
         from reportlab.lib.units import mm                                       # pyrefly: ignore [missing-import]
         from reportlab.lib.colors import Color                                   # pyrefly: ignore [missing-import]
-        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak  # pyrefly: ignore [missing-import]
+        from reportlab.platypus import Paragraph, Spacer, PageBreak  # pyrefly: ignore [missing-import]
         from reportlab.lib.styles import ParagraphStyle                          # pyrefly: ignore [missing-import]
         from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_JUSTIFY          # pyrefly: ignore [missing-import]
     except ImportError as e:
@@ -2738,6 +2738,7 @@ def render_layout_pdf(
                     _toc_ch_style,
                 )
                 story.append(_toc_para)
+                _notify_toc(toc, chapter["title"], _anchor)
             else:
                 story.append(Paragraph(safe_ch_title, ch_style))
 
@@ -2934,8 +2935,6 @@ def render_layout_pdf(
                 # Regex for footnote reference in text:   [^1]  [^note]
                 # Regex for footnote definition:          [^1]: text…  (standalone block)
                 _FN_DEF_RE  = re.compile(r"^\[\^([^\]]+)\]:\s*(.+)$", re.MULTILINE)
-                _FN_REF_RE  = re.compile(r"\[\^([^\]]+)\]")
-
                 # Extract all footnote *definitions* from the whole section text
                 # (they might be inline or at the bottom — collect them all)
                 _fn_defs: dict[str, str] = {}
@@ -3113,6 +3112,7 @@ def render_layout_pdf(
                 # Text column width for image scaling
                 _text_width = PW - ml - mr
 
+                _inline_fig_counter = [0]  # reset once per section (not per paragraph)
                 for p_idx, para_text in enumerate(paragraphs):
                     # ── FIX 2: Skip footnote definition lines (rendered at end) ──
                     if _FN_DEF_RE.match(para_text.strip()):
@@ -3227,12 +3227,10 @@ def render_layout_pdf(
                         num   = _fn_num(label)
                         return f"<super><font size='{max(6, body_size - 3)}'>{num}</font></super>"
 
-                    # Escape body text first, then re-apply footnote superscript tags cleanly.
-                    safe = _FN_REF_RE.sub(_replace_fn_ref,
-                                          joined.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
-                    # But [^ref] itself must not have been HTML-escaped — redo cleanly:
+                    # Escape body text, then inject footnote superscript tags.
+                    # [^ref] markers survive HTML escaping (square brackets/caret are safe),
+                    # so we escape first, then apply the superscript substitution once.
                     safe = joined.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-                    # Apply footnote tags on the already-escaped text (refs survive escaping)
                     safe = re.sub(
                         r"\[\^([^\]]+)\]",
                         lambda m2: (
@@ -3244,7 +3242,8 @@ def render_layout_pdf(
 
                     # ── FIX 2: Inline image references within a paragraph ──────
                     # Replace ![cap](path) inside body text with a [Figure N] reference.
-                    _inline_fig_counter = [0]  # reset per section; increments via _inline_fig_counter[0] += 1
+                    # Note: _inline_fig_counter is defined once per section (outside
+                    # this paragraph loop) so figure numbers increment across paragraphs.
                     def _inline_img_ref(im: re.Match) -> str:  # type: ignore[type-arg]
                         _inline_fig_counter[0] += 1
                         cap = im.group(1) or f"Figure {_inline_fig_counter[0]}"
