@@ -2235,13 +2235,7 @@ def render_layout_pdf(
                 topMargin=mt, bottomMargin=mb,
             )
             mirror_doc.addPageTemplates([pt_odd, pt_even])
-        else:
-            simple_doc = SimpleDocTemplate(
-                output_path,
-                pagesize=(PW, PH),
-                leftMargin=ml, rightMargin=mr,
-                topMargin=mt,  bottomMargin=mb,
-            )
+        # (non-mirror path: BaseDocTemplate is built later at the build step)
 
         # ── Heading design: apply to ch_style alignment and decoration ───────────
         _hd = concept.get("heading_design", "")
@@ -2586,20 +2580,23 @@ def render_layout_pdf(
         if _auth_match:
             _author_name = _auth_match.group(1).strip()
 
-        _render_fixed_front_pages(
-            canvas_obj=_fc,
-            page_width_pt=PW,
-            page_height_pt=PH,
-            book_title=book_title,
-            author_name=_author_name,
-            devanagari_font=body_font,
-            latin_font=raw_body_font,
-            body_font_size=body_size,
-        )
-        _fc.save()
-
-        # Track physical page count for chapter_start parity (2 fixed pages already)
-        _story_page_counter = [3]  # pages 1+2 are the fixed front pages
+        if _show_title_page:
+            _render_fixed_front_pages(
+                canvas_obj=_fc,
+                page_width_pt=PW,
+                page_height_pt=PH,
+                book_title=book_title,
+                author_name=_author_name,
+                devanagari_font=body_font,
+                latin_font=raw_body_font,
+                body_font_size=body_size,
+            )
+            _fc.save()
+            # Track physical page count for chapter_start parity (2 fixed pages already)
+            _story_page_counter = [3]  # pages 1+2 are the fixed front pages
+        else:
+            _fc.save()  # save empty canvas so the merge path still has a valid file
+            _story_page_counter = [1]  # no fixed front pages; body starts at page 1
 
         # The old title_page / copyright_page front-matter items are handled above;
         # skip them in the story[] to avoid duplication.
@@ -3230,11 +3227,7 @@ def render_layout_pdf(
                         num   = _fn_num(label)
                         return f"<super><font size='{max(6, body_size - 3)}'>{num}</font></super>"
 
-                    joined_with_fn = _FN_REF_RE.sub(_replace_fn_ref, joined)
-                    # Escape ONLY the non-tag parts; the <super>/<font> tags must survive
-                    # We escape first, then re-introduce the tags via a safe substitution.
-                    safe_base = joined.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-                    # Re-apply footnote superscripts on the escaped base string
+                    # Escape body text first, then re-apply footnote superscript tags cleanly.
                     safe = _FN_REF_RE.sub(_replace_fn_ref,
                                           joined.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
                     # But [^ref] itself must not have been HTML-escaped — redo cleanly:
