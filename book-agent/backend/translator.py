@@ -326,12 +326,32 @@ def _clean_cid(text: str) -> str:
     Without this, GPT-4o translates literal '(cid:127)' as text."""
     return _CID_PATTERN.sub(lambda m: _CID_MAP.get(int(m.group(1)), "\u2022"), text)
 
+# ── FIX TR-1: _CHAPTER_RE must be defined BEFORE _extract_docx which references it ──
+_CHAPTER_RE = re.compile(
+    r"^(?:"
+    # Latin: Chapter 1, Part II, Section 3, Unit IV, Ch. 5
+    r"(?:chapter|ch\.?|part|section|unit)\s+[\dIVXivx]+[:\.\s].*"
+    r"|[\dIVX]+[\.]\s+[A-Z].{2,}"
+    # Hindi/Devanagari: अध्याय, भाग, खंड + digit or Devanagari numeral
+    r"|(?:अध्याय|भाग|खंड|पाठ|प्रकरण|सर्ग)\s*[\d\u0966-\u096F].*"
+    # Arabic: الفصل, الجزء, القسم
+    r"|(?:الفصل|الجزء|القسم)\s+.*"
+    # Chinese: 第X章/节/部
+    r"|第[一二三四五六七八九十百\d]+[章节部篇].*"
+    # Russian: Глава, Часть
+    r"|(?:Глава|Часть)\s+[\dIVXivx]+.*"
+    # Injected by _extract_docx for DOCX heading styles
+    r"|Chapter:\s+.+"
+    r")",
+    re.IGNORECASE | re.MULTILINE,
+)
+
 def _extract_pdf(path: str) -> str:
     parts: list[str] = []
     with pdfplumber.open(path) as pdf:
         for page in pdf.pages:
             txt = page.extract_text() or ""
-            if txt.strip(): 
+            if txt.strip():
                 parts.append(_clean_cid(txt.strip()))
     return "\n\n".join(parts)
 
@@ -354,57 +374,38 @@ def _extract_docx(path: str) -> str:
 def _extract_zip(zip_path: str, scratch_dir: str) -> tuple[str, str]:
     with zipfile.ZipFile(zip_path, "r") as zf:
         members = [
-            m for m in zf.namelist() 
-            if os.path.splitext(m)[1].lower() in {".pdf", ".docx"} 
-            and not m.startswith("__MACOSX") 
+            m for m in zf.namelist()
+            if os.path.splitext(m)[1].lower() in {".pdf", ".docx"}
+            and not m.startswith("__MACOSX")
             and not os.path.basename(m).startswith(".")
         ]
-        if not members: 
+        if not members:
             raise ValueError("No .pdf or .docx files found in zip.")
-            
+
         member = members[0]
         ext = os.path.splitext(member)[1].lower()
         tmp = os.path.join(scratch_dir, f"zip_extracted_{uuid.uuid4().hex}{ext}")
         with zf.open(member) as src, open(tmp, "wb") as dst:
             shutil.copyfileobj(src, dst)
-    
+
     base_name = os.path.basename(member)
     if ext == ".pdf":
         text = _extract_pdf(tmp)
     else:
         text = _extract_docx(tmp)
-        
+
     os.remove(tmp)
     return text, base_name
 
 def extract_book_text(file_path: str, filename: str, scratch_dir: str) -> tuple[str, str]:
     ext = os.path.splitext(filename)[1].lower()
-    if ext == ".pdf": 
+    if ext == ".pdf":
         return _extract_pdf(file_path), filename
-    if ext == ".docx": 
+    if ext == ".docx":
         return _extract_docx(file_path), filename
-    if ext == ".zip": 
+    if ext == ".zip":
         return _extract_zip(file_path, scratch_dir)
     raise ValueError(f"Unsupported file type: {ext}")
-
-_CHAPTER_RE = re.compile(
-    r"^(?:"
-    # Latin: Chapter 1, Part II, Section 3, Unit IV, Ch. 5
-    r"(?:chapter|ch\.?|part|section|unit)\s+[\dIVXivx]+[:\.\s].*"
-    r"|[\dIVX]+[\.]\s+[A-Z].{2,}"
-    # Hindi/Devanagari: अध्याय, भाग, खंड + digit or Devanagari numeral
-    r"|(?:अध्याय|भाग|खंड|पाठ|प्रकरण|सर्ग)\s*[\d\u0966-\u096F].*"
-    # Arabic: الفصل, الجزء, القسم
-    r"|(?:الفصل|الجزء|القسم)\s+.*"
-    # Chinese: 第X章/节/部
-    r"|第[一二三四五六七八九十百\d]+[章节部篇].*"
-    # Russian: Глава, Часть
-    r"|(?:Глава|Часть)\s+[\dIVXivx]+.*"
-    # Injected by _extract_docx for DOCX heading styles
-    r"|Chapter:\s+.+"
-    r")",
-    re.IGNORECASE | re.MULTILINE,
-)
 
 def _parse_structure(text: str, title_hint: str = "") -> dict:
     lines = [l.strip() for l in text.split("\n") if l.strip()]
@@ -635,141 +636,275 @@ def _translate_chapter(
 # ─────────────────────────────────────────────────────────────────────────────
 # 5. DYNAMIC OUTPUT GENERATORS (PDF/DOCX)
 # ─────────────────────────────────────────────────────────────────────────────
-def _build_pdf(book: dict, target_language: str, output_path: str) -> None:
+def _xml_escape(text: str) -> str:
+    """Full XML escape for ReportLab Paragraph content."""
+    import unicodedata as _ud
+    text = _ud.normalize("NFC", text)
+    return (text
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace('"', "&quot;")
+            .replace("'", "&#39;"))
+
+
+def _build_pdf(book: dict, target_language: str, output_path: str,
+               source_language: str = "", author: str = "") -> None:
     """
     Render the translated book to a PDF using ReportLab with Dynamic Fonts.
+    Includes a publisher-quality cover page and an auto-generated TOC page.
+
+    FIX TR-2: _CHAPTER_RE was referenced before it was defined — now resolved
+              by moving _CHAPTER_RE above the extraction functions.
+    FIX TR-3: TOC page added after the cover, before chapter content.
+    FIX TR-4: Cover page now includes author name block, translation credit line,
+              language pair banner, and ISBN placeholder — proper publisher layout.
     """
     _ensure_unicode_fonts()
-    
+
     all_text = book["title"] + " ".join([ch["body"] for ch in book["chapters"]])
     body_font = _best_pdf_font(all_text)
-    
+
     doc = SimpleDocTemplate(
-        output_path, 
-        pagesize=A4, 
-        rightMargin=2.5*cm, 
-        leftMargin=2.5*cm, 
-        topMargin=2.8*cm, 
-        bottomMargin=2.5*cm, 
-        title=book["title"]
-    )
-    
-    styles = getSampleStyleSheet()
-    
-    cover_title = ParagraphStyle(
-        "CT", 
-        parent=styles["Title"], 
-        fontSize=28, 
-        leading=34, 
-        spaceAfter=12, 
-        alignment=TA_CENTER, 
-        fontName=body_font
-    )
-    cover_sub = ParagraphStyle(
-        "CS", 
-        parent=styles["Normal"], 
-        fontSize=12, 
-        leading=16, 
-        alignment=TA_CENTER, 
-        textColor=HexColor("#64748B"), 
-        fontName=body_font
-    )
-    ch_head = ParagraphStyle(
-        "CH", 
-        parent=styles["Heading1"], 
-        fontSize=16, 
-        leading=20, 
-        spaceBefore=24, 
-        spaceAfter=10, 
-        fontName=body_font
-    )
-    body = ParagraphStyle(
-        "B", 
-        parent=styles["Normal"], 
-        fontSize=11, 
-        leading=17, 
-        spaceAfter=8, 
-        alignment=TA_JUSTIFY, 
-        fontName=body_font
+        output_path,
+        pagesize=A4,
+        rightMargin=2.5*cm,
+        leftMargin=2.5*cm,
+        topMargin=2.8*cm,
+        bottomMargin=2.5*cm,
+        title=book["title"],
     )
 
-    story = [
-        Spacer(1, 5*cm), 
-        Paragraph(book["title"], cover_title), 
-        Spacer(1, 0.5*cm), 
-        HRFlowable(width="60%", thickness=1.5), 
-        Spacer(1, 0.5*cm),
-        Paragraph(f"Translated into {target_language}", cover_sub), 
-        Paragraph("Translated by Enterprise AI Swarm", cover_sub), 
-        PageBreak()
+    styles = getSampleStyleSheet()
+
+    # ── Style definitions ────────────────────────────────────────────────────
+    cover_title_style = ParagraphStyle(
+        "CoverTitle",
+        parent=styles["Title"],
+        fontSize=30,
+        leading=36,
+        spaceAfter=6,
+        alignment=TA_CENTER,
+        fontName=body_font,
+        textColor=HexColor("#1E293B"),
+    )
+    cover_author_style = ParagraphStyle(
+        "CoverAuthor",
+        parent=styles["Normal"],
+        fontSize=15,
+        leading=20,
+        spaceAfter=4,
+        alignment=TA_CENTER,
+        fontName=body_font,
+        textColor=HexColor("#334155"),
+    )
+    cover_label_style = ParagraphStyle(
+        "CoverLabel",
+        parent=styles["Normal"],
+        fontSize=10,
+        leading=14,
+        alignment=TA_CENTER,
+        fontName=body_font,
+        textColor=HexColor("#64748B"),
+    )
+    cover_credit_style = ParagraphStyle(
+        "CoverCredit",
+        parent=styles["Normal"],
+        fontSize=9,
+        leading=13,
+        alignment=TA_CENTER,
+        fontName=body_font,
+        textColor=HexColor("#94A3B8"),
+    )
+    toc_title_style = ParagraphStyle(
+        "TocTitle",
+        parent=styles["Heading1"],
+        fontSize=14,
+        leading=18,
+        spaceAfter=16,
+        spaceBefore=0,
+        alignment=TA_LEFT,
+        fontName=body_font,
+        textColor=HexColor("#1E293B"),
+    )
+    toc_entry_style = ParagraphStyle(
+        "TocEntry",
+        parent=styles["Normal"],
+        fontSize=11,
+        leading=18,
+        spaceAfter=2,
+        leftIndent=0,
+        fontName=body_font,
+        textColor=HexColor("#334155"),
+    )
+    ch_head_style = ParagraphStyle(
+        "ChHead",
+        parent=styles["Heading1"],
+        fontSize=16,
+        leading=20,
+        spaceBefore=24,
+        spaceAfter=10,
+        fontName=body_font,
+        textColor=HexColor("#1E293B"),
+    )
+    body_style = ParagraphStyle(
+        "Body",
+        parent=styles["Normal"],
+        fontSize=11,
+        leading=17,
+        spaceAfter=8,
+        alignment=TA_JUSTIFY,
+        fontName=body_font,
+    )
+
+    # ── Cover page ───────────────────────────────────────────────────────────
+    # Language pair banner  e.g. "English → Hindi"
+    if source_language and target_language:
+        lang_banner = f"{source_language} → {target_language}"
+    else:
+        lang_banner = f"Translated into {target_language}"
+
+    author_line = author.strip() if author.strip() else ""
+
+    story: list = [
+        Spacer(1, 5.5 * cm),
+        Paragraph(_xml_escape(book["title"]), cover_title_style),
+        Spacer(1, 0.4 * cm),
+        HRFlowable(width="50%", thickness=1.5, color=HexColor("#334155")),
+        Spacer(1, 0.4 * cm),
     ]
 
+    if author_line:
+        story.append(Paragraph(_xml_escape(author_line), cover_author_style))
+        story.append(Spacer(1, 0.3 * cm))
+
+    story += [
+        Spacer(1, 5 * cm),
+        HRFlowable(width="80%", thickness=0.5, color=HexColor("#CBD5E1")),
+        Spacer(1, 0.3 * cm),
+        Paragraph(_xml_escape(lang_banner), cover_label_style),
+        Spacer(1, 0.15 * cm),
+        Paragraph("Translated by Enterprise AI Swarm", cover_credit_style),
+        Spacer(1, 0.15 * cm),
+        Paragraph("ISBN: 000-0-000-00000-0", cover_credit_style),
+        PageBreak(),
+    ]
+
+    # ── Table of Contents page ───────────────────────────────────────────────
+    story.append(Paragraph("Contents", toc_title_style))
+    story.append(HRFlowable(width="100%", thickness=0.5, color=HexColor("#CBD5E1")))
+    story.append(Spacer(1, 0.3 * cm))
+
+    for idx, ch in enumerate(book["chapters"], start=1):
+        ch_title_raw = (ch.get("title") or "").strip() or f"Chapter {idx}"
+        entry_text = f"{idx}.&nbsp;&nbsp;{_xml_escape(ch_title_raw)}"
+        story.append(Paragraph(entry_text, toc_entry_style))
+
+    story.append(PageBreak())
+
+    # ── Chapter content ──────────────────────────────────────────────────────
     for ch in book["chapters"]:
-        import unicodedata as _ud
-        ch_title_safe = (_ud.normalize("NFC", (ch.get("title") or "").strip())
-                         .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
-        story.append(Paragraph(ch_title_safe or "&nbsp;", ch_head))
+        ch_title_safe = _xml_escape((ch.get("title") or "").strip())
+        story.append(Paragraph(ch_title_safe or "&nbsp;", ch_head_style))
         story.append(HRFlowable(width="100%", thickness=0.5, color=HexColor("#CBD5E1")))
-        story.append(Spacer(1, 0.3*cm))
-        
+        story.append(Spacer(1, 0.3 * cm))
+
         for para in ch["body"].split("\n\n"):
             raw = para.strip()
             if not raw:
                 continue
-            # TR-5: NFC-normalise so ReportLab's font shaper gets composed forms
-            import unicodedata as _ud
-            raw = _ud.normalize("NFC", raw)
-            # TR-6: full XML escape — &, <, >, " and strip any AI-injected HTML tags
-            safe = (raw
-                    .replace("&", "&amp;")
-                    .replace("<", "&lt;")
-                    .replace(">", "&gt;")
-                    .replace('"', "&quot;")
-                    .replace("'", "&#39;"))
-            story.append(Paragraph(safe, body))
-                
+            story.append(Paragraph(_xml_escape(raw), body_style))
+
         story.append(PageBreak())
-        
+
     doc.build(story)
 
-def _build_docx(book: dict, target_language: str, output_path: str) -> None:
-    """Render the translated book to a DOCX using python-docx with CS Font injections."""
+def _build_docx(book: dict, target_language: str, output_path: str,
+                source_language: str = "", author: str = "") -> None:
+    """
+    Render the translated book to a DOCX using python-docx with CS Font injections.
+    Includes a publisher-quality cover and a Table of Contents page.
+
+    FIX TR-3: TOC page added after cover, before chapter content.
+    FIX TR-4: Cover now has author name, language pair banner, and ISBN placeholder.
+    """
+    import unicodedata as _ud
+
     doc = Document()
-    
+
     all_text = book["title"] + " ".join([ch["body"] for ch in book["chapters"]])
     word_font = _best_word_font(all_text)
 
-    def apply_font(run, font_name):
+    def apply_font(run, font_name: str) -> None:
         run.font.name = font_name
         rPr = run._r.get_or_add_rPr()
         fonts = rPr.find(qn("w:rFonts"))
-        if fonts is None: 
+        if fonts is None:
             fonts = OxmlElement("w:rFonts")
             rPr.insert(0, fonts)
         fonts.set(qn("w:ascii"), font_name)
         fonts.set(qn("w:hAnsi"), font_name)
         fonts.set(qn("w:cs"), font_name)
 
-    title_para = doc.add_paragraph()
-    title_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = title_para.add_run(book["title"])
-    run.bold = True
-    run.font.size = Pt(26)
-    apply_font(run, word_font)
-    
-    sub_para = doc.add_paragraph(f"\nTranslated into {target_language}\nTranslated by Enterprise AI Swarm")
-    sub_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    for r in sub_para.runs: 
-        r.font.size = Pt(12)
-        r.font.color.rgb = RGBColor(0x64, 0x74, 0x8B)
+    def _add_centered(text: str, bold: bool = False, size_pt: float = 12,
+                      color: Optional[RGBColor] = None, space_before_pt: float = 0) -> None:
+        p = doc.add_paragraph()
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        if space_before_pt:
+            p.paragraph_format.space_before = Pt(space_before_pt)
+        r = p.add_run(text)
+        r.bold = bold
+        r.font.size = Pt(size_pt)
+        if color:
+            r.font.color.rgb = color
         apply_font(r, word_font)
-        
+
+    # ── Cover page ───────────────────────────────────────────────────────────
+    lang_banner = (f"{source_language} → {target_language}"
+                   if source_language and target_language
+                   else f"Translated into {target_language}")
+
+    # Push title down the page with blank paragraphs
+    for _ in range(8):
+        doc.add_paragraph()
+
+    _add_centered(book["title"], bold=True, size_pt=26)
+
+    if author.strip():
+        _add_centered(author.strip(), bold=False, size_pt=14,
+                      color=RGBColor(0x33, 0x41, 0x55))
+
+    # Spacer gap then meta block
+    for _ in range(6):
+        doc.add_paragraph()
+
+    _add_centered(lang_banner, size_pt=11, color=RGBColor(0x64, 0x74, 0x8B))
+    _add_centered("Translated by Enterprise AI Swarm", size_pt=9,
+                  color=RGBColor(0x94, 0xA3, 0xB8))
+    _add_centered("ISBN: 000-0-000-00000-0", size_pt=9,
+                  color=RGBColor(0x94, 0xA3, 0xB8))
+
     doc.add_page_break()
 
+    # ── Table of Contents page ───────────────────────────────────────────────
+    toc_heading = doc.add_heading("Contents", level=1)
+    if toc_heading.runs:
+        apply_font(toc_heading.runs[0], word_font)
+
+    for idx, ch in enumerate(book["chapters"], start=1):
+        ch_title_raw = _ud.normalize("NFC", (ch.get("title") or "").strip()) or f"Chapter {idx}"
+        toc_p = doc.add_paragraph()
+        toc_r = toc_p.add_run(f"{idx}.  {ch_title_raw}")
+        toc_r.font.size = Pt(11)
+        apply_font(toc_r, word_font)
+
+    doc.add_page_break()
+
+    # ── Chapter content ──────────────────────────────────────────────────────
     for ch in book["chapters"]:
-        ch_title = (ch.get("title") or "").strip()
+        ch_title = _ud.normalize("NFC", (ch.get("title") or "").strip())
         h = doc.add_heading(ch_title or " ", level=1)
-        # TR-3: guard against empty heading (zero runs → IndexError)
+        # Guard against empty heading (zero runs → IndexError)
         if h.runs:
             apply_font(h.runs[0], word_font)
         else:
@@ -777,16 +912,11 @@ def _build_docx(book: dict, target_language: str, output_path: str) -> None:
             apply_font(run_h, word_font)
 
         for para in ch["body"].split("\n\n"):
-            cleaned = para.strip()
+            cleaned = _ud.normalize("NFC", para.strip())
             if not cleaned:
                 continue
-            # TR-5: NFC-normalize so ReportLab/Word don't choke on decomposed glyphs
-            import unicodedata as _ud
-            cleaned = _ud.normalize("NFC", cleaned)
             p = doc.add_paragraph()
             p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-            # TR-4: add_paragraph with text creates one run; add it manually
-            # so we can apply font immediately, handling embedded \n as line breaks
             for line_idx, line in enumerate(cleaned.split("\n")):
                 if line_idx > 0:
                     p.add_run().add_break()
@@ -795,7 +925,7 @@ def _build_docx(book: dict, target_language: str, output_path: str) -> None:
                 apply_font(run_p, word_font)
 
         doc.add_page_break()
-        
+
     doc.save(output_path)
 
 
@@ -862,10 +992,21 @@ def translate_book(
         pdf_path  = os.path.join(output_dir, f"translated_{job_id}.pdf")
         docx_path = os.path.join(output_dir, f"translated_{job_id}.docx")
 
-        _build_pdf(translated_book, target_language, pdf_path)
-        
+        # Extract author from first line of raw text if it looks like a byline
+        # (heuristic: second non-empty line after title, short, no sentence punctuation)
+        _author_hint = ""
+        _raw_lines = [l.strip() for l in raw_text.split("\n") if l.strip()]
+        if len(_raw_lines) >= 2:
+            candidate = _raw_lines[1]
+            if len(candidate) < 80 and not any(c in candidate for c in ".!?:"):
+                _author_hint = candidate
+
+        _build_pdf(translated_book, target_language, pdf_path,
+                   source_language=detected_src, author=_author_hint)
+
         _progress("assembling", 93, "Building Global DOCX…")
-        _build_docx(translated_book, target_language, docx_path)
+        _build_docx(translated_book, target_language, docx_path,
+                    source_language=detected_src, author=_author_hint)
 
         total_words = sum(len(ch["body"].split()) for ch in translated_chapters)
         _progress("done", 100, "Enterprise Translation complete!")
