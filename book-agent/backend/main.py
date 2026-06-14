@@ -286,6 +286,7 @@ class _ScanJobProxy:
 
 _scan_jobs = _ScanJobProxy()
 _editor_sessions: dict[str, dict] = {}
+_editor_jobs: dict[str, dict] = {}
 # _translate_jobs: disk-backed so Railway load-balancer can route any poll
 # to any instance and still find the job. Uses the same _JOBS_DIR as proofread.
 class _TranslateJobProxy:
@@ -1545,83 +1546,91 @@ async def editor_upload(
         "message": f"Book loaded successfully. {len(book_structure.get('chapters', []))} chapters found. What would you like to edit?",
     }
 
-
 @app.post("/editor/{session_id}/chat")
 async def editor_chat(
     session_id: str,
     user_message: str = Form(...),
     theme: Optional[str] = Form(default=None),
 ):
-    """
-    Send an edit instruction. AI edits the book and returns a new downloadable version.
-    Maintains full conversation context across turns.
-    """
     session = _editor_sessions.get(session_id)
     if not session:
         raise HTTPException(404, "Editor session not found. Please re-upload your book.")
 
-    current_book = session["book"]
+    job_id = str(uuid.uuid4())
+    _editor_jobs[job_id] = {"state": "processing", "result": None, "error": None}
+
     current_theme = theme or session["theme"]
     session["turn"] += 1
     turn = session["turn"]
-
-    # Add user message to history
     session["history"].append({"role": "user", "content": user_message})
 
-    try:
-        result = process_editor_turn(
-            book_structure=current_book,
-            user_message=user_message,
-            conversation_history=session["history"],
-            output_dir=OUTPUT_DIR,
-            theme=current_theme,
-            job_id=f"{session_id}_v{turn}",
-        )
-    except Exception as e:
-        # Don't crash the session — return error message
-        session["history"].append({
-            "role": "assistant",
-            "content": f"I encountered an error applying that edit: {str(e)}. Please try rephrasing your request.",
-        })
-        raise HTTPException(500, f"Edit failed: {str(e)}")
+    # Snapshot what the thread needs (don't let it race with next turn)
+    book_snapshot = session["book"]
+    history_snapshot = list(session["history"])
 
-    # Update session state
-    session["book"]  = result["updated_book"]
-    session["theme"] = result["theme"]
+    def _run():
+        try:
+            result = process_editor_turn(
+                book_structure=book_snapshot,
+                user_message=user_message,
+                conversation_history=history_snapshot,
+                output_dir=OUTPUT_DIR,
+                theme=current_theme,
+                job_id=f"{session_id}_v{turn}",
+            )
+            session["book"]  = result["updated_book"]
+            session["theme"] = result["theme"]
 
-    version_record = {
-        "turn": turn,
-        "pdf_path": result["pdf_path"],
-        "docx_path": result["docx_path"],
-        "edit_summary": result["edit_summary"],
-        "theme": result["theme"],
-        "chapters_changed": result["chapters_changed"],
-        "pdf_url": f"/editor/{session_id}/download/pdf/{turn}",
-        "docx_url": f"/editor/{session_id}/download/docx/{turn}",
-    }
-    session["versions"].append(version_record)
+            version_record = {
+                "turn": turn,
+                "pdf_path": result["pdf_path"],
+                "docx_path": result["docx_path"],
+                "edit_summary": result["edit_summary"],
+                "theme": result["theme"],
+                "chapters_changed": result["chapters_changed"],
+                "pdf_url": f"/editor/{session_id}/download/pdf/{turn}",
+                "docx_url": f"/editor/{session_id}/download/docx/{turn}",
+            }
+            session["versions"].append(version_record)
 
-    # Add assistant response to history
-    assistant_msg = (
-        f"{result['edit_summary']}\n\n"
-        f"Theme: **{result['theme']}** · "
-        f"Chapters modified: {result['chapters_changed'] or 'none'} · "
-        f"Version {turn} ready to download."
-    )
-    session["history"].append({"role": "assistant", "content": assistant_msg})
+            assistant_msg = (
+                f"{result['edit_summary']}\n\n"
+                f"Theme: **{result['theme']}** · "
+                f"Chapters modified: {result['chapters_changed'] or 'none'} · "
+                f"Version {turn} ready to download."
+            )
+            session["history"].append({"role": "assistant", "content": assistant_msg})
 
+            _editor_jobs[job_id]["result"] = {
+                "turn": turn,
+                "edit_summary": result["edit_summary"],
+                "chapters_changed": result["chapters_changed"],
+                "theme": result["theme"],
+                "title": result["updated_book"].get("title", ""),
+                "chapter_titles": [c["title"] for c in result["updated_book"].get("chapters", [])],
+                "pdf_url": version_record["pdf_url"],
+                "docx_url": version_record["docx_url"],
+                "assistant_message": assistant_msg,
+            }
+            _editor_jobs[job_id]["state"] = "done"
+        except Exception as e:
+            _editor_jobs[job_id]["state"] = "error"
+            _editor_jobs[job_id]["error"] = str(e)
+
+    threading.Thread(target=_run, daemon=True).start()
+    return {"job_id": job_id, "state": "processing"}
+
+
+@app.get("/editor/{session_id}/job/{job_id}/status")
+async def editor_job_status(session_id: str, job_id: str):
+    job = _editor_jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
     return {
-        "turn": turn,
-        "edit_summary": result["edit_summary"],
-        "chapters_changed": result["chapters_changed"],
-        "theme": result["theme"],
-        "title": result["updated_book"].get("title", ""),
-        "chapter_titles": [c["title"] for c in result["updated_book"].get("chapters", [])],
-        "pdf_url": version_record["pdf_url"],
-        "docx_url": version_record["docx_url"],
-        "assistant_message": assistant_msg,
+        "state": job["state"],
+        "result": job["result"],
+        "error": job["error"],
     }
-
 
 @app.get("/editor/{session_id}/download/pdf/{turn}")
 def editor_download_pdf(session_id: str, turn: int):
