@@ -241,7 +241,40 @@ export default function BookEditorPage() {
                 const err = await res.json();
                 throw new Error(err.detail || "Edit failed");
             }
-            const data = await res.json();
+            const { job_id } = await res.json();
+
+            interface EditorResult {
+                turn: number;
+                edit_summary: string;
+                theme: string;
+                chapters_changed: number[];
+                pdf_url: string;
+                docx_url: string;
+                chapter_titles?: string[];
+                title?: string;
+                assistant_message?: string;
+            }
+
+            const data = await new Promise<EditorResult>((resolve, reject) => {
+                let consecutiveErrors = 0;
+                const poll = async () => {
+                    try {
+                        const statusRes = await fetch(
+                            `${API_BASE}/editor/${session.session_id}/job/${job_id}/status`
+                        );
+                        const status = await statusRes.json();
+                        consecutiveErrors = 0;
+                        if (status.state === "done") return resolve(status.result as EditorResult);
+                        if (status.state === "error") return reject(new Error(status.error || "Edit failed"));
+                        setTimeout(poll, 3000);
+                    } catch (err) {
+                        consecutiveErrors++;
+                        if (consecutiveErrors >= 10) return reject(new Error("Polling failed repeatedly"));
+                        setTimeout(poll, Math.min(3000 * consecutiveErrors, 15000));
+                    }
+                };
+                setTimeout(poll, 3000);
+            });
 
             const version: Version = {
                 turn: data.turn,
@@ -256,9 +289,8 @@ export default function BookEditorPage() {
             setCurrentTheme(data.theme);
             if (themeOverride) setThemeOverride(null);
 
-            // Update chapter titles if returned
             if (data.chapter_titles) {
-                setSession((prev) => prev ? { ...prev, chapter_titles: data.chapter_titles, title: data.title || prev.title } : prev);
+                setSession((prev) => prev ? { ...prev, chapter_titles: data.chapter_titles!, title: data.title || prev.title } : prev);
             }
 
             setMessages((prev) =>
