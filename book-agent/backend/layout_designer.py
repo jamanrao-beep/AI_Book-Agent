@@ -3633,9 +3633,10 @@ def render_layout_pdf(
             )
 
             try:
-                from pypdf.generic import (  # pyrefly: ignore [missing-import]
+                # pyrefly: ignore [missing-import]
+                from pypdf.generic import (
                     ArrayObject, DecodedStreamObject, DictionaryObject,
-                    NameObject, NumberObject
+                    NameObject, NumberObject,createStringObject
                 )
 
                 _icc_bytes: bytes | None = None
@@ -3695,8 +3696,8 @@ def render_layout_pdf(
                     NameObject("/Type"):  NameObject("/OutputIntent"),
                     NameObject("/S"):     NameObject("/GTS_PDFA1"),
                     NameObject("/OutputConditionIdentifier"):
-                                          NameObject("sRGB IEC61966-2.1"),
-                    NameObject("/Info"):  NameObject("sRGB IEC61966-2.1"),
+                                          createStringObject("sRGB IEC61966-2.1"),
+                    NameObject("/Info"):  createStringObject("sRGB IEC61966-2.1"),
                     NameObject("/DestOutputProfile"): _icc_stream,
                 })
                 _writer._root_object.update({
