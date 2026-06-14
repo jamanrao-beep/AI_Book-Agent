@@ -58,8 +58,10 @@ SUPPORTED_UPLOAD_EXTS = SUPPORTED_IMAGE_EXTS | {".pdf", ".docx", ".zip"}
 PAGES_PER_BATCH = 1
 
 # Max output tokens per transcription call.
-# Using 32768 (max for gpt-4o) to ensure dense handwriting is NEVER silently truncated.
-TRANSCRIPTION_MAX_TOKENS = 32768
+# gpt-4o's hard limit is 16384 output tokens — anything higher causes an
+# immediate 400 Bad Request on EVERY call (no retry, since 400s aren't
+# treated as transient). 16384 is plenty for one page of dense handwriting.
+TRANSCRIPTION_MAX_TOKENS = 16384
 
 # Number of parallel workers for transcription.
 # Keep at 4 — 8 workers hammers the OpenAI rate limit on standard tiers
@@ -641,6 +643,11 @@ def _api_call_with_retry(fn, *args, **kwargs):
                     print(f"  ⏳  API error (attempt {attempt}/{MAX_RETRIES}), retrying in {wait:.1f}s: {e}")
                     time.sleep(wait)
                     continue
+            else:
+                # Non-transient error (e.g. 400 Bad Request from a bad request
+                # body/param) — surface it immediately, it will NOT fix itself
+                # on retry.
+                print(f"  ❌  Non-retryable API error (attempt {attempt}/{MAX_RETRIES}): {e}")
             raise
             
     raise last_exc
@@ -785,6 +792,7 @@ def _transcribe_single_batch(batch: list[str], batch_start: int) -> list[dict]:
                     }
 
             except Exception as e:
+                print(f"  ❌  Transcription API call failed for page(s) {[batch_start + s + 1 for s in successful_indices]}: {e}")
                 for slot in successful_indices:
                     batch_results[slot] = {
                         "page_num": batch_start + slot + 1,
@@ -957,7 +965,7 @@ def heal_transcription_context(pages: list[dict]) -> list[dict]:
                         f"{compiled_text}"
                     )},
                 ],
-                max_tokens=32768,
+                max_tokens=16384,
                 temperature=0.05,
             )
             healed_raw = (response.choices[0].message.content or "").strip()
