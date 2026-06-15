@@ -173,31 +173,52 @@ def generate_section(
     previous_summary: str,
     word_count      : int = 400,
     writing_style   : str = "",
+    story_bible     : str = "",   # ← NEW: structured EKG injected as strict rules
 ) -> str:
     """
     Drafts the actual book content using Premium Bestseller Prose constraints.
     Eliminates passive voice, repetitive AI jargon, and forces 'Show, Don't Tell'.
+
+    story_bible: JSON Entity Knowledge Graph from agent.py. When provided, it is
+    injected as a hard constraint block BEFORE the prose directives so the model
+    treats it as inviolable rules rather than optional context.
     """
-    context = (
-        f"The previous section established the following context/memory:\n{previous_summary}"
+    # ── Build the two context blocks separately so they're clearly distinct ──
+    ekg_block = ""
+    if story_bible and story_bible.strip():
+        ekg_block = f"""
+══════════════════════════════════════════════════════
+ENTITY KNOWLEDGE GRAPH — ABSOLUTE CONSTRAINTS
+You are STRICTLY FORBIDDEN from introducing any character, location, object,
+scent, sound, or event that is not already listed in this graph.
+If the section title implies a new location or character not in this graph,
+reinterpret it creatively within the EXISTING established world.
+Do NOT invent new proper nouns, place names, or sensory details that contradict
+the descriptions below.
+
+{story_bible}
+══════════════════════════════════════════════════════
+"""
+
+    narrative_context = (
+        f"NARRATIVE CONTINUITY — what happened immediately before this section:\n{previous_summary}"
         if previous_summary else "This is the very first section of the book."
     )
-    
+
     style_instruction = (
         f"\nTARGET WRITING STYLE: '{writing_style}' — strictly maintain this tone."
         if writing_style else ""
     )
-    
+
     lang_rules = _language_instruction(book_title, writing_style)
-    
+
     prompt = f"""{lang_rules}
 You are a bestselling author writing a commercial manuscript.
 Book: "{book_title}"{style_instruction}
 Current Chapter: {chapter_title}
 Current Section: {subheading}
-
-CONTINUITY CONTEXT:
-{context}
+{ekg_block}
+{narrative_context}
 
 CRITICAL PROSE DIRECTIVES:
 1. Write EXACTLY {word_count} words for this section. Do not stop early.
@@ -205,18 +226,24 @@ CRITICAL PROSE DIRECTIVES:
 3. Avoid generic AI phrasing (e.g., "It is important to note," "In conclusion," "A testament to").
 4. Do NOT repeat the section title or chapter title at the top of the text.
 5. Write in flowing, engaging prose paragraphs. No bullet points.
-6. Seamlessly continue the narrative or argument from the CONTINUITY CONTEXT.
+6. Seamlessly continue the narrative or argument from the NARRATIVE CONTINUITY above.
+7. ONLY use sensory details (scents, textures, sounds, colours) that are consistent
+   with the Entity Knowledge Graph above. Do not introduce new ones.
 
 Write only the prose content:"""
 
     max_toks = max(2048, int(word_count * 1.5) + 200)
-    
+
     for attempt in range(3):
         try:
             response = client.chat.completions.create(
                 model=MODEL,
                 messages=[
-                    {"role": "system", "content": "You are a master author generating premium, publish-ready prose."},
+                    {"role": "system", "content": (
+                        "You are a master author generating premium, publish-ready prose. "
+                        "You treat the Entity Knowledge Graph as inviolable law — "
+                        "you never introduce facts, characters, or locations not listed there."
+                    )},
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.7,
@@ -227,5 +254,5 @@ Write only the prose content:"""
         except Exception as e:
             print(f"  ⚠️  Section generation attempt {attempt+1} failed: {e}")
             time.sleep(3 * (attempt + 1))
-            
+
     raise Exception("Failed to generate section after all retries")

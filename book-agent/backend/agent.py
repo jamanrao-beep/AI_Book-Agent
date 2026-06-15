@@ -11,7 +11,6 @@ sys.path.insert(0, os.path.dirname(__file__))
 from database import SessionLocal
 from models import Book, BookSegment
 
-# We keep your original imports but we will augment the generation process natively here
 from openai_client import generate_outline, generate_section
 # pyrefly: ignore [missing-import]
 from openai import OpenAI
@@ -31,8 +30,11 @@ Your job is to review the newly drafted section of a book against the 'Entity Kn
 
 Look for:
 1. Plot holes, factual inconsistencies, or character breaks compared to the Entity Knowledge Graph.
-2. Repetitive phrasing, weak transitions, or hallucinations.
+2. Repetitive phrasing, weak transitions, or hallucinations (any detail NOT present in the Entity Knowledge Graph).
 3. Deviation from the requested writing style.
+
+IMPORTANT: Any character, location, scent, object, or event that appears in the draft
+but is NOT listed in the Entity Knowledge Graph counts as a hallucination and must be flagged.
 
 Output STRICTLY valid JSON with no markdown formatting:
 {
@@ -43,8 +45,16 @@ Output STRICTLY valid JSON with no markdown formatting:
 """
 
 REVISOR_SYSTEM_PROMPT = """You are a Master Author and Revisor.
-You will be given a draft of a book section and a harsh critique from the Editor.
-Your job is to rewrite the section to flawlessly address the Editor's critique while maintaining the exact requested word count and style.
+You will be given:
+- An Entity Knowledge Graph of ALL established facts (characters, locations, events, sensory details).
+- A harsh critique from the Editor listing specific problems.
+- The original draft that needs fixing.
+
+Your job is to rewrite the section to flawlessly address the Editor's critique while:
+1. Maintaining the exact requested word count and style.
+2. NEVER introducing any character, location, scent, object, or event not listed in the Entity Knowledge Graph.
+3. Reinterpreting any section title creatively within the EXISTING established world if it implies new elements.
+
 Do NOT output any conversational text, only the final revised book content.
 """
 
@@ -62,6 +72,12 @@ You MUST output ONLY a valid JSON object matching this exact structure:
     },
     "Locations": {
         "Location Name": "Description and significance"
+    },
+    "Sensory_Details": {
+        "Scents": [],
+        "Sounds": [],
+        "Textures": [],
+        "Visual_Motifs": []
     },
     "Timeline": [
         "Event 1: Description",
@@ -82,13 +98,16 @@ def calculate_chapters(num_pages: int, words_per_page: int) -> int:
     # A standard chapter is ~4 sections
     words_per_chapter = 4 * words_per_section
     chapters = max(3, total_words // words_per_chapter)
-    return min(chapters, 100) # Cap at 100 chapters to prevent runaway generation
+    return min(chapters, 100)  # Cap at 100 chapters to prevent runaway generation
 
 
 def update_story_bible(current_bible: str, new_content: str, book_title: str) -> str:
     """
-    Entity Knowledge Graph Engine: Updates the structured JSON memory of the book 
+    Entity Knowledge Graph Engine: Updates the structured JSON memory of the book
     to prevent AI amnesia and plot holes across 1000+ page generation runs.
+
+    Now includes a Sensory_Details field so scents, sounds, and textures are
+    tracked explicitly — preventing the Writer from inventing new ones each section.
     """
     print("    🧠 Updating Continuity Entity Knowledge Graph...")
     try:
@@ -97,13 +116,17 @@ def update_story_bible(current_bible: str, new_content: str, book_title: str) ->
             response_format={"type": "json_object"},
             messages=[
                 {"role": "system", "content": STORY_BIBLE_PROMPT},
-                {"role": "user", "content": f"Book Title: {book_title}\n\nCURRENT KNOWLEDGE GRAPH:\n{current_bible}\n\nNEW SECTION CONTENT:\n{new_content}"}
+                {"role": "user", "content": (
+                    f"Book Title: {book_title}\n\n"
+                    f"CURRENT KNOWLEDGE GRAPH:\n{current_bible}\n\n"
+                    f"NEW SECTION CONTENT:\n{new_content}"
+                )}
             ],
             max_tokens=2500,
             temperature=0.2
         )
         updated_bible = response.choices[0].message.content.strip()
-        
+
         # Verify it is valid JSON before returning
         json.loads(updated_bible)
         return updated_bible
@@ -114,52 +137,75 @@ def update_story_bible(current_bible: str, new_content: str, book_title: str) ->
 
 def critique_and_revise(draft: str, story_bible: str, style: str, target_words: int) -> str:
     """
-    Multi-Agent Loop: Critic reviews the draft against the JSON Knowledge Graph. 
-    If it fails, Revisor rewrites it. Maximum of 2 revision loops to prevent infinite hanging.
+    Multi-Agent Loop: Critic reviews the draft against the JSON Knowledge Graph.
+    If it fails, Revisor rewrites it WITH the EKG injected so it cannot hallucinate.
+
+    Changes from v1:
+    - MAX_ATTEMPTS raised to 3 (was 2) so Revisor output gets a final Critic check.
+    - Revisor now receives story_bible as a hard constraint (was missing entirely).
+    - Loop exits before final revision attempt so we don't waste a call on an
+      unchecked draft — instead the last Critic run is the gate.
     """
     current_draft = draft
-    
-    for attempt in range(2):
-        # --- AGENT 1: THE CRITIC ---
+    MAX_ATTEMPTS = 3
+
+    for attempt in range(MAX_ATTEMPTS):
+
+        # ── AGENT 1: THE CRITIC ───────────────────────────────────────────────
         try:
             critique_response = client.chat.completions.create(
                 model=MODEL,
                 messages=[
                     {"role": "system", "content": CRITIC_SYSTEM_PROMPT},
-                    {"role": "user", "content": f"STYLE: {style}\nENTITY KNOWLEDGE GRAPH:\n{story_bible}\n\nDRAFT TO CRITIQUE:\n{current_draft}"}
+                    {"role": "user", "content": (
+                        f"STYLE: {style}\n"
+                        f"ENTITY KNOWLEDGE GRAPH:\n{story_bible}\n\n"
+                        f"DRAFT TO CRITIQUE:\n{current_draft}"
+                    )}
                 ],
-                max_tokens=500,
+                max_tokens=600,
                 temperature=0.2
             )
             raw_critique = critique_response.choices[0].message.content.strip()
-            
+
             # Clean JSON markdown if present
             if raw_critique.startswith("```json"):
                 raw_critique = raw_critique[7:-3].strip()
-            
+
             critique_data = json.loads(raw_critique)
-            
+
             if critique_data.get("passed", False):
-                if attempt > 0:
-                    print("    ✅ Revisor successfully fixed the draft!")
-                else:
+                if attempt == 0:
                     print("    ✅ Critic approved draft on first pass.")
+                else:
+                    print(f"    ✅ Revisor successfully fixed the draft! (Attempt {attempt})")
                 return current_draft
-                
-            print(f"    🚨 Critic flagged issues (Attempt {attempt+1}): {critique_data.get('critique')}")
-            
+
+            print(f"    🚨 Critic flagged issues (Attempt {attempt + 1}/{MAX_ATTEMPTS}): {critique_data.get('critique')}")
+
         except Exception as e:
             print(f"    ⚠️ Critic agent failed JSON parse, bypassing critique loop: {e}")
             return current_draft
-            
-        # --- AGENT 2: THE REVISOR ---
-        print("    ✍️ Revisor agent rewriting based on critique...")
+
+        # Don't revise on the final attempt — the Critic just ran and we're out of loops.
+        # Return the best draft we have rather than producing an unchecked revision.
+        if attempt == MAX_ATTEMPTS - 1:
+            break
+
+        # ── AGENT 2: THE REVISOR (now receives story_bible!) ─────────────────
+        print(f"    ✍️ Revisor agent rewriting based on critique (Attempt {attempt + 1})...")
         try:
             revise_response = client.chat.completions.create(
                 model=MODEL,
                 messages=[
                     {"role": "system", "content": REVISOR_SYSTEM_PROMPT},
-                    {"role": "user", "content": f"TARGET WORDS: {target_words}\nCRITIQUE TO ADDRESS:\n{critique_data['critique']}\n\nORIGINAL DRAFT:\n{current_draft}"}
+                    {"role": "user", "content": (
+                        f"TARGET WORDS: {target_words}\n\n"
+                        f"ENTITY KNOWLEDGE GRAPH (STRICT — DO NOT CONTRADICT OR ADD TO THIS):\n"
+                        f"{story_bible}\n\n"
+                        f"CRITIQUE TO ADDRESS:\n{critique_data['critique']}\n\n"
+                        f"ORIGINAL DRAFT:\n{current_draft}"
+                    )}
                 ],
                 max_tokens=max(2000, int(target_words * 1.5)),
                 temperature=0.7
@@ -171,6 +217,7 @@ def critique_and_revise(draft: str, story_bible: str, style: str, target_words: 
 
     print("    ⚠️ Max revision loops reached. Proceeding with best draft.")
     return current_draft
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # MAIN EXECUTION ENGINE
@@ -199,9 +246,8 @@ def run_book_agent(book_id: int):
         num_chapters = calculate_chapters(book.num_pages, book.words_per_page)
         print(f"📋 Generating master outline architecture ({num_chapters} chapters)...")
 
-        # Fallback empty string if style is None to prevent OpenAI typing errors
         safe_style = book.writing_style or "Neutral, clear, and engaging."
-        
+
         outline = generate_outline(book.title, num_chapters, writing_style=safe_style)
         book.outline = json.dumps(outline)
         book.status  = "generating"
@@ -212,18 +258,25 @@ def run_book_agent(book_id: int):
         print(f"✅ Master Outline established. Total logical blocks to generate: {total_sections}\n")
 
         # ── STEP 2: Swarm Generation & Continuity Loop ───────────────────────
-        # Initialize the Entity Knowledge Graph as a strict JSON structure
+        # Initialize the Entity Knowledge Graph with Sensory_Details from the start
+        # so the Writer has an explicit bucket to respect from section 1.
         initial_graph = {
             "Core_Premise": f"A book titled '{book.title}' written in the style of: {safe_style}.",
             "Characters": {},
             "Locations": {},
+            "Sensory_Details": {
+                "Scents": [],
+                "Sounds": [],
+                "Textures": [],
+                "Visual_Motifs": []
+            },
             "Timeline": []
         }
-        story_bible          = json.dumps(initial_graph)
-        segment_order        = 0
-        total_words_target   = book.num_pages * book.words_per_page
-        words_per_section    = max(300, total_words_target // max(total_sections, 1))
-        
+        story_bible        = json.dumps(initial_graph)
+        segment_order      = 0
+        total_words_target = book.num_pages * book.words_per_page
+        words_per_section  = max(300, total_words_target // max(total_sections, 1))
+
         print(f"🎯 Target Volume: {total_words_target:,} words | Expected ~{words_per_section} words/section\n")
 
         for chapter in outline["chapters"]:
@@ -241,32 +294,34 @@ def run_book_agent(book_id: int):
 
                 if existing:
                     print(f"    ⏭️ Skipping (Resuming from DB): {subheading}")
-                    # Rapidly rebuild story bible from existing segments to maintain continuity on resume
-                    story_bible = update_story_bible(story_bible, existing.content[-800:], book.title)
-                    segment_order   += 1
-                    done_sections   += 1
+                    story_bible   = update_story_bible(story_bible, existing.content[-800:], book.title)
+                    segment_order += 1
+                    done_sections += 1
                     continue
 
                 print(f"    ✍️  Writer Agent drafting: {subheading} (~{words_per_section} words)")
-                
-                # We inject the structured JSON story bible into the context for the Writer Agent
-                enhanced_context = f"ENTITY KNOWLEDGE GRAPH / CONTINUITY RULES:\n{story_bible}"
-                
+
+                # ── KEY FIX: pass story_bible directly to generate_section ──
+                # Previously story_bible was passed as `previous_summary` which
+                # framed it as optional backstory. Now it goes through the new
+                # `story_bible` parameter which injects it as an absolute constraint
+                # block with visual separators and explicit prohibition language.
                 raw_draft = generate_section(
                     book_title       = book.title,
                     chapter_title    = chapter["title"],
                     subheading       = subheading,
-                    previous_summary = enhanced_context,
+                    previous_summary = "",   # narrative "what happened before" now comes from EKG Timeline
                     word_count       = words_per_section,
                     writing_style    = safe_style,
+                    story_bible      = story_bible,   # ← hard constraint, not soft context
                 )
 
-                # Pass to Critic & Revisor Swarm
+                # Pass to Critic & Revisor Swarm (Revisor now also gets story_bible)
                 final_content = critique_and_revise(
-                    draft=raw_draft, 
-                    story_bible=story_bible, 
-                    style=safe_style, 
-                    target_words=words_per_section
+                    draft        = raw_draft,
+                    story_bible  = story_bible,
+                    style        = safe_style,
+                    target_words = words_per_section,
                 )
 
                 # Save to database
@@ -280,11 +335,10 @@ def run_book_agent(book_id: int):
                     is_complete    = True
                 )
                 db.add(segment)
-                # E8: heartbeat — lets monitoring know the job is alive
                 book.last_heartbeat = datetime.utcnow()
                 db.commit()
 
-                # E8: check for cancellation signal after every section
+                # Check for cancellation signal after every section
                 db.refresh(book)
                 if book.is_cancelled:
                     print(f"    🛑 Cancellation requested — stopping after section {done_sections}.")
@@ -292,16 +346,15 @@ def run_book_agent(book_id: int):
                     db.commit()
                     return
 
-                # Update the rolling memory for the next section
+                # Update the rolling EKG for the next section
                 story_bible = update_story_bible(story_bible, final_content, book.title)
-                
-                segment_order    += 1
-                done_sections    += 1
+
+                segment_order += 1
+                done_sections += 1
 
                 pct = int((done_sections / total_sections) * 100)
                 print(f"    ✅ Section Finalized [{pct}%] ({done_sections}/{total_sections})")
-                
-                # Dynamic delay to respect API rate limits based on generation size
+
                 time.sleep(1.5)
 
         # ── STEP 3: Premium Assembly & Formatting ─────────────────────────────
@@ -318,11 +371,11 @@ def run_book_agent(book_id: int):
 
         output_dir = os.path.join(os.path.dirname(__file__), "output")
         os.makedirs(output_dir, exist_ok=True)
-        
+
         try:
-            pdf_path   = generate_pdf(book.title, segments, output_dir)
-            docx_path  = generate_docx(book.title, segments, output_dir)
-            
+            pdf_path  = generate_pdf(book.title, segments, output_dir)
+            docx_path = generate_docx(book.title, segments, output_dir)
+
             book.pdf_url  = pdf_path
             book.docx_url = docx_path
             book.status   = "done"
@@ -332,7 +385,7 @@ def run_book_agent(book_id: int):
             print(f"   STANDARD PDF → {pdf_path}")
             print(f"   DOCX         → {docx_path}")
             return {"pdf": pdf_path, "docx": docx_path}
-            
+
         except Exception as assembly_error:
             print(f"\n❌ Assembly failed during PDF/DOCX generation: {assembly_error}")
             traceback.print_exc()
