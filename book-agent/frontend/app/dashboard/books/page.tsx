@@ -29,6 +29,7 @@ import {
   Zap,
   Globe,
   RefreshCw,
+  AlertTriangle,
 } from "lucide-react";
 
 // ── Status config ──────────────────────────────────────────────────────────────
@@ -67,6 +68,7 @@ interface ActiveJob {
   title: string;
   segments: number;
   status: string;
+  errorMessage?: string; // user-friendly error from backend
 }
 
 export default function BooksPage() {
@@ -124,7 +126,12 @@ export default function BooksPage() {
           getProgress(activeJob.bookId),
         ]);
         setActiveJob((prev) =>
-          prev ? { ...prev, status: statusRes.data.status, segments: progressRes.data.completed_segments } : null
+          prev ? {
+            ...prev,
+            status: statusRes.data.status,
+            segments: progressRes.data.completed_segments,
+            errorMessage: statusRes.data.error_message ?? prev.errorMessage,
+          } : null
         );
         if (statusRes.data.status === "done" || statusRes.data.status === "failed") {
           fetchBooks();
@@ -703,7 +710,62 @@ export default function BooksPage() {
         )}
 
         {/* ── Active Job Banner ───────────────────────────────────────────────── */}
-        {activeJob && activeJob.status !== "done" && activeJob.status !== "failed" && (() => {
+        {activeJob && activeJob.status !== "done" && (() => {
+
+          // ── FAILED: friendly error card ──────────────────────────────────────
+          if (activeJob.status === "failed") {
+            return (
+              <div style={{
+                background: "rgba(248,113,113,0.07)",
+                border: "1px solid rgba(248,113,113,0.22)",
+                borderRadius: "16px",
+                padding: "20px 24px",
+                marginBottom: "28px",
+                display: "flex",
+                alignItems: "flex-start",
+                gap: "14px",
+                animation: "fadeInUp 0.3s ease",
+              }}>
+                <div style={{
+                  width: "40px", height: "40px", flexShrink: 0,
+                  background: "rgba(248,113,113,0.12)",
+                  border: "1px solid rgba(248,113,113,0.25)",
+                  borderRadius: "11px",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                }}>
+                  <AlertTriangle size={18} color="#f87171" />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <p style={{ fontWeight: "700", fontSize: "14px", color: "#fca5a5", marginBottom: "5px", letterSpacing: "-0.01em" }}>
+                    "{activeJob.title}" couldn't be generated
+                  </p>
+                  <p style={{ fontSize: "13px", color: "#94a3b8", lineHeight: "1.65" }}>
+                    {activeJob.errorMessage ?? "Something went wrong while generating your book. Please try again."}
+                  </p>
+                  <div style={{ display: "flex", gap: "8px", marginTop: "12px" }}>
+                    <button
+                      onClick={() => { setShowForm(true); setActiveJob(null); }}
+                      style={{ display: "flex", alignItems: "center", gap: "6px", background: "rgba(99,102,241,0.15)", border: "1px solid rgba(99,102,241,0.3)", borderRadius: "8px", padding: "7px 14px", color: "#a5b4fc", fontSize: "12px", fontWeight: "600", cursor: "pointer", transition: "all 0.15s" }}
+                      onMouseOver={e => e.currentTarget.style.background = "rgba(99,102,241,0.25)"}
+                      onMouseOut={e => e.currentTarget.style.background = "rgba(99,102,241,0.15)"}
+                    >
+                      <RefreshCw size={12} /> Try Again
+                    </button>
+                    <button
+                      onClick={() => setActiveJob(null)}
+                      style={{ background: "none", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "8px", padding: "7px 14px", color: "#64748b", fontSize: "12px", cursor: "pointer", transition: "all 0.15s" }}
+                      onMouseOver={e => e.currentTarget.style.color = "#e2e8f0"}
+                      onMouseOut={e => e.currentTarget.style.color = "#64748b"}
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          }
+
+          // ── IN PROGRESS ───────────────────────────────────────────────────────
           const meta = STATUS_META[activeJob.status] || STATUS_META.pending;
           return (
             <div style={{
@@ -921,6 +983,22 @@ export default function BooksPage() {
                           </span>
                         )}
                       </div>
+
+                      {/* ── Friendly error message on failed book cards ── */}
+                      {isFailed && book.error_message && (
+                        <div style={{
+                          display: "flex", alignItems: "flex-start", gap: "6px",
+                          marginTop: "8px", padding: "8px 10px",
+                          background: "rgba(248,113,113,0.06)",
+                          border: "1px solid rgba(248,113,113,0.15)",
+                          borderRadius: "8px",
+                        }}>
+                          <AlertTriangle size={12} color="#f87171" style={{ flexShrink: 0, marginTop: "1px" }} />
+                          <p style={{ fontSize: "12px", color: "#fca5a5", lineHeight: "1.5", margin: 0 }}>
+                            {book.error_message}
+                          </p>
+                        </div>
+                      )}
                     </div>
 
                     {/* Status + Downloads */}

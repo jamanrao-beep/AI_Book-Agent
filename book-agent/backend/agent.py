@@ -392,7 +392,42 @@ def run_book_agent(book_id: int):
             raise
 
     except Exception as e:
-        book.status = "failed"
+        error_str = str(e).lower()
+
+        # Detect OpenAI quota/billing errors and surface a friendly message
+        # instead of a raw technical crash. The frontend reads book.status and
+        # book.error_message to decide what to show the user.
+        if "insufficient_quota" in error_str or "exceeded your current quota" in error_str or "billing" in error_str:
+            book.status        = "failed"
+            book.error_message = (
+                "Oops! It looks like the AI service ran out of credits. "
+                "Please try again later or contact support if this keeps happening."
+            )
+        elif "429" in error_str or "rate limit" in error_str or "too many requests" in error_str:
+            book.status        = "failed"
+            book.error_message = (
+                "The AI service is a bit busy right now. "
+                "Please wait a few minutes and try again."
+            )
+        elif "timeout" in error_str or "timed out" in error_str:
+            book.status        = "failed"
+            book.error_message = (
+                "The AI took too long to respond. "
+                "Please try again — it usually works on the next attempt."
+            )
+        elif "connection" in error_str or "network" in error_str:
+            book.status        = "failed"
+            book.error_message = (
+                "We had trouble reaching the AI service. "
+                "Check your internet connection and try again."
+            )
+        else:
+            book.status        = "failed"
+            book.error_message = (
+                "Something went wrong while generating your book. "
+                "Please try again. If the problem continues, contact support."
+            )
+
         db.commit()
         print(f"\n❌ Core Agent Engine failed: {e}")
         traceback.print_exc()

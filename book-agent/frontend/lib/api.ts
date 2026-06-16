@@ -28,6 +28,7 @@ export interface BookStatus {
   pdf_url: string | null;
   docx_url: string | null;
   created_at: string;
+  error_message?: string; // user-friendly error message from backend
 }
 
 export interface BookProgress {
