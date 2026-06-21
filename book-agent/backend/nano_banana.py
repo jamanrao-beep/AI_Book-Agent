@@ -61,8 +61,11 @@ if not _NB_KEY:
 _genai_client = genai.Client(api_key=_NB_KEY)
 
 # ── Model names ───────────────────────────────────────────────────────────────
-NANO_BANANA_PRO = "gemini-2.5-flash-preview-05-20"   # Tier 1
-NANO_BANANA_2   = "gemini-2.0-flash-exp"             # Tier 2
+# IMPORTANT: these must be IMAGE-capable model IDs, not text chat models.
+# gemini-2.5-flash-preview-05-20 / gemini-2.0-flash-exp do NOT support
+# generateContent for images and will 404 — that was the original bug.
+NANO_BANANA_PRO = "gemini-3-pro-image-preview"      # Tier 1 — Nano Banana Pro
+NANO_BANANA_2   = "gemini-3.1-flash-image-preview"  # Tier 2 — Nano Banana 2
 
 
 # ─────────────────────────────────────────────────────────────────────────────
