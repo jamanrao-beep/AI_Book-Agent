@@ -36,12 +36,15 @@ logger = logging.getLogger("nano_banana")
 # ── Gemini SDK (image generation only) ───────────────────────────────────────
 try:
     # pyrefly: ignore [missing-import]
-    import google.generativeai as genai
+    from google import genai
+    # pyrefly: ignore [missing-import]
+    from google.genai import types as genai_types
 except ImportError as _e:
     raise ImportError(
-        "google-generativeai is not installed.\n"
-        "Run: pip install google-generativeai>=0.8.0\n"
-        "(Only needed for Nano Banana cover image generation.)"
+        "google-genai is not installed.\n"
+        "Run: pip install google-genai>=1.0.0\n"
+        "(Only needed for Nano Banana cover image generation. Note: the old\n"
+        "google-generativeai package is deprecated — use google-genai instead.)"
     ) from _e
 
 _NB_KEY = (
@@ -55,7 +58,7 @@ if not _NB_KEY:
         "Get a free key at: https://aistudio.google.com/apikey"
     )
 
-genai.configure(api_key=_NB_KEY)
+_genai_client = genai.Client(api_key=_NB_KEY)
 
 # ── Model names ───────────────────────────────────────────────────────────────
 NANO_BANANA_PRO = "gemini-2.5-flash-preview-05-20"   # Tier 1
@@ -73,14 +76,19 @@ def generate_image(prompt: str, model_name: str) -> bytes | None:
     """
     try:
         logger.info("  🍌 Nano Banana (%s) generating…", model_name)
-        model   = genai.GenerativeModel(model_name)
-        gen_cfg = genai.types.GenerationConfig(
-            response_modalities=["TEXT", "IMAGE"],
+        response = _genai_client.models.generate_content(
+            model=model_name,
+            contents=prompt,
+            config=genai_types.GenerateContentConfig(
+                response_modalities=["TEXT", "IMAGE"],
+            ),
         )
-        response = model.generate_content(prompt, generation_config=gen_cfg)
 
-        for candidate in response.candidates:
-            for part in candidate.content.parts:
+        for candidate in (response.candidates or []):
+            content = getattr(candidate, "content", None)
+            if not content:
+                continue
+            for part in (content.parts or []):
                 inline = getattr(part, "inline_data", None)
                 if inline and inline.data:
                     raw = inline.data

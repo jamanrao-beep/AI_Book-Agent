@@ -961,6 +961,18 @@ def render_cover_pdf(concept: dict, output_path: str,
     # ── Build background canvas ───────────────────────────────────────────────
     try:
         def _fit_to_canvas(img_bytes: bytes) -> "Image.Image":
+            # Rasterise SVG bytes to PNG first — PIL cannot open SVG directly.
+            head = img_bytes[:200].lstrip()
+            if head.startswith(b"<?xml") or head.startswith(b"<svg") or b"<svg" in head:
+                try:
+                    import cairosvg  # pyrefly: ignore [missing-import]
+                    img_bytes = cairosvg.svg2png(
+                        bytestring=img_bytes, output_width=W_px, output_height=H_px
+                    )
+                except Exception as svg_err:
+                    logger.warning(f"  ⚠️  cairosvg unavailable/failed ({svg_err}); cannot rasterise SVG background.")
+                    raise
+
             img   = Image.open(io.BytesIO(img_bytes)).convert("RGBA")
             ratio = max(W_px / img.width, H_px / img.height)
             nw    = int(img.width  * ratio)
