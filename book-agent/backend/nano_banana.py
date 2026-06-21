@@ -6,12 +6,15 @@ Used exclusively by cover_designer.py for cover illustration generation.
 All text/AI work (concept, prompts, book writing, proofreading, etc.)
 continues to use openai_client.py with GPT-4o, unchanged.
 
-5-Tier image cluster:
+6-Tier image cluster:
   Tier 1 : gemini-2.5-flash-preview-05-20  (Nano Banana Pro)
-  Tier 2 : gemini-2.0-flash-exp            (Nano Banana 2)
+  Tier 2 : gemini-2.0-flash-exp            (Nano Banana 2, sanitised prompt)
   Tier 3 : Stability AI REST API           (STABILITY_API_KEY in .env)
   Tier 4 : SVG template from templates/    (local, no API)
-  Tier 5 : Pillow procedural generator     (local, fully offline)
+  Tier 5 : Pillow procedural gradient      (local, fully offline)
+  Tier 6 : Pillow complex-shape mosaic     (local, zero dependencies on
+                                             external state — the absolute
+                                             last-resort guarantee)
 """
 
 from __future__ import annotations
@@ -282,7 +285,101 @@ def generate_procedural(concept: dict, width: int = 1024, height: int = 1792) ->
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Public entry point — run the full 5-tier cluster
+# Tier 6 — Local complex-shape mosaic (absolute last resort)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def generate_complex_shapes(concept: dict, width: int = 1024, height: int = 1792) -> bytes | None:
+    """
+    Tier 6: Pure-Pillow geometric mosaic — the absolute final guarantee.
+
+    Unlike Tier 5 (soft gradient + faint rings, meant to look like a
+    generated illustration), Tier 6 is intentionally built from layered
+    polygons, triangles, and a diagonal line lattice so it never depends on
+    anything outside this process: no network, no fonts, no external
+    assets. If even this fails, a flat-color rectangle is returned inline,
+    so this function effectively cannot return None.
+    """
+    palette = concept.get("palette", {})
+    title   = concept.get("title", "Cover")
+
+    def _h(h: str) -> tuple[int, int, int]:
+        h = (h or "#0f172a").lstrip("#")
+        if len(h) == 3:
+            h = "".join(c * 2 for c in h)
+        try:
+            return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
+        except Exception:
+            return (15, 23, 42)
+
+    bg1  = _h(palette.get("bg_primary",   "#0f172a"))
+    bg2  = _h(palette.get("bg_secondary", "#1e3a5f"))
+    acc  = _h(palette.get("accent",       "#f59e0b"))
+    acc2 = _h(palette.get("accent2",      "#fbbf24"))
+
+    try:
+        import math
+        from PIL import Image, ImageDraw, ImageFilter  # pyrefly: ignore
+
+        rng = random.Random(hash(title) & 0xFFFFFFFF)
+
+        img  = Image.new("RGB", (width, height), bg1)
+        draw = ImageDraw.Draw(img)
+
+        # 1. Banded diagonal-feel gradient base
+        bands  = 48
+        band_h = max(1, height // bands)
+        for i in range(bands):
+            t = i / bands
+            r = int(bg1[0] * (1 - t) + bg2[0] * t)
+            g = int(bg1[1] * (1 - t) + bg2[1] * t)
+            b = int(bg1[2] * (1 - t) + bg2[2] * t)
+            draw.rectangle([0, i * band_h, width, (i + 1) * band_h + 1], fill=(r, g, b))
+
+        # 2. Layered translucent polygons (triangles / quads / pentagons)
+        overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        odraw   = ImageDraw.Draw(overlay)
+        palette_colors = [acc, acc2, bg2]
+        for _ in range(22):
+            cx, cy = rng.randint(0, width), rng.randint(0, height)
+            spread = rng.randint(80, 320)
+            sides  = rng.choice([3, 3, 4, 4, 5])
+            angle0 = rng.uniform(0, 360)
+            pts = []
+            for s in range(sides):
+                ang = math.radians(angle0 + s * (360 / sides) + rng.uniform(-10, 10))
+                rad = spread * rng.uniform(0.6, 1.0)
+                pts.append((cx + rad * math.cos(ang), cy + rad * math.sin(ang)))
+            color = rng.choice(palette_colors)
+            alpha = rng.randint(18, 50)
+            odraw.polygon(pts, fill=(*color, alpha))
+        img = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
+
+        # 3. Fine diagonal accent-line lattice for a "designed" feel
+        draw = ImageDraw.Draw(img)
+        step = max(120, width // 6)
+        for x in range(-height, width + height, step):
+            draw.line([(x, height), (x + height, 0)], fill=acc, width=1)
+
+        img = img.filter(ImageFilter.GaussianBlur(radius=0.6))
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=88)
+        logger.info("  ✅ Tier 6 complex-shape mosaic generated (%d KB).", len(buf.getvalue()) // 1024)
+        return buf.getvalue()
+
+    except Exception as exc:
+        logger.error("  ⚠️  Tier 6 complex-shape mosaic failed: %s — falling back to flat color.", exc)
+        try:
+            from PIL import Image  # pyrefly: ignore
+            img = Image.new("RGB", (width, height), bg1)
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=85)
+            return buf.getvalue()
+        except Exception:
+            return None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Public entry point — run the full 6-tier cluster
 # ─────────────────────────────────────────────────────────────────────────────
 
 def run_image_cluster(
@@ -291,10 +388,11 @@ def run_image_cluster(
     concept : dict,
 ) -> bytes | None:
     """
-    Run all 5 Nano Banana tiers in order and return the first success.
+    Run all 6 Nano Banana tiers in order and return the first success.
     Called by cover_designer.py only — no other module should import this.
 
-    Returns None only if every tier fails (extremely unlikely).
+    Returns None only in the theoretically-impossible case that even the
+    flat-color Tier 6 fallback raises (e.g. PIL not installed at all).
     """
     # Tier 1 — Nano Banana Pro
     result = generate_image(prompt, NANO_BANANA_PRO)
@@ -324,14 +422,21 @@ def run_image_cluster(
         logger.info("  ✅ Tier 4 (SVG template) succeeded.")
         return result
 
-    # Tier 5 — Procedural
-    logger.warning("  🚨 All external tiers exhausted — Tier 5 procedural.")
+    # Tier 5 — Procedural gradient
+    logger.warning("  🚨 Tiers 1-4 exhausted — Tier 5 procedural gradient.")
     result = generate_procedural(concept)
     if result:
-        logger.info("  ✅ Tier 5 (procedural) succeeded.")
+        logger.info("  ✅ Tier 5 (procedural gradient) succeeded.")
         return result
 
-    logger.error("  ❌ All 5 Nano Banana tiers failed.")
+    # Tier 6 — Complex-shape mosaic (final guarantee)
+    logger.warning("  🚨 Tier 5 failed — Tier 6 complex-shape mosaic (final guarantee).")
+    result = generate_complex_shapes(concept)
+    if result:
+        logger.info("  ✅ Tier 6 (complex-shape mosaic) succeeded.")
+        return result
+
+    logger.error("  ❌ All 6 Nano Banana tiers failed.")
     return None
 
 

@@ -1,5 +1,5 @@
 """
-cover_designer.py  ·  v7.0 (Peak Enterprise 5-Tier Fallback Edition)
+cover_designer.py  ·  v8.0 (Nano Banana 6-Tier Edition)
 AI-powered book cover designer — fully personalised, image-aware covers.
 
 Pipeline:
@@ -8,20 +8,28 @@ Pipeline:
      first image found in DOCX) to use as a visual source
   3. GPT-4o Vision analyses the book image AND the title to produce a
      deeply personalised cover concept with unique visual DNA per book
-  4. Generate Cover Illustration via 5-Tier Image Swarm
+  4. Generate Cover Illustration via Nano Banana's 6-Tier Image Cluster
   5. render_cover_pdf  — full-bleed A4 cover with:
-       • DALL-E / Stability / Procedural background
+       • Nano Banana / Stability / SVG / Procedural background
        • Premium multi-pass drop shadow typography
        • Style-specific illustration overlay & motif texture layers
        • Genre badge & author lines
   6. Prepend cover to original PDF or DOCX
   7. Return output path + concept metadata
 
-ENTERPRISE UPGRADES:
-  - 5-Tier Failover Cluster (DALL-E 3 HD -> Safe Prompt -> Stability AI -> DALL-E 2 -> Local Procedural)
-  - Tier 5 Procedural Fallback guarantees a beautiful cover even completely offline
-  - Premium Multi-Pass Text Shadowing for high legibility on complex backgrounds
-  - Fully Expanded PEP-8 Motif & Structural Rendering Logic (Zero Minification)
+NANO BANANA MIGRATION (cover designer ONLY — all other features still use
+OpenAI for text exactly as before):
+  - Image generation no longer calls any OpenAI image endpoint
+    (dall-e-2 / dall-e-3 removed entirely from this pipeline).
+  - All cover artwork now flows through nano_banana.run_image_cluster(),
+    which implements its own internal 6-Tier Failover Cluster:
+        Tier 1: Nano Banana Pro (Gemini 2.5 Flash image preview)
+        Tier 2: Nano Banana 2  (Gemini 2.0 Flash, sanitised prompt)
+        Tier 3: Stability AI REST fallback
+        Tier 4: SVG template fallback
+        Tier 5: Procedural gradient fallback
+        Tier 6: Complex-shape mosaic — guaranteed even fully offline
+  - GPT-4o is still used for the text-only concept + prompt-crafting calls.
 """
 
 from __future__ import annotations
@@ -45,6 +53,8 @@ from pathlib import Path
 from openai import OpenAI           
 # pyrefly: ignore [missing-import]
 from dotenv import load_dotenv      
+
+import nano_banana
 
 load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -554,78 +564,32 @@ def generate_cover_from_svg_template(
 
 def generate_cover_image(concept: dict, book_title: str, book_text: str = "") -> bytes | None:
     """
-    Maximized 5-Tier Fallback Loop:
-    Tier 1: DALL-E 3 HD (Highest Quality)
-    Tier 2: DALL-E 3 HD + Sanitizer (Safety Policy Bypass)
-    Tier 3: Stability AI (REST API Fallback for OpenAI outages)
-    Tier 4: DALL-E 2 Standard (Low Latency / Rate Limit Bypass)
-    Tier 5: Local Procedural Generator (Offline/Complete Failure Guarantee)
+    Cover illustration generation — fully migrated to Nano Banana.
+
+    GPT-4o still crafts the scene-specific image prompt (text-only call,
+    unchanged), but ALL actual image generation now runs through
+    nano_banana.run_image_cluster(), which implements its own internal
+    6-tier failover:
+        Tier 1: Nano Banana Pro (Gemini 2.5 Flash image preview)
+        Tier 2: Nano Banana 2  (Gemini 2.0 Flash, sanitised prompt)
+        Tier 3: Stability AI REST fallback
+        Tier 4: SVG template fallback
+        Tier 5: Procedural gradient fallback
+        Tier 6: Complex-shape mosaic (absolute last-resort guarantee)
+
+    No OpenAI image endpoint (dall-e-2 / dall-e-3) is called anywhere in
+    this pipeline anymore — this keeps cover design fully on Nano Banana
+    while every other feature (editor, scanner, etc.) keeps using OpenAI
+    for text exactly as before.
     """
-    dalle_prompt = generate_dalle_prompt(concept, book_title, book_text)
-    logger.info(f"  🎨 Base Image Swarm prompt ({len(dalle_prompt)} chars): {dalle_prompt[:200]}…")
+    image_prompt = generate_dalle_prompt(concept, book_title, book_text)
+    logger.info(f"  🎨 Base Image Swarm prompt ({len(image_prompt)} chars): {image_prompt[:200]}…")
 
-    # ── Tier 1 & 2 Loop: OpenAI DALL-E 3 with Sanitation ──
-    for attempt in range(1, 3):
-        try:
-            logger.info(f"  [Tier {attempt}] Attempting OpenAI DALL-E 3 generation...")
-            resp = client.images.generate(
-                model="dall-e-3",
-                prompt=dalle_prompt,
-                size="1024x1792",
-                quality="hd",
-                n=1,
-            )
-            image_url = resp.data[0].url
-            with urllib.request.urlopen(image_url) as r:
-                return r.read()
-                
-        except Exception as api_err:
-            err_str = str(api_err).lower()
-            if any(k in err_str for k in ("safety", "policy", "rejected", "content", "violat")):
-                logger.warning("  ⚠️ OpenAI Content Filter Triggered. Engaging Tier 2 Sanitizer Agent...")
-                try:
-                    safe_resp = client.chat.completions.create(
-                        model=MODEL,
-                        messages=[
-                            {"role": "system", "content": SANITIZER_SYSTEM_PROMPT},
-                            {"role": "user", "content": dalle_prompt}
-                        ],
-                        temperature=0.3
-                    )
-                    dalle_prompt = safe_resp.choices[0].message.content.strip()
-                except Exception:
-                    break
-            else:
-                logger.warning(f"  ⚠️ DALL-E 3 API pipeline drop: {api_err}")
-                break
+    result = nano_banana.run_image_cluster(image_prompt, book_title, concept)
+    if result:
+        return result
 
-    # ── Tier 3 Loop: Stability AI REST Architecture ──
-    stability_data = _generate_via_stability_ai(dalle_prompt)
-    if stability_data:
-        return stability_data
-
-    # ── Tier 4 Loop: OpenAI DALL-E 2 Standard Core Fallback ──
-    try:
-        logger.info("  [Tier 4] Attempting low-latency OpenAI DALL-E 2 asset recovery line...")
-        resp_d2 = client.images.generate(
-            model="dall-e-2",
-            prompt=dalle_prompt[:900], # Force bounds within 1000 char threshold limits
-            size="1024x1024",
-            n=1,
-        )
-        image_url_d2 = resp_d2.data[0].url
-        with urllib.request.urlopen(image_url_d2) as r:
-            return r.read()
-    except Exception as e:
-        logger.warning(f"  ⚠️ Tier 4 DALL-E 2 pipeline failover: {e}")
-
-    # ── Tier 5 Loop: Local Procedural Math Fallback (The Ultimate Safety Net) ──
-    logger.warning("  🚨 All external imaging clusters exhausted. Engaging Tier 5 Local Procedural core.")
-    procedural_data = _generate_procedural_fallback_image(concept)
-    if procedural_data:
-        return procedural_data
-
-    logger.error("  ❌ All 5 Tiers failed. Returning empty asset buffer.")
+    logger.error("  ❌ All 6 Nano Banana tiers failed. Returning empty asset buffer.")
     return None
 
 
@@ -2212,20 +2176,14 @@ def design_cover(
             if cover_image_bytes:
                 logger.info("  🖼️  User-supplied cover image provided — skipping generation cluster step.")
             else:
-                logger.info("  🖼️  No cover image supplied — engaging 5-Tier multi-engine failover image generation swarm…")
+                logger.info("  🖼️  No cover image supplied — engaging Nano Banana 6-Tier image generation cluster…")
                 generated_illustration = generate_cover_image(concept, book_title, book_text)
                 if generated_illustration:
                     logger.info(f"  ✅ Image pipeline resolved successfully ({len(generated_illustration)//1024} KB)")
                 else:
-                    # Try SVG template fallback before giving up
-                    svg_bytes = generate_cover_from_svg_template(book_title, concept=concept)
-                    if svg_bytes:
-                        generated_illustration = svg_bytes
-                        logger.info("  🖼️  Using SVG template as cover background.")
-                    else:
-                        logger.warning("  ⚠️ All visual generators offline — cover using gradient background.")
-                        concept["_dalle_failed"] = True
-                        concept["_dalle_note"] = "Image generation unavailable — cover uses gradient background. Check your OpenAI API key has Images access (paid tier required)."
+                    logger.warning("  ⚠️ All 6 Nano Banana tiers offline — cover using gradient background.")
+                    concept["_dalle_failed"] = True
+                    concept["_dalle_note"] = "Image generation unavailable — cover uses gradient background. Check your Nano Banana / Gemini API key."
 
             render_cover_pdf(concept, cover_pdf,
                              book_image_bytes=book_image,
@@ -2246,17 +2204,12 @@ def design_cover(
                 docx_illustration = cover_image_bytes
                 logger.info("  🖼️  User-supplied cover image will be embedded in DOCX cover.")
             else:
-                logger.info("  🖼️  Generating cover image for DOCX via 5-Tier cluster…")
+                logger.info("  🖼️  Generating cover image for DOCX via Nano Banana 6-Tier cluster…")
                 docx_illustration = generate_cover_image(concept, book_title, book_text)
                 if docx_illustration:
                     logger.info(f"  ✅ Cover image ready for DOCX ({len(docx_illustration)//1024} KB)")
                 else:
-                    svg_bytes = generate_cover_from_svg_template(book_title, concept=concept)
-                    if svg_bytes:
-                        docx_illustration = svg_bytes
-                        logger.info("  🖼️  Using SVG template as DOCX cover background.")
-                    else:
-                        logger.warning("  ⚠️  No image for DOCX cover — text-only layout.")
+                    logger.warning("  ⚠️  All 6 Nano Banana tiers offline for DOCX — text-only layout.")
             prepend_cover_to_docx(concept, file_path, out_path,
                                   cover_image_bytes=docx_illustration)
         else:
