@@ -13,7 +13,8 @@ openai
 
 # ── Nano Banana — used ONLY by cover_designer.py for image generation ─────────
 # (Gemini image models: Nano Banana Pro + Nano Banana 2)
-google-generativeai>=0.8.0
+# NOTE: google-generativeai is DEPRECATED — replaced with google-genai.
+google-genai>=1.0.0
 
 # ── Document Generation ───────────────────────────────────────────────────────
 reportlab
@@ -28,6 +29,7 @@ pdf2image
 
 # ── Image Processing ─────────────────────────────────────────────────────────
 Pillow
+cairosvg
 
 # ── NLP / Embeddings ─────────────────────────────────────────────────────────
 sentence_transformers
