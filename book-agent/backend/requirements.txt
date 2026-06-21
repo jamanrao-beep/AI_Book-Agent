@@ -1,16 +1,33 @@
+# ── Core API & Web Framework ─────────────────────────────────────────────────
 fastapi
 uvicorn
-sqlalchemy
-python-dotenv
-openai
-reportlab
-python-docx
 pydantic
 python-multipart
+
+# ── Database ──────────────────────────────────────────────────────────────────
+sqlalchemy
+python-dotenv
+
+# ── OpenAI — used by ALL features (book writing, proofreading, layout, etc.) ─
+openai
+
+# ── Nano Banana — used ONLY by cover_designer.py for image generation ─────────
+# (Gemini image models: Nano Banana Pro + Nano Banana 2)
+google-generativeai>=0.8.0
+
+# ── Document Generation ───────────────────────────────────────────────────────
+reportlab
+python-docx
+
+# ── PDF Processing ────────────────────────────────────────────────────────────
 pdfplumber
 striprtf
 pypdf
 pymupdf
 pdf2image
+
+# ── Image Processing ─────────────────────────────────────────────────────────
 Pillow
+
+# ── NLP / Embeddings ─────────────────────────────────────────────────────────
 sentence_transformers

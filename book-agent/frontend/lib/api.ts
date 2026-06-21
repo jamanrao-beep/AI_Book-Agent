@@ -1,10 +1,19 @@
+/**
+ * api.ts — Nano Banana AI  ·  Gemini-powered backend client
+ *
+ * All AI generation (book writing, proofreading, cover design) now runs
+ * through Google Gemini / Nano Banana instead of OpenAI.
+ *
+ * Cover-designer timeout raised to 5 min (300 s) because the 5-tier Nano
+ * Banana image cluster may take up to ~3 min on Tier 1 alone.
+ */
+
 import axios from "axios";
 
 const API = axios.create({
   baseURL: process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000",
-  // Large Hindi books are split into many small chunks; each chunk can take
-  // ~30–60 s, and a 200-page book may have 20–30 chunks → allow up to 1 hour.
-  timeout: 3600000, // 1 hour (was 900 s / 15 min)
+  // Large books are split into many chunks; allow up to 1 hour total.
+  timeout: 3600000,
 });
 
 // ─────────────────────────────────────────────
@@ -28,7 +37,8 @@ export interface BookStatus {
   pdf_url: string | null;
   docx_url: string | null;
   created_at: string;
-  error_message?: string; // user-friendly error message from backend
+  /** Human-readable error message surfaced by the backend on failure. */
+  error_message?: string;
 }
 
 export interface BookProgress {
@@ -50,9 +60,11 @@ export interface ErrorDetail {
 export interface ProofreadResult {
   job_id: string;
   original_filename: string;
-  /** Not returned by the status endpoint — fetch via downloadProofreadDoc() instead.
-   *  Omitting corrected_text from the poll response is the fix for Railway's
-   *  response-size limit (Bug A) and gzip mid-stream corruption (Bug C). */
+  /**
+   * Not returned by the status endpoint — fetch via downloadProofreadDoc().
+   * Omitting corrected_text from the poll response fixes Railway's
+   * response-size limit (Bug A) and gzip mid-stream corruption (Bug C).
+   */
   corrected_text?: string;
   grammar_fixes: number;
   punctuation_fixes: number;
@@ -62,22 +74,34 @@ export interface ProofreadResult {
   grammar_details: ErrorDetail[];
   punctuation_details: ErrorDetail[];
   style_details: ErrorDetail[];
-  /** Chunk numbers (1-based) that failed all 3 attempts and used original text */
+  /** Chunk numbers (1-based) that failed all 3 attempts and used original text. */
   skipped_chunks?: number[];
 }
 
 // ─────────────────────────────────────────────
-// Types — Cover Designer
+// Types — Cover Designer  (Nano Banana / Gemini)
 // ─────────────────────────────────────────────
 
+/**
+ * Colour palette returned by the Gemini cover-concept API.
+ *
+ * The backend returns both the canonical names (bg_primary / bg_secondary)
+ * AND the legacy aliases (bg_top / bg_bottom) so both this type and any
+ * older page.tsx local interfaces continue to work without breaking changes.
+ */
 export interface CoverPalette {
-  bg_top: string;
-  bg_bottom: string;
-  panel_color: string;   // mid-page text panel background (new)
+  // Canonical names (new — Gemini backend)
+  bg_primary: string;
+  bg_secondary: string;
+  panel_color: string;
   accent: string;
+  accent2: string;
   title_color: string;
   subtitle_color: string;
   tagline_color: string;
+  // Legacy aliases kept for backward compat with older page.tsx local types
+  bg_top: string;   // mirrors bg_primary
+  bg_bottom: string;  // mirrors bg_secondary
 }
 
 export interface CoverConcept {
@@ -88,8 +112,20 @@ export interface CoverConcept {
   palette: CoverPalette;
   style: string;
   motif: string;
-  illustration_shape: string;  // hero shape drawn behind text panel (new)
+  /** Hero illustration shape drawn behind the text panel. */
+  illustration_shape: string;
+  /** One of: split_horizon | full_bleed | left_panel | top_image | diagonal_cut | magazine */
+  layout_template: string;
+  /** Image compositing treatment: tinted_overlay | grayscale_fade | duotone | vignette | blur_bg | color_burn */
+  image_treatment: string;
+  /** Up to 4 decorative accent element descriptions. */
+  accent_elements: string[];
   genre_label: string;
+  /** 1-2 sentences explaining why these design choices suit this specific book. */
+  design_rationale?: string;
+  /** Set by backend if all image-gen tiers fail; used to show a warning in the UI. */
+  _nb_failed?: boolean;
+  _nb_note?: string;
 }
 
 export interface CoverFileResult {
@@ -97,7 +133,12 @@ export interface CoverFileResult {
   concept: CoverConcept;
 }
 
-/** Returned by POST /design-cover */
+/**
+ * Returned by POST /design-cover
+ *
+ * mode === "single"     → concept + download_url for one file
+ * mode === "zip_bundle" → files[] with per-file concepts + bundle download_url
+ */
 export interface CoverResult {
   job_id: string;
   mode: "single" | "zip_bundle";
@@ -108,6 +149,11 @@ export interface CoverResult {
   // zip_bundle mode
   files_processed?: number;
   files?: CoverFileResult[];
+  /**
+   * Non-null when all Nano Banana image-gen tiers failed and the cover uses
+   * a gradient background instead. Show this as a warning toast in the UI.
+   */
+  image_generation_warning?: string | null;
 }
 
 // ─────────────────────────────────────────────
@@ -161,27 +207,23 @@ export const proofreadDocument = (
       timeout: 3600000,
       onUploadProgress: onUploadProgress
         ? (e) => {
-          if (e.total) {
-            onUploadProgress(Math.round((e.loaded * 100) / e.total));
-          }
+          if (e.total) onUploadProgress(Math.round((e.loaded * 100) / e.total));
         }
         : undefined,
     },
   );
 
-  // Step 2: poll /proofread/{job_id}/status until done or error
+  // Step 2: poll until done or error
   return uploadPromise.then(({ data }) => {
     const jobId = data.job_id;
     return new Promise<{ data: ProofreadResult }>((resolve, reject) => {
       // Signal 100% upload so the UI switches to "Analysing…"
       onUploadProgress?.(100);
 
-      // BUG D fix: use a short per-poll timeout so a single dropped connection
-      // doesn't stall the entire job. Railway silently closes sockets on large
-      // responses; axios reports ERR_NETWORK immediately (not a timeout), so we
-      // catch it and retry rather than rejecting the whole promise.
-      const POLL_TIMEOUT_MS = 60_000; // 60 s per individual poll request
-      const MAX_CONSECUTIVE_ERRORS = 10; // give up after 10 back-to-back failures
+      // Short per-poll timeout so a single dropped Railway socket doesn't
+      // stall the whole job. ERR_NETWORK is caught and retried with back-off.
+      const POLL_TIMEOUT_MS = 60_000;
+      const MAX_CONSECUTIVE_ERRORS = 10;
       let consecutiveErrors = 0;
 
       const poll = () => {
@@ -194,7 +236,7 @@ export const proofreadDocument = (
           error?: string;
         }>(`/proofread/${jobId}/status`, { timeout: POLL_TIMEOUT_MS })
           .then(({ data: status }) => {
-            consecutiveErrors = 0; // reset on success
+            consecutiveErrors = 0;
             if (
               onChunkProgress &&
               typeof status.chunks_done === "number" &&
@@ -208,20 +250,25 @@ export const proofreadDocument = (
             } else if (status.stage === "error") {
               reject(new Error(status.error ?? "Proofreading failed on the server."));
             } else {
-              // Still processing — poll again in 3 seconds
               setTimeout(poll, 3000);
             }
           })
           .catch((err) => {
             consecutiveErrors += 1;
             if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
-              reject(new Error(`Polling failed ${MAX_CONSECUTIVE_ERRORS} times in a row: ${err?.message ?? err}`));
+              reject(
+                new Error(
+                  `Polling failed ${MAX_CONSECUTIVE_ERRORS} times in a row: ${err?.message ?? err}`,
+                ),
+              );
               return;
             }
-            // Transient network drop (Railway closed the socket) — retry after
-            // a short back-off rather than killing the whole job.
             const backoff = Math.min(3000 * consecutiveErrors, 15000);
-            console.warn(`[proofread] Poll attempt failed (${consecutiveErrors}/${MAX_CONSECUTIVE_ERRORS}), retrying in ${backoff}ms:`, err?.message);
+            console.warn(
+              `[proofread] Poll ${consecutiveErrors}/${MAX_CONSECUTIVE_ERRORS} failed, ` +
+              `retrying in ${backoff}ms:`,
+              err?.message,
+            );
             setTimeout(poll, backoff);
           });
       };
@@ -233,10 +280,7 @@ export const proofreadDocument = (
 };
 
 /** Trigger a browser download of the corrected file. */
-export const downloadProofreadDoc = (
-  jobId: string,
-  originalFilename: string,
-) => {
+export const downloadProofreadDoc = (jobId: string, originalFilename: string) => {
   const url = `${API.defaults.baseURL}/proofread/${jobId}/download`;
   const a = document.createElement("a");
   a.href = url;
@@ -247,30 +291,59 @@ export const downloadProofreadDoc = (
 };
 
 // ─────────────────────────────────────────────
-// Cover Designer
+// Cover Designer  (Nano Banana / Gemini)
 // ─────────────────────────────────────────────
 
+/**
+ * Upload a book file (.pdf, .docx, or .zip) to generate an AI cover via
+ * the Nano Banana 5-tier image cluster (Gemini 2.5 Flash Image → Gemini 2.0
+ * Flash Exp → Stability AI → SVG template → procedural fallback).
+ *
+ * @param file         The book file (.pdf / .docx / .zip)
+ * @param bookTitle    Optional title override (inferred from filename if blank)
+ * @param description  Optional extra context for the Gemini cover concept prompt
+ * @param designStyle  One of: normal | premium | scifi | minimalist | fantasy |
+ *                     thriller | romance | academic | vibrant | retro
+ * @param coverImage   Optional user-supplied illustration (PNG/JPEG) used as the
+ *                     full-bleed background. When provided, Nano Banana is skipped.
+ *
+ * Timeout: 300 s (5 min). The 5-tier cluster can take up to ~3 min on slow
+ * Gemini responses; 120 s (old value) was too short and caused false failures.
+ */
 export const designCover = (
   file: File,
   bookTitle: string = "",
   description: string = "",
   designStyle: string = "",
+  coverImage?: File,
 ) => {
   const form = new FormData();
   form.append("file", file);
   form.append("book_title", bookTitle);
   form.append("description", description);
   form.append("design_style", designStyle);
+
+  // Optional user-supplied cover illustration — skips the Nano Banana cluster
+  if (coverImage) {
+    form.append("cover_image", coverImage);
+  }
+
   return API.post<CoverResult>("/design-cover", form, {
-    // No Content-Type header — axios sets multipart/form-data with boundary automatically
-    timeout: 120000,
+    // Raised from 120 s → 300 s for Nano Banana 5-tier image generation.
+    // No Content-Type header — axios sets multipart/form-data with boundary.
+    timeout: 300_000,
   });
 };
 
+/**
+ * Trigger a browser download of the cover-enhanced file.
+ * Handles both single-file and zip-bundle modes.
+ */
 export const downloadCoverDoc = (result: CoverResult) => {
   const url = `${API.defaults.baseURL}${result.download_url}`;
   const a = document.createElement("a");
   a.href = url;
+
   if (result.mode === "zip_bundle") {
     const base = result.original_filename.replace(/\.zip$/i, "");
     a.download = `${base}_covers.zip`;
@@ -279,6 +352,7 @@ export const downloadCoverDoc = (result: CoverResult) => {
     const base = result.original_filename.replace(/\.(pdf|docx)$/i, "");
     a.download = `${base}_with_cover.${ext}`;
   }
+
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
@@ -298,7 +372,7 @@ export interface LayoutResult {
   book_type: string;
 }
 
-// All layout design parameters — every field maps 1:1 to a backend Form param.
+/** All layout design parameters — every field maps 1:1 to a backend Form param. */
 export interface LayoutDesignParams {
   // Core
   pageWidthMm: number;
@@ -372,10 +446,10 @@ export const designLayout = (
   if (params.marginRightMm) form.append("margin_right_mm", params.marginRightMm.trim());
 
   // Booleans
-  if (params.showDropCap !== null && params.showDropCap !== undefined) form.append("show_drop_cap", String(params.showDropCap));
-  if (params.showPageNumbers !== null && params.showPageNumbers !== undefined) form.append("show_page_numbers", String(params.showPageNumbers));
-  if (params.mirrorMargins !== null && params.mirrorMargins !== undefined) form.append("mirror_margins", String(params.mirrorMargins));
-  if (params.sectionBreaks !== null && params.sectionBreaks !== undefined) form.append("section_breaks", String(params.sectionBreaks));
+  if (params.showDropCap != null) form.append("show_drop_cap", String(params.showDropCap));
+  if (params.showPageNumbers != null) form.append("show_page_numbers", String(params.showPageNumbers));
+  if (params.mirrorMargins != null) form.append("mirror_margins", String(params.mirrorMargins));
+  if (params.sectionBreaks != null) form.append("section_breaks", String(params.sectionBreaks));
 
   // Footer
   if (params.footerLeftText) form.append("footer_left_text", params.footerLeftText.trim());

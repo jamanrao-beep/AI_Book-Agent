@@ -23,30 +23,50 @@ interface CoverConcept {
     tagline: string;
     author_line: string;
     palette: {
-        bg_top: string;
-        bg_bottom: string;
+        // Canonical Gemini/Nano Banana backend names
+        bg_primary: string;
+        bg_secondary: string;
+        panel_color: string;
         accent: string;
+        accent2: string;
         title_color: string;
         subtitle_color: string;
         tagline_color: string;
+        // Legacy aliases also returned by backend
+        bg_top: string;
+        bg_bottom: string;
     };
     style: string;
     motif: string;
+    illustration_shape: string;
+    layout_template: string;
+    image_treatment: string;
+    accent_elements: string[];
     genre_label: string;
+    design_rationale?: string;
+    /** Set if all Nano Banana image tiers failed — show warning in UI */
+    _nb_failed?: boolean;
+    _nb_note?: string;
 }
 
 interface CoverResult {
     job_id: string;
     mode: "single" | "zip_bundle";
     original_filename: string;
-    concept?: CoverConcept;           // present for mode === "single"
     download_url: string;
-    // zip_bundle extras
+    // single mode
+    concept?: CoverConcept;
+    // zip_bundle mode
     files_processed?: number;
     files?: Array<{
         source_filename: string;
         concept: CoverConcept;
     }>;
+    /**
+     * Non-null when all Nano Banana image tiers failed.
+     * Show this as a warning banner/toast in the UI.
+     */
+    image_generation_warning?: string | null;
 }
 
 async function designCover(
@@ -54,23 +74,41 @@ async function designCover(
     bookTitle: string,
     description: string,
     designStyle: string,
+    coverImage?: File,   // optional user-supplied illustration (skips Nano Banana cluster)
 ): Promise<CoverResult> {
     const form = new FormData();
     form.append("file", file);
     form.append("book_title", bookTitle);
     form.append("description", description);
     form.append("design_style", designStyle);
+    if (coverImage) form.append("cover_image", coverImage);
 
-    const res = await fetch(`${API_BASE}/design-cover`, {
-        method: "POST",
-        body: form,
-    });
+    // 300 s timeout — Nano Banana 5-tier cluster can take up to ~3 min.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 300_000);
 
-    if (!res.ok) {
-        const err = await res.json().catch(() => ({ detail: "Unknown error" }));
-        throw new Error(err.detail || `Server error ${res.status}`);
+    try {
+        const res = await fetch(`${API_BASE}/design-cover`, {
+            method: "POST",
+            body: form,
+            signal: controller.signal,
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({ detail: "Unknown error" }));
+            throw new Error(err.detail || `Server error ${res.status}`);
+        }
+        return res.json();
+    } catch (err: unknown) {
+        if (err instanceof Error && err.name === "AbortError") {
+            throw new Error(
+                "Cover design timed out after 5 minutes. " +
+                "The Nano Banana image cluster may be busy — please try again."
+            );
+        }
+        throw err;
+    } finally {
+        clearTimeout(timer);
     }
-    return res.json();
 }
 
 // Mini cover preview rendered in-browser from concept data
@@ -84,7 +122,7 @@ function CoverPreview({ concept }: { concept: CoverConcept }) {
                 width: "220px",
                 height: "310px",
                 borderRadius: "6px",
-                background: `linear-gradient(160deg, ${pal.bg_top} 0%, ${pal.bg_bottom} 100%)`,
+                background: `linear-gradient(160deg, ${pal.bg_primary ?? pal.bg_top} 0%, ${pal.bg_secondary ?? pal.bg_bottom} 100%)`,
                 position: "relative",
                 overflow: "hidden",
                 flexShrink: 0,
@@ -244,7 +282,7 @@ function CoverPreview({ concept }: { concept: CoverConcept }) {
                         letterSpacing: "0.1em",
                     }}
                 >
-                    EDITORIAL AI
+                    NANO BANANA AI 🍌
                 </span>
             </div>
         </div>
@@ -264,6 +302,9 @@ export default function CoverDesignerPage() {
     const [loading, setLoading] = useState(false);
     const [result, setResult] = useState<CoverResult | null>(null);
     const [error, setError] = useState("");
+    /** Warning shown when Nano Banana image gen failed but cover still rendered (gradient). */
+    const [nbWarning, setNbWarning] = useState<string | null>(null);
+    const [coverImage, setCoverImage] = useState<File | null>(null);
 
     const handleFile = (f: File) => {
         const ext = f.name.split(".").pop()?.toLowerCase();
@@ -298,10 +339,15 @@ export default function CoverDesignerPage() {
         if (!file) return;
         setLoading(true);
         setError("");
+        setNbWarning(null);
         try {
             const effectiveStyle = designStyle === "other" ? customStyle.trim() : designStyle;
-            const res = await designCover(file, bookTitle, description, effectiveStyle);
+            const res = await designCover(file, bookTitle, description, effectiveStyle, coverImage ?? undefined);
             setResult(res);
+            // Surface Nano Banana image-gen warning if all tiers fell back to gradient
+            if (res.image_generation_warning) {
+                setNbWarning(res.image_generation_warning);
+            }
         } catch (err: unknown) {
             setError(
                 err instanceof Error
@@ -416,11 +462,11 @@ export default function CoverDesignerPage() {
                             marginBottom: "10px",
                         }}
                     >
-                        AI Book Cover Designer
+                        AI Book Cover Designer — Nano Banana 🍌
                     </h1>
                     <p style={{ color: "#64748b", fontSize: "15px", lineHeight: "1.6" }}>
                         Upload your .pdf or .docx manuscript — or a .zip containing multiple files.
-                        AI generates a full-bleed cover page for each and attaches it — zero design skills needed.
+                        Nano Banana (Gemini) generates a full-bleed cover page for each and attaches it — zero design skills needed.
                     </p>
                 </div>
 
@@ -623,6 +669,48 @@ export default function CoverDesignerPage() {
                             </div>
                         </div>
 
+                        {/* Optional user-supplied cover illustration */}
+                        <div style={{ marginBottom: "24px" }}>
+                            <label
+                                style={{
+                                    fontSize: "11px",
+                                    fontWeight: "700",
+                                    letterSpacing: "0.08em",
+                                    textTransform: "uppercase",
+                                    color: "#64748b",
+                                    display: "block",
+                                    marginBottom: "8px",
+                                }}
+                            >
+                                🖼️ Custom Cover Image{" "}
+                                <span style={{ color: "#334155", fontWeight: "400", textTransform: "none", fontSize: "10px" }}>
+                                    (optional — skips Nano Banana image generation)
+                                </span>
+                            </label>
+                            <input
+                                type="file"
+                                accept="image/png,image/jpeg,image/webp"
+                                onChange={(e) => setCoverImage(e.target.files?.[0] ?? null)}
+                                style={{
+                                    fontSize: "13px",
+                                    color: "#94a3b8",
+                                    cursor: "pointer",
+                                    width: "100%",
+                                }}
+                            />
+                            {coverImage && (
+                                <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "6px", fontSize: "12px", color: "#86efac" }}>
+                                    <span>✅ {coverImage.name}</span>
+                                    <button
+                                        onClick={() => setCoverImage(null)}
+                                        style={{ background: "none", border: "none", color: "#f87171", cursor: "pointer", fontSize: "12px", padding: 0 }}
+                                    >
+                                        ✕ remove
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+
                         {/* Design style selector */}
                         <div style={{ marginBottom: "24px" }}>
                             <label
@@ -752,6 +840,29 @@ export default function CoverDesignerPage() {
                                 {error}
                             </div>
                         )}
+                        {nbWarning && (
+                            <div
+                                style={{
+                                    background: "rgba(251,191,36,0.08)",
+                                    border: "1px solid rgba(251,191,36,0.30)",
+                                    borderRadius: "10px",
+                                    padding: "12px 16px",
+                                    color: "#fde68a",
+                                    fontSize: "13px",
+                                    marginBottom: "20px",
+                                    display: "flex",
+                                    gap: "8px",
+                                    alignItems: "flex-start",
+                                }}
+                            >
+                                <span>🍌</span>
+                                <span>
+                                    <strong>Nano Banana note:</strong> Image generation
+                                    was unavailable — cover uses a gradient background.
+                                    Check that your GEMINI_API_KEY has image generation access.
+                                </span>
+                            </div>
+                        )}
 
                         <button
                             onClick={handleSubmit}
@@ -786,7 +897,7 @@ export default function CoverDesignerPage() {
                                 </>
                             ) : (
                                 <>
-                                    <Sparkles size={18} /> Design Cover with AI
+                                    <Sparkles size={18} /> 🍌 Design Cover with Nano Banana
                                 </>
                             )}
                         </button>
@@ -801,7 +912,7 @@ export default function CoverDesignerPage() {
                                 }}
                             >
                                 AI is creating your cover concept and rendering the design…
-                                usually takes 15–30 seconds
+                                usually takes 15–30 seconds 🍌
                             </p>
                         )}
                     </>
@@ -973,7 +1084,7 @@ export default function CoverDesignerPage() {
                                             marginBottom: "20px",
                                         }}
                                     >
-                                        AI Design Concept
+                                        Nano Banana Design Concept 🍌
                                     </h2>
 
                                     <div style={{ display: "grid", gap: "14px" }}>

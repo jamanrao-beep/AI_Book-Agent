@@ -60,8 +60,8 @@ Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
     title="Editorial AI — Book Writing + Proofreading + Cover Design",
-    description="Generate full books, proofread documents, and design covers using OpenAI GPT-4o",
-    version="4.1.0",
+    description="Generate full books, proofread documents, and design covers using Google Gemini (Nano Banana)",
+    version="5.0.0",
     lifespan=lifespan,
 )
 
@@ -328,8 +328,8 @@ _layout_jobs = _LayoutJobProxy()
 # ─────────────────────────────────────────────────────────────────────────────
 # Global job concurrency limiter
 # ─────────────────────────────────────────────────────────────────────────────
-# Without this, each upload spawns an unbounded background thread that runs 8
-# parallel OpenAI calls. Two concurrent users = 16 simultaneous API calls,
+# Without this, each upload spawns an unbounded background thread that runs
+# parallel Gemini calls. Two concurrent users = 16 simultaneous API calls,
 # all hitting rate limits, all backing off, all blocking each other.
 # This semaphore caps the number of *active heavy jobs* (scan/translate/layout)
 # at 2 at once. A 3rd upload queues until a slot opens.
@@ -481,7 +481,7 @@ async def generate_book(req: BookRequest, bg: BackgroundTasks):
 
     lang = (req.language or "English").strip()
 
-    # Merge language into writing_style so the existing openai_client
+    # Merge language into writing_style so the openai_client
     # language-instruction pipeline picks it up automatically.
     base_style  = (req.writing_style or "").strip()
     merged_style = f"{base_style} — Write the entire book in {lang}." if base_style else f"Write the entire book in {lang}."
@@ -1135,7 +1135,7 @@ async def design_cover_endpoint(
       `design_style` — normal | premium | scifi | minimalist | fantasy |
                        thriller | romance | academic | vibrant | retro
       `cover_image`  — optional illustration to use as the full-bleed background
-                       (PNG/JPEG). When provided, DALL-E is not called and the
+                       (PNG/JPEG). When provided, Nano Banana is not called and the
                        supplied image is used directly — no tinting or blurring.
     """
     filename = file.filename or "document.pdf"
@@ -1181,7 +1181,7 @@ async def design_cover_endpoint(
                 "original_filename": filename,
                 "concept": result["concept"],
                 "download_url": f"/design-cover/{job_id}/download",
-                "image_generation_warning": result["concept"].get("_dalle_note"),
+                "image_generation_warning": result["concept"].get("_nb_note"),
             }
 
         # ── ZIP bundle ────────────────────────────────────────────────────────
@@ -1210,6 +1210,11 @@ async def design_cover_endpoint(
                 for r in cover_results
             ]
 
+            # Aggregate _nb_note warnings across all files in the bundle
+            zip_nb_warning = next(
+                (r["concept"].get("_nb_note") for r in cover_results if r["concept"].get("_nb_note")),
+                None,
+            )
             return {
                 "job_id": zip_job_id,
                 "mode": "zip_bundle",
@@ -1217,6 +1222,7 @@ async def design_cover_endpoint(
                 "files_processed": len(cover_results),
                 "files": files_info,
                 "download_url": f"/design-cover/{zip_job_id}/download",
+                "image_generation_warning": zip_nb_warning,
             }
 
     finally:

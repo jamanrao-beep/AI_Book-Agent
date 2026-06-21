@@ -8,9 +8,11 @@ Pipeline:
      first image found in DOCX) to use as a visual source
   3. GPT-4o Vision analyses the book image AND the title to produce a
      deeply personalised cover concept with unique visual DNA per book
-  4. Generate Cover Illustration via 5-Tier Image Swarm
+  4. Generate Cover Illustration via Nano Banana 5-Tier Cluster:
+       Tier 1/2: Nano Banana Pro / Nano Banana 2 (Gemini image models)
+       Tier 3: Stability AI · Tier 4: SVG template · Tier 5: Procedural
   5. render_cover_pdf  — full-bleed A4 cover with:
-       • DALL-E / Stability / Procedural background
+       • Nano Banana / Stability / SVG / Procedural background
        • Premium multi-pass drop shadow typography
        • Style-specific illustration overlay & motif texture layers
        • Genre badge & author lines
@@ -18,7 +20,7 @@ Pipeline:
   7. Return output path + concept metadata
 
 ENTERPRISE UPGRADES:
-  - 5-Tier Failover Cluster (DALL-E 3 HD -> Safe Prompt -> Stability AI -> DALL-E 2 -> Local Procedural)
+  - Nano Banana 5-Tier Cluster (Nano Banana Pro → Nano Banana 2 → Stability AI → SVG → Procedural)
   - Tier 5 Procedural Fallback guarantees a beautiful cover even completely offline
   - Premium Multi-Pass Text Shadowing for high legibility on complex backgrounds
   - Fully Expanded PEP-8 Motif & Structural Rendering Logic (Zero Minification)
@@ -213,12 +215,48 @@ def extract_book_text(file_path: str, ext: str, max_chars: int = 8000) -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 5-TIER AI IMAGING CLUSTER
+# NANO BANANA IMAGE CLUSTER  (5-Tier Failover — Gemini-powered)
 # ─────────────────────────────────────────────────────────────────────────────
+#
+# Tier 1 : Nano Banana Pro   gemini-2.5-flash-preview-05-20  (best quality)
+# Tier 2 : Nano Banana 2     gemini-2.0-flash-exp            (fast fallback)
+# Tier 3 : Stability AI      REST API ultra endpoint         (external)
+# Tier 4 : SVG Template      genre-aware local template      (offline)
+# Tier 5 : Procedural        Pillow math renderer            (offline guarantee)
+#
+# All TEXT work (concept JSON, image prompt crafting, sanitizer) still uses
+# GPT-4o via the existing openai client above — only image pixels use Gemini.
+# ─────────────────────────────────────────────────────────────────────────────
+
+import base64 as _b64
+
+try:
+    # pyrefly: ignore [missing-import]
+    import google.generativeai as _genai          # pip install google-generativeai>=0.8.0
+    _NB_KEY = (
+        os.getenv("NANO_BANANA_API_KEY")
+        or os.getenv("GEMINI_API_KEY")
+        or ""
+    )
+    if _NB_KEY:
+        _genai.configure(api_key=_NB_KEY)
+    else:
+        logger.warning("  ⚠️  NANO_BANANA_API_KEY not set — Tiers 1 & 2 will be skipped.")
+    _NB_AVAILABLE = bool(_NB_KEY)
+except ImportError:
+    _genai        = None   # type: ignore
+    _NB_AVAILABLE = False
+    logger.warning("  ⚠️  google-generativeai not installed — Nano Banana Tiers 1 & 2 disabled.")
+
+NANO_BANANA_PRO = "gemini-2.5-flash-preview-05-20"
+NANO_BANANA_2   = "gemini-2.0-flash-exp"
+
+
+# ── Image prompt crafter (GPT-4o text, Nano Banana image) ────────────────────
 
 DALLE_PROMPT_SYSTEM = """You are a world-class book cover art director and illustrator.
 Your job: read the actual book content provided and craft one precise, vivid
-DALL-E 3 image-generation prompt that will produce a stunning, professional
+image-generation prompt that will produce a stunning, professional
 illustrated book cover background image that is UNIQUE to this specific book.
 
 Rules:
@@ -234,23 +272,23 @@ Rules:
     romance → "painterly watercolor", "soft impressionist"
     thriller → "noir illustration", "high-contrast graphic novel art"
 - NEVER include generic placeholders. Every detail must be specific to THIS book.
-- IMPORTANT: Ensure your prompt strictly follows OpenAI Safety Guidelines. Do not include excessive gore, real world politicians, or copyrighted names.
-- 4–6 sentences. No text or words anywhere in the image.
-- End EVERY prompt with: "No text, letters, titles, or words anywhere in the image. Portrait orientation, photorealistic painting."
+- Do NOT include any text, letters, titles, or words in the image.
+- 4–6 sentences. End EVERY prompt with:
+  "No text, letters, titles, or words anywhere in the image. Portrait orientation, photorealistic painting."
 """
 
-SANITIZER_SYSTEM_PROMPT = """You are an OpenAI Safety Policy expert.
-The following DALL-E 3 image prompt was REJECTED by the safety filters.
-Your job is to rewrite the prompt to be 100% compliant and brand-safe while maintaining the artistic vibe.
+SANITIZER_SYSTEM_PROMPT = """You are a content safety policy expert.
+The following image prompt may have triggered safety filters.
+Rewrite it to be 100% compliant while maintaining the artistic vibe.
 1. Remove all violence, gore, weapons, or self-harm references.
 2. Remove all names of real public figures, politicians, or copyrighted characters.
 3. Remove any sexually explicit or adult themes.
 4. Replace them with abstract, safe, beautiful, or metaphorical imagery that conveys the same genre.
-Output ONLY the rewritten, perfectly safe DALL-E prompt."""
+Output ONLY the rewritten, perfectly safe prompt."""
 
 
 def generate_dalle_prompt(concept: dict, book_title: str, book_text: str = "") -> str:
-    """Ask GPT-4o to craft a scene-specific DALL-E 3 prompt derived from actual content."""
+    """Ask GPT-4o to craft a scene-specific image prompt from actual book content."""
     genre   = concept.get("genre_label", "")
     style   = concept.get("style", "premium")
     tagline = concept.get("tagline", "")
@@ -270,10 +308,10 @@ def generate_dalle_prompt(concept: dict, book_title: str, book_text: str = "") -
         f"=== BOOK CONTENT EXCERPT ===\n{book_excerpt}\n"
         f"=== END EXCERPT ===\n\n"
         "Based on the book excerpt above, identify the most visually dramatic "
-        "scene, character, or symbol from this specific book and write a "
-        "DALL-E 3 prompt for the cover illustration. Be very specific."
+        "scene, character, or symbol from this specific book and write an "
+        "image-generation prompt for the cover illustration. Be very specific."
     )
-    
+
     resp = client.chat.completions.create(
         model=MODEL,
         messages=[
@@ -286,27 +324,80 @@ def generate_dalle_prompt(concept: dict, book_title: str, book_text: str = "") -
     return (resp.choices[0].message.content or "").strip()
 
 
+# ── Tier 1 & 2: Nano Banana (Gemini image generation) ────────────────────────
+
+def _nb_generate_image(prompt: str, model_name: str) -> bytes | None:
+    """
+    Call a Nano Banana (Gemini) image model and return raw image bytes.
+    Returns None on any failure so the next tier can be tried.
+    """
+    if not _NB_AVAILABLE or _genai is None:
+        logger.warning("  ⚠️  Nano Banana unavailable — %s skipped.", model_name)
+        return None
+    try:
+        logger.info("  🍌 Nano Banana (%s) generating…", model_name)
+        model   = _genai.GenerativeModel(model_name)
+        gen_cfg = _genai.types.GenerationConfig(
+            response_modalities=["TEXT", "IMAGE"],
+        )
+        response = model.generate_content(prompt, generation_config=gen_cfg)
+        for candidate in response.candidates:
+            for part in candidate.content.parts:
+                inline = getattr(part, "inline_data", None)
+                if inline and inline.data:
+                    raw = inline.data
+                    img_bytes = bytes(raw) if isinstance(raw, (bytes, bytearray))                                 else _b64.b64decode(raw)
+                    logger.info(
+                        "  ✅ Nano Banana (%s) returned %d KB",
+                        model_name, len(img_bytes) // 1024,
+                    )
+                    return img_bytes
+        logger.warning("  ⚠️  %s: no image parts in response.", model_name)
+    except Exception as exc:
+        logger.warning("  ⚠️  Nano Banana (%s) failed: %s", model_name, exc)
+    return None
+
+
+def _nb_sanitize_prompt(prompt: str) -> str:
+    """Rewrite prompt through GPT-4o safety filter before Tier 2 retry."""
+    try:
+        safe_resp = client.chat.completions.create(
+            model=MODEL,
+            messages=[
+                {"role": "system", "content": SANITIZER_SYSTEM_PROMPT},
+                {"role": "user",   "content": prompt},
+            ],
+            temperature=0.3,
+            max_tokens=400,
+        )
+        return (safe_resp.choices[0].message.content or "").strip()
+    except Exception as exc:
+        logger.warning("  ⚠️  Prompt sanitizer failed (%s) — using original", exc)
+        return prompt
+
+
+# ── Tier 3: Stability AI REST ─────────────────────────────────────────────────
+
 def _generate_via_stability_ai(prompt: str) -> bytes | None:
     """
-    Tier 3 Backup Engine: Calls the Stability AI REST API directly using standard urllib.
-    Avoids heavy external dependencies and executes flawlessly if Stability API key is active.
+    Tier 3 Backup Engine: Stability AI REST API via standard urllib.
+    Only runs if STABILITY_API_KEY is set in the environment.
     """
     api_key = os.getenv("STABILITY_API_KEY")
     if not api_key:
-        logger.warning("  ℹ️  Stability AI API Key missing from environment; skipping fallback engine.")
+        logger.warning("  ℹ️  Stability AI API Key missing — skipping Tier 3.")
         return None
-        
-    logger.info("  🚀 Stability AI failover cluster engaged. Generating via SD3/Ultra...")
-    
-    url = "https://api.stability.ai/v2beta/stable-image/generate/ultra"
+
+    logger.info("  🚀 Stability AI (Tier 3) engaging…")
+
+    url      = "https://api.stability.ai/v2beta/stable-image/generate/ultra"
     boundary = "----WebKitFormBoundaryEnterpriseAICluster"
-    
-    # Assemble multipart body payload parameters manually to maintain zero external lock-in
+
     parts = []
     parts.append(f"--{boundary}")
     parts.append('Content-Disposition: form-data; name="prompt"')
     parts.append("")
-    parts.append(prompt[:2000]) # Protect length boundaries
+    parts.append(prompt[:2000])
     parts.append(f"--{boundary}")
     parts.append('Content-Disposition: form-data; name="output_format"')
     parts.append("")
@@ -314,101 +405,32 @@ def _generate_via_stability_ai(prompt: str) -> bytes | None:
     parts.append(f"--{boundary}")
     parts.append('Content-Disposition: form-data; name="aspect_ratio"')
     parts.append("")
-    parts.append("2:3") # Clean book portrait dimension bounds
+    parts.append("2:3")
     parts.append(f"--{boundary}--")
     parts.append("")
-    
+
     body = "\r\n".join(parts).encode("utf-8")
-    
+
     try:
         req = urllib.request.Request(url, data=body)
         req.add_header("Authorization", f"Bearer {api_key}")
-        req.add_header("Content-Type", f"multipart/form-data; boundary={boundary}")
-        req.add_header("accept", "image/*")
-        
+        req.add_header("Content-Type",  f"multipart/form-data; boundary={boundary}")
+        req.add_header("accept",        "image/*")
+
         with urllib.request.urlopen(req, timeout=45) as response:
             if response.status == 200:
                 img_data = response.read()
-                logger.info(f"  ✅ Stability AI image successfully generated and downloaded ({len(img_data)//1024} KB)")
+                logger.info(
+                    "  ✅ Stability AI image generated (%d KB)", len(img_data) // 1024
+                )
                 return img_data
     except Exception as e:
-        logger.warning(f"  ⚠️ Stability AI generation pass failed: {e}")
-        
+        logger.warning("  ⚠️  Stability AI generation failed: %s", e)
+
     return None
 
 
-def _generate_procedural_fallback_image(concept: dict, width: int = 1024, height: int = 1792) -> bytes | None:
-    """
-    Tier 5 Backup Engine: Local Procedural Generation.
-    If all external generative APIs fail or the network drops completely, this algorithm
-    generates a mathematically beautiful abstract composition using the exact book palette.
-    """
-    try:
-        # pyrefly: ignore [missing-import]
-        from PIL import Image, ImageDraw, ImageFilter
-        
-        palette = concept.get("palette", {})
-        title = concept.get("title", "Cover")
-        
-        def _hex_to_rgb(h_str):
-            h_str = h_str.lstrip("#")
-            if len(h_str) == 3: 
-                h_str = "".join(c*2 for c in h_str)
-            return (int(h_str[0:2], 16), int(h_str[2:4], 16), int(h_str[4:6], 16))
-            
-        bg_rgb = _hex_to_rgb(palette.get("bg_primary", "#0f172a"))
-        bg2_rgb = _hex_to_rgb(palette.get("bg_secondary", "#1e3a5f"))
-        acc_rgb = _hex_to_rgb(palette.get("accent", "#f59e0b"))
-        
-        # Create base canvas
-        img = Image.new("RGBA", (width, height))
-        draw = ImageDraw.Draw(img)
-        
-        # 1. Base Gradient Interpolation
-        for y in range(height):
-            t = y / height
-            r = int(bg_rgb[0] * (1 - t) + bg2_rgb[0] * t)
-            g = int(bg_rgb[1] * (1 - t) + bg2_rgb[1] * t)
-            b = int(bg_rgb[2] * (1 - t) + bg2_rgb[2] * t)
-            draw.line([(0, y), (width, y)], fill=(r, g, b, 255))
-            
-        # 2. Procedural Soft Orbs
-        rng = random.Random(hash(title))
-        for _ in range(15):
-            rad = rng.randint(100, 600)
-            cx = rng.randint(-200, width + 200)
-            cy = rng.randint(-200, height + 200)
-            alpha = rng.randint(10, 40)
-            draw.ellipse([cx-rad, cy-rad, cx+rad, cy+rad], fill=acc_rgb + (alpha,))
-            
-        # 3. Procedural Sine Waves (adds motion/flow)
-        for i in range(5):
-            amp = rng.randint(50, 300)
-            freq = rng.uniform(0.001, 0.005)
-            y_offset = rng.randint(200, height - 200)
-            pts = []
-            for x in range(0, width, 10):
-                y = y_offset + math.sin(x * freq + i) * amp
-                pts.append((x, y))
-            if len(pts) > 1:
-                draw.line(pts, fill=acc_rgb + (rng.randint(20, 80),), width=rng.randint(2, 8))
-                
-        # Blur the composition into an atmospheric backdrop
-        img = img.filter(ImageFilter.GaussianBlur(15))
-        
-        buf = io.BytesIO()
-        img.convert("RGB").save(buf, format="JPEG", quality=90)
-        
-        logger.info(f"  ✅ Tier 5 Procedural Fallback engaged successfully ({len(buf.getvalue())//1024} KB)")
-        return buf.getvalue()
-        
-    except ImportError:
-        logger.warning("  ⚠️ PIL not installed, cannot generate Tier 5 procedural fallback.")
-        return None
-    except Exception as e:
-        logger.warning(f"  ⚠️ Tier 5 procedural generation failed: {e}")
-        return None
-
+# ── Tier 4: SVG template ──────────────────────────────────────────────────────
 
 def generate_cover_from_svg_template(
     title: str,
@@ -431,7 +453,7 @@ def generate_cover_from_svg_template(
 
     Scoring: each SVG filename + parent folder is matched against the book's
     genre and style keywords. Highest-scoring group is collected, then one
-    is chosen at random -- so 80 thriller templates each get equal chance.
+    is chosen at random — so 80 thriller templates each get equal chance.
 
     PLACEHOLDER TABLE (use these strings inside your .svg files):
         {{TITLE}}           -> book title  (<=30 chars)
@@ -502,9 +524,9 @@ def generate_cover_from_svg_template(
     svg_path  = random.choice(top_pool)
 
     logger.info(
-        f"  SVG template selected: {os.path.relpath(svg_path, templates_dir)!r}"
-        f"  (score={top_score}, pool={len(top_pool)} of {len(svgs)},"
-        f"  genre={genre_raw!r}, style={style_raw!r})"
+        "  SVG template selected: %r  (score=%d, pool=%d of %d, genre=%r, style=%r)",
+        os.path.relpath(svg_path, templates_dir),
+        top_score, len(top_pool), len(svgs), genre_raw, style_raw,
     )
 
     try:
@@ -540,7 +562,6 @@ def generate_cover_from_svg_template(
         for placeholder, value in substitutions.items():
             svg = svg.replace(placeholder, value)
 
-        # Legacy backward-compatibility placeholders
         svg = svg.replace("Your Title Here", short_title)
         svg = svg.replace("Your Title",      short_title)
         svg = svg.replace("Author Name",     short_author)
@@ -548,84 +569,133 @@ def generate_cover_from_svg_template(
         return svg.encode("utf-8")
 
     except Exception as e:
-        logger.warning(f"  SVG template fallback failed: {e}\n{traceback.format_exc()}")
+        logger.warning("  SVG template fallback failed: %s\n%s", e, traceback.format_exc())
         return None
 
 
+# ── Tier 5: Local procedural fallback ─────────────────────────────────────────
+
+def _generate_procedural_fallback_image(concept: dict, width: int = 1024, height: int = 1792) -> bytes | None:
+    """
+    Tier 5 Backup Engine: Local Procedural Generation using Pillow.
+    Generates a mathematically beautiful abstract composition using the exact
+    book palette — works completely offline with zero external API calls.
+    """
+    try:
+        from PIL import Image, ImageDraw, ImageFilter   # pyrefly: ignore [missing-import]
+
+        palette = concept.get("palette", {})
+        title   = concept.get("title", "Cover")
+
+        def _hex_to_rgb(h_str):
+            h_str = h_str.lstrip("#")
+            if len(h_str) == 3:
+                h_str = "".join(c*2 for c in h_str)
+            return (int(h_str[0:2], 16), int(h_str[2:4], 16), int(h_str[4:6], 16))
+
+        bg_rgb  = _hex_to_rgb(palette.get("bg_primary",  "#0f172a"))
+        bg2_rgb = _hex_to_rgb(palette.get("bg_secondary", "#1e3a5f"))
+        acc_rgb = _hex_to_rgb(palette.get("accent",       "#f59e0b"))
+
+        img  = Image.new("RGBA", (width, height))
+        draw = ImageDraw.Draw(img)
+
+        # 1. Base gradient interpolation
+        for y in range(height):
+            t = y / height
+            r = int(bg_rgb[0] * (1 - t) + bg2_rgb[0] * t)
+            g = int(bg_rgb[1] * (1 - t) + bg2_rgb[1] * t)
+            b = int(bg_rgb[2] * (1 - t) + bg2_rgb[2] * t)
+            draw.line([(0, y), (width, y)], fill=(r, g, b, 255))
+
+        # 2. Procedural soft orbs
+        rng = random.Random(hash(title))
+        for _ in range(15):
+            rad = rng.randint(100, 600)
+            cx  = rng.randint(-200, width + 200)
+            cy  = rng.randint(-200, height + 200)
+            alpha = rng.randint(10, 40)
+            draw.ellipse([cx-rad, cy-rad, cx+rad, cy+rad], fill=acc_rgb + (alpha,))
+
+        # 3. Procedural sine waves
+        for i in range(5):
+            amp      = rng.randint(50, 300)
+            freq     = rng.uniform(0.001, 0.005)
+            y_offset = rng.randint(200, height - 200)
+            pts      = []
+            for x in range(0, width, 10):
+                y = y_offset + math.sin(x * freq + i) * amp
+                pts.append((x, y))
+            if len(pts) > 1:
+                draw.line(pts, fill=acc_rgb + (rng.randint(20, 80),), width=rng.randint(2, 8))
+
+        img = img.filter(ImageFilter.GaussianBlur(15))
+        buf = io.BytesIO()
+        img.convert("RGB").save(buf, format="JPEG", quality=90)
+
+        logger.info("  ✅ Tier 5 Procedural fallback engaged successfully (%d KB)", len(buf.getvalue()) // 1024)
+        return buf.getvalue()
+
+    except ImportError:
+        logger.warning("  ⚠️  PIL not installed — Tier 5 procedural fallback unavailable.")
+        return None
+    except Exception as e:
+        logger.warning("  ⚠️  Tier 5 procedural generation failed: %s", e)
+        return None
+
+
+# ── Main image generation orchestrator ───────────────────────────────────────
+
 def generate_cover_image(concept: dict, book_title: str, book_text: str = "") -> bytes | None:
     """
-    Maximized 5-Tier Fallback Loop:
-    Tier 1: DALL-E 3 HD (Highest Quality)
-    Tier 2: DALL-E 3 HD + Sanitizer (Safety Policy Bypass)
-    Tier 3: Stability AI (REST API Fallback for OpenAI outages)
-    Tier 4: DALL-E 2 Standard (Low Latency / Rate Limit Bypass)
-    Tier 5: Local Procedural Generator (Offline/Complete Failure Guarantee)
+    Nano Banana 5-Tier Failover Cluster:
+    Tier 1 : Nano Banana Pro  (gemini-2.5-flash-preview-05-20) — best quality
+    Tier 2 : Nano Banana 2    (gemini-2.0-flash-exp)           — fast fallback
+    Tier 3 : Stability AI     REST API ultra endpoint
+    Tier 4 : SVG Template     genre-aware local template
+    Tier 5 : Procedural       Pillow math renderer (offline guarantee)
+
+    GPT-4o crafts the image prompt; Nano Banana renders the pixels.
     """
-    dalle_prompt = generate_dalle_prompt(concept, book_title, book_text)
-    logger.info(f"  🎨 Base Image Swarm prompt ({len(dalle_prompt)} chars): {dalle_prompt[:200]}…")
+    image_prompt = generate_dalle_prompt(concept, book_title, book_text)
+    logger.info("  🎨 Image prompt (%d chars): %s…", len(image_prompt), image_prompt[:200])
 
-    # ── Tier 1 & 2 Loop: OpenAI DALL-E 3 with Sanitation ──
-    for attempt in range(1, 3):
-        try:
-            logger.info(f"  [Tier {attempt}] Attempting OpenAI DALL-E 3 generation...")
-            resp = client.images.generate(
-                model="dall-e-3",
-                prompt=dalle_prompt,
-                size="1024x1792",
-                quality="hd",
-                n=1,
-            )
-            image_url = resp.data[0].url
-            with urllib.request.urlopen(image_url) as r:
-                return r.read()
-                
-        except Exception as api_err:
-            err_str = str(api_err).lower()
-            if any(k in err_str for k in ("safety", "policy", "rejected", "content", "violat")):
-                logger.warning("  ⚠️ OpenAI Content Filter Triggered. Engaging Tier 2 Sanitizer Agent...")
-                try:
-                    safe_resp = client.chat.completions.create(
-                        model=MODEL,
-                        messages=[
-                            {"role": "system", "content": SANITIZER_SYSTEM_PROMPT},
-                            {"role": "user", "content": dalle_prompt}
-                        ],
-                        temperature=0.3
-                    )
-                    dalle_prompt = safe_resp.choices[0].message.content.strip()
-                except Exception:
-                    break
-            else:
-                logger.warning(f"  ⚠️ DALL-E 3 API pipeline drop: {api_err}")
-                break
+    # ── Tier 1: Nano Banana Pro ───────────────────────────────────────────────
+    result = _nb_generate_image(image_prompt, NANO_BANANA_PRO)
+    if result:
+        logger.info("  🍌 Tier 1 (Nano Banana Pro) succeeded.")
+        return result
 
-    # ── Tier 3 Loop: Stability AI REST Architecture ──
-    stability_data = _generate_via_stability_ai(dalle_prompt)
-    if stability_data:
-        return stability_data
+    # Sanitize before Tier 2
+    logger.warning("  ⚠️  Tier 1 failed — sanitising prompt for Tier 2…")
+    safe_prompt = _nb_sanitize_prompt(image_prompt)
 
-    # ── Tier 4 Loop: OpenAI DALL-E 2 Standard Core Fallback ──
-    try:
-        logger.info("  [Tier 4] Attempting low-latency OpenAI DALL-E 2 asset recovery line...")
-        resp_d2 = client.images.generate(
-            model="dall-e-2",
-            prompt=dalle_prompt[:900], # Force bounds within 1000 char threshold limits
-            size="1024x1024",
-            n=1,
-        )
-        image_url_d2 = resp_d2.data[0].url
-        with urllib.request.urlopen(image_url_d2) as r:
-            return r.read()
-    except Exception as e:
-        logger.warning(f"  ⚠️ Tier 4 DALL-E 2 pipeline failover: {e}")
+    # ── Tier 2: Nano Banana 2 ─────────────────────────────────────────────────
+    result = _nb_generate_image(safe_prompt, NANO_BANANA_2)
+    if result:
+        logger.info("  🍌 Tier 2 (Nano Banana 2) succeeded.")
+        return result
 
-    # ── Tier 5 Loop: Local Procedural Math Fallback (The Ultimate Safety Net) ──
-    logger.warning("  🚨 All external imaging clusters exhausted. Engaging Tier 5 Local Procedural core.")
-    procedural_data = _generate_procedural_fallback_image(concept)
-    if procedural_data:
-        return procedural_data
+    # ── Tier 3: Stability AI ──────────────────────────────────────────────────
+    result = _generate_via_stability_ai(safe_prompt)
+    if result:
+        logger.info("  ✅ Tier 3 (Stability AI) succeeded.")
+        return result
 
-    logger.error("  ❌ All 5 Tiers failed. Returning empty asset buffer.")
+    # ── Tier 4: SVG template ──────────────────────────────────────────────────
+    result = generate_cover_from_svg_template(book_title, concept=concept)
+    if result:
+        logger.info("  ✅ Tier 4 (SVG template) succeeded.")
+        return result
+
+    # ── Tier 5: Local procedural ──────────────────────────────────────────────
+    logger.warning("  🚨 All external image tiers exhausted — Tier 5 Local Procedural engaged.")
+    result = _generate_procedural_fallback_image(concept)
+    if result:
+        logger.info("  ✅ Tier 5 (procedural) succeeded.")
+        return result
+
+    logger.error("  ❌ All 5 Nano Banana tiers failed. Returning None.")
     return None
 
 
@@ -913,7 +983,8 @@ def _draw_image_on_canvas(c, img_bytes: bytes, x: float, y: float, w: float, h: 
 
 def render_cover_pdf(concept: dict, output_path: str,
                      book_image_bytes: bytes | None = None,
-                     dalle_image_bytes: bytes | None = None,
+                     dalle_image_bytes: bytes | None = None,   # kept for backward compat
+                     nb_image_bytes: bytes | None = None,
                      cover_image_bytes: bytes | None = None) -> str:
     """
     Render a professional A4 book cover PDF.
@@ -964,10 +1035,13 @@ def render_cover_pdf(concept: dict, output_path: str,
             top_  = (nh - H_px) // 2
             return img.crop((left, top_, left + W_px, top_ + H_px))
 
+        # Support both old dalle_image_bytes param and new nb_image_bytes param
+        _gen_img = nb_image_bytes or dalle_image_bytes
+
         if cover_image_bytes:
             bg = _fit_to_canvas(cover_image_bytes)
             logger.info("  ✅ User-supplied cover image composited as full-bleed background")
-        elif dalle_image_bytes:
+        elif _gen_img:
             bg = _fit_to_canvas(dalle_image_bytes)
             logger.info("  ✅ Generative imagery swarm composited as cover background")
         elif book_image_bytes:
@@ -1006,7 +1080,7 @@ def render_cover_pdf(concept: dict, output_path: str,
         draw = ImageDraw.Draw(bg, "RGBA")
 
         # ── Overlay strategy ──────────────────────────────────────────────────────
-        has_image = (cover_image_bytes is not None) or (dalle_image_bytes is not None)
+        has_image = (cover_image_bytes is not None) or (_gen_img is not None)
         overlay = Image.new("RGBA", (W_px, H_px), (0, 0, 0, 0))
         od = ImageDraw.Draw(overlay)
 
@@ -1174,7 +1248,7 @@ def render_cover_pdf(concept: dict, output_path: str,
                       author_line, font=auth_font, fill=scol_rgb + (230,))
 
         pub_font = _load_font(int(H_px * 0.016), bold=True)
-        pub_text = "ENTERPRISE AI"
+        pub_text = "NANO BANANA AI 🍌"
         pb = draw.textbbox((0, 0), pub_text, font=pub_font)
         draw.text((W_px - text_left - (pb[2] - pb[0]), band_top + int(BOTTOM_BAND_H * 0.32)),
                   pub_text, font=pub_font, fill=acc_rgb + (230,))
@@ -2182,8 +2256,8 @@ def design_cover(
                         logger.info("  🖼️  Using SVG template as cover background.")
                     else:
                         logger.warning("  ⚠️ All visual generators offline — cover using gradient background.")
-                        concept["_dalle_failed"] = True
-                        concept["_dalle_note"] = "Image generation unavailable — cover uses gradient background. Check your OpenAI API key has Images access (paid tier required)."
+                        concept["_nb_failed"] = True
+                        concept["_nb_note"] = "Image generation unavailable — cover uses gradient background. Check your NANO_BANANA_API_KEY has Gemini image generation access enabled."
 
             render_cover_pdf(concept, cover_pdf,
                              book_image_bytes=book_image,

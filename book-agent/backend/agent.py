@@ -25,21 +25,33 @@ MODEL = "gpt-4o"
 # ADVANCED MULTI-AGENT SWARM PROMPTS (UPGRADED: MEMGPT-STYLE ENTITY GRAPH)
 # ─────────────────────────────────────────────────────────────────────────────
 
-CRITIC_SYSTEM_PROMPT = """You are a ruthless, highly experienced Book Editor.
-Your job is to review the newly drafted section of a book against the 'Entity Knowledge Graph' (which contains all facts, characters, and timelines established so far) and the intended writing style.
+CRITIC_SYSTEM_PROMPT = """You are a highly experienced Book Editor reviewing a draft section.
 
-Look for:
-1. Plot holes, factual inconsistencies, or character breaks compared to the Entity Knowledge Graph.
-2. Repetitive phrasing, weak transitions, or hallucinations (any detail NOT present in the Entity Knowledge Graph).
-3. Deviation from the requested writing style.
+The Entity Knowledge Graph contains FACTUAL CONSTRAINTS only — character names, location names,
+established timeline events, and explicitly listed sensory details (specific scents, sounds, textures).
 
-IMPORTANT: Any character, location, scent, object, or event that appears in the draft
-but is NOT listed in the Entity Knowledge Graph counts as a hallucination and must be flagged.
+YOU MUST FLAG (these are real problems):
+1. Wrong character names, traits, or motivations vs the Entity Knowledge Graph.
+2. Wrong location names or descriptions vs the Entity Knowledge Graph.
+3. New proper nouns (character names, place names) introduced that are NOT in the Entity Knowledge Graph.
+4. Sensory details that DIRECTLY CONTRADICT the EKG (e.g. EKG says jasmine, draft says roses).
+5. Events that contradict the established timeline.
+6. Severely repetitive phrasing or broken narrative flow.
+
+YOU MUST NOT FLAG (these are acceptable and expected in good prose):
+- General metaphors, similes, or poetic imagery that do not contradict any established fact.
+- Descriptive phrases and figurative language (e.g. "whispers of the divine", "tapestry of grace").
+- New adjectives or emotional descriptions that don't introduce new proper nouns.
+- Stylistic flourishes consistent with the writing style, even if not in the EKG.
+- Minor embellishments that add colour without contradicting established facts.
+
+Be a fair, professional editor — not a pedantic fact-checker of every metaphor.
+Only flag things that would genuinely confuse or mislead a reader about established facts.
 
 Output STRICTLY valid JSON with no markdown formatting:
 {
     "passed": true/false,
-    "critique": "Detailed explanation of what is wrong and how to fix it, or 'perfect' if passed",
+    "critique": "List only genuine factual contradictions, or 'Approved' if passed",
     "severity": "low/medium/high"
 }
 """
@@ -179,6 +191,12 @@ def critique_and_revise(draft: str, story_bible: str, style: str, target_words: 
                     print("    ✅ Critic approved draft on first pass.")
                 else:
                     print(f"    ✅ Revisor successfully fixed the draft! (Attempt {attempt})")
+                return current_draft
+
+            # Low severity = minor stylistic nitpicks, not real factual errors.
+            # Skip the Revisor entirely — the draft is good enough to proceed.
+            if critique_data.get("severity") == "low":
+                print(f"    ℹ️ Low severity notes only — proceeding without revision.")
                 return current_draft
 
             print(f"    🚨 Critic flagged issues (Attempt {attempt + 1}/{MAX_ATTEMPTS}): {critique_data.get('critique')}")
