@@ -363,13 +363,31 @@ export const downloadCoverDoc = (result: CoverResult) => {
 // ─────────────────────────────────────────────
 
 export interface LayoutResult {
+  job_id: string;
   title: string;
   style_name: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  concept: Record<string, any>;
   chapter_count: number;
-  pdf_path: string;
-  docx_path: string;
-  job_id: string;
+  chapter_titles: string[];
   book_type: string;
+  book_type_label: string;
+  /** Relative paths — fetch via downloadLayoutDoc(), not directly. */
+  pdf_url: string;
+  docx_url: string;
+}
+
+/**
+ * Shape returned by GET /layout/{job_id}/status.
+ * `stage` cycles: queued → (running stages from progress_callback) → done | error.
+ * `result` is only present once stage === "done".
+ */
+export interface LayoutStatus {
+  job_id: string;
+  stage: string;
+  pct: number;
+  message: string;
+  result?: LayoutResult;
 }
 
 /** All layout design parameters — every field maps 1:1 to a backend Form param. */
@@ -417,11 +435,20 @@ export interface LayoutDesignParams {
   backMatter?: string;
 }
 
+/**
+ * Poll the status of a previously-started layout job.
+ * Exposed directly in case a caller wants manual control over polling
+ * (e.g. to drive a progress bar independently of designLayout()'s own loop).
+ */
+export const getLayoutStatus = (jobId: string) =>
+  API.get<LayoutStatus>(`/layout/${jobId}/status`);
+
 export const designLayout = (
   file: File,
   params: LayoutDesignParams,
   onUploadProgress?: (pct: number) => void,
-) => {
+  onProgress?: (stage: string, pct: number, message: string) => void,
+): Promise<{ data: LayoutResult }> => {
   const form = new FormData();
   form.append("file", file);
   form.append("page_width_mm", String(Math.max(50, Math.min(600, params.pageWidthMm || 210))));
@@ -472,11 +499,77 @@ export const designLayout = (
   if (params.frontMatter) form.append("front_matter", params.frontMatter);
   if (params.backMatter) form.append("back_matter", params.backMatter);
 
-  return API.post<LayoutResult>("/design-layout", form, {
-    timeout: 3600000,
-    onUploadProgress: onUploadProgress
-      ? (e) => { if (e.total) onUploadProgress(Math.round((e.loaded * 100) / e.total)); }
-      : undefined,
+  // Step 1: upload + kick off the background job. The backend streams the
+  // file to disk and starts a thread, then returns {job_id, status:"started"}
+  // almost immediately — it does NOT wait for the render pipeline to finish.
+  const startPromise = API.post<{ job_id: string; status: string }>(
+    "/design-layout",
+    form,
+    {
+      // Generous, but this call returns fast in practice — it only covers
+      // the upload itself, not the actual layout/render work.
+      timeout: 3600000,
+      onUploadProgress: onUploadProgress
+        ? (e) => { if (e.total) onUploadProgress(Math.round((e.loaded * 100) / e.total)); }
+        : undefined,
+    },
+  );
+
+  // Step 2: poll GET /layout/{job_id}/status until stage is "done" or "error".
+  // This is what actually survives Railway's request-duration limit — each
+  // poll is a short, independent request instead of one connection held
+  // open for the entire pipeline (GPT call + font downloads + PDF/DOCX/EPUB
+  // render), which is what was previously causing "Failed to fetch".
+  return startPromise.then(({ data }) => {
+    const jobId = data.job_id;
+    return new Promise<{ data: LayoutResult }>((resolve, reject) => {
+      // Signal 100% upload so the UI can switch to a "designing layout…" state.
+      onUploadProgress?.(100);
+
+      const POLL_INTERVAL_MS = 3000;
+      const MAX_CONSECUTIVE_ERRORS = 10;
+      let consecutiveErrors = 0;
+
+      const poll = () => {
+        getLayoutStatus(jobId)
+          .then(({ data: status }) => {
+            consecutiveErrors = 0;
+            onProgress?.(status.stage, status.pct, status.message);
+
+            if (status.stage === "done" && status.result) {
+              resolve({ data: status.result });
+              return;
+            }
+            if (status.stage === "error") {
+              reject(new Error(status.message || "Layout design failed."));
+              return;
+            }
+            setTimeout(poll, POLL_INTERVAL_MS);
+          })
+          .catch((err) => {
+            consecutiveErrors += 1;
+            if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+              reject(
+                new Error(
+                  `Lost connection to layout job after ${MAX_CONSECUTIVE_ERRORS} failed polls: ${err?.message}`,
+                ),
+              );
+              return;
+            }
+            const backoff = Math.min(3000 * consecutiveErrors, 15000);
+            console.warn(
+              `[layout] Poll ${consecutiveErrors}/${MAX_CONSECUTIVE_ERRORS} failed, ` +
+              `retrying in ${backoff}ms:`,
+              err?.message,
+            );
+            setTimeout(poll, backoff);
+          });
+      };
+
+      // First poll after 1.5 s — small books can finish fast, queued jobs
+      // (semaphore-limited to 2 concurrent heavy jobs) will just keep polling.
+      setTimeout(poll, 1500);
+    });
   });
 };
 
