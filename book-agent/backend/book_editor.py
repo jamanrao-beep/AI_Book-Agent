@@ -842,6 +842,11 @@ def _default_layout_directives() -> Dict[str, Any]:
       ornament_after       str    — decorative character after chapter
       first_para_indent    bool   — indent first paragraph (normally suppressed)
       running_header_text  str    — override running header for this chapter
+      blank_page_after_paragraphs  list[int] — 0-based paragraph indices within
+                            this chapter after which to inject a blank page.
+                            Resolved from "page N" instructions by
+                            resolve_page_target() — not meant to be set by
+                            hand for normal use.
     """
     return {
         "force_recto_start":    False,
@@ -860,6 +865,7 @@ def _default_layout_directives() -> Dict[str, Any]:
         "ornament_after":       "",
         "first_para_indent":    False,
         "running_header_text":  "",
+        "blank_page_after_paragraphs": [],
     }
 
 
@@ -2170,6 +2176,177 @@ def _generate_edit_summary(
         return f"Applied '{instruction}' to {ch_list} in '{book_title}'."
 
 
+def _apply_structural_edit(book_structure: dict, user_instruction: str) -> Optional[dict]:
+    """
+    Handle REORDER-intent instructions by calling the ACTUAL structural
+    functions (insert_chapter / delete_chapter / merge_chapters /
+    split_chapter / reorder_chapters) instead of routing them through the
+    generic prose-rewrite pipeline.
+
+    Uses one small GPT call to extract a structured action from the
+    natural-language instruction, then executes that action directly
+    against the book dict — deterministic, not generative.
+
+    Returns the updated book dict (with edit_summary / chapters_changed
+    keys set), or None if no client is available / extraction failed,
+    so the caller can fall back to the prose pipeline.
+    """
+    if not client:
+        return None
+
+    chapters_brief = [
+        {"chapter_number": ch.get("chapter_number"), "title": ch.get("title", "")}
+        for ch in book_structure.get("chapters", [])
+    ]
+
+    try:
+        resp = client.chat.completions.create(
+            model=MODEL,
+            messages=[{
+                "role": "system",
+                "content": (
+                    "You convert a structural book-editing instruction into ONE JSON action.\n"
+                    "Valid actions: insert_chapter, delete_chapter, merge_chapters, "
+                    "split_chapter, reorder_chapters, none.\n"
+                    "Respond with ONLY JSON, one of these shapes:\n"
+                    '{"action":"insert_chapter","position":int,"title":str,"content":str}\n'
+                    '{"action":"delete_chapter","chapter_number":int}\n'
+                    '{"action":"merge_chapters","first_number":int,"second_number":int}\n'
+                    '{"action":"split_chapter","chapter_number":int,"split_paragraph":int,"second_title":str}\n'
+                    '{"action":"reorder_chapters","new_order":[int,...]}\n'
+                    '{"action":"none"}\n'
+                    "Use \"none\" if the instruction isn't a clear structural operation "
+                    "on chapters (e.g. it's actually a prose/style edit)."
+                ),
+            }, {
+                "role": "user",
+                "content": (
+                    f"Current chapters: {json.dumps(chapters_brief, ensure_ascii=False)}\n"
+                    f"Instruction: {user_instruction}"
+                ),
+            }],
+            max_tokens=300,
+            temperature=0.0,
+        )
+        action = _try_parse_json((resp.choices[0].message.content or "").strip())
+    except Exception as ex:
+        log.warning("Structural-edit extraction failed: %s", ex)
+        return None
+
+    if not action or action.get("action") in (None, "none"):
+        return None
+
+    try:
+        kind = action["action"]
+        if kind == "insert_chapter":
+            result = insert_chapter(
+                book_structure,
+                position=int(action["position"]),
+                title=action.get("title") or "New Chapter",
+                content=action.get("content") or "",
+            )
+            changed = [int(action["position"])]
+            summary = f"Inserted new chapter '{action.get('title','New Chapter')}' at position {action['position']}."
+
+        elif kind == "delete_chapter":
+            cn = int(action["chapter_number"])
+            result  = delete_chapter(book_structure, cn)
+            changed = []
+            summary = f"Deleted chapter {cn}; remaining chapters renumbered."
+
+        elif kind == "merge_chapters":
+            f, s   = int(action["first_number"]), int(action["second_number"])
+            result = merge_chapters(book_structure, f, s)
+            changed = [f]
+            summary = f"Merged chapters {f} and {s} into one chapter."
+
+        elif kind == "split_chapter":
+            cn  = int(action["chapter_number"])
+            result = split_chapter(
+                book_structure, cn,
+                int(action["split_paragraph"]),
+                action.get("second_title") or "",
+            )
+            changed = [cn, cn + 1]
+            summary = f"Split chapter {cn} into two chapters."
+
+        elif kind == "reorder_chapters":
+            order  = [int(x) for x in action["new_order"]]
+            result = reorder_chapters(book_structure, order)
+            changed = list(range(1, len(order) + 1))
+            summary = f"Reordered chapters: new order {order}."
+
+        else:
+            return None
+
+    except Exception as ex:
+        log.warning("Structural-edit execution failed (%s): %s", action, ex)
+        return None
+
+    result["edit_summary"]     = summary
+    result["chapters_changed"] = changed
+    log.info("Structural edit applied: %s", summary)
+    return result
+
+
+_FIND_REPLACE_PATTERNS = [
+    re.compile(r'change\s+(?:the word\s+)?["\u2018\u2019\'\u201c\u201d"]([^"\u2018\u2019\'\u201c\u201d]+)["\u2018\u2019\'\u201c\u201d"]\s+to\s+["\u2018\u2019\'\u201c\u201d"]([^"\u2018\u2019\'\u201c\u201d]+)["\u2018\u2019\'\u201c\u201d"]', re.IGNORECASE),
+    re.compile(r'replace\s+["\u2018\u2019\'\u201c\u201d"]([^"\u2018\u2019\'\u201c\u201d]+)["\u2018\u2019\'\u201c\u201d"]\s+with\s+["\u2018\u2019\'\u201c\u201d"]([^"\u2018\u2019\'\u201c\u201d]+)["\u2018\u2019\'\u201c\u201d"]', re.IGNORECASE),
+]
+
+
+def _try_literal_find_replace(book_structure: dict, user_instruction: str) -> Optional[dict]:
+    """
+    Exact, deterministic find/replace for instructions like:
+      change "word X" to "word Y"
+      replace "word X" with "word Y"
+
+    This bypasses the LLM entirely for this kind of edit — no rewriting,
+    no paraphrasing, no risk of the model drifting from the literal
+    instruction. Scoped to chapter_targets if the instruction names
+    specific chapters, otherwise applied across the whole book.
+
+    Returns None if the instruction doesn't match a literal find/replace
+    shape, so the caller falls back to the generative pipeline.
+    """
+    for pattern in _FIND_REPLACE_PATTERNS:
+        m = pattern.search(user_instruction)
+        if m:
+            find_text, replace_text = m.group(1), m.group(2)
+            break
+    else:
+        return None
+
+    targets = set(_extract_chapter_targets(user_instruction, book_structure))
+    result  = copy.deepcopy(book_structure)
+    changed: List[int] = []
+    total_replacements = 0
+
+    for ch in result.get("chapters", []):
+        cn = ch.get("chapter_number")
+        if cn not in targets:
+            continue
+        content = str(ch.get("content", ""))
+        count   = content.count(find_text)
+        if count:
+            ch["content"] = content.replace(find_text, replace_text)
+            ch["word_count"] = len(ch["content"].split())
+            changed.append(cn)
+            total_replacements += count
+
+    if total_replacements == 0:
+        log.info("Literal find/replace matched no occurrences of '%s' — falling back to AI edit.", find_text)
+        return None
+
+    result["edit_summary"] = (
+        f"Replaced {total_replacements} occurrence(s) of \"{find_text}\" "
+        f"with \"{replace_text}\" in chapter(s) {changed}."
+    )
+    result["chapters_changed"] = changed
+    log.info(result["edit_summary"])
+    return result
+
+
 def apply_edit(
     book_structure:       dict,
     user_instruction:     str,
@@ -2177,9 +2354,20 @@ def apply_edit(
 ) -> dict:
     """
     Master edit entry-point.
+    Step 0: Try exact literal find/replace (deterministic, no LLM).
+    Step 0.5: Try structural ops (insert/delete/merge/split/reorder chapter)
+              via the real functions, not prose-rewrite.
     Step 1: Apply layout directives from the instruction (Subsystem 1).
     Step 2: Route: tiny books → whole-book call; everything else → chapter-by-chapter.
     """
+    literal_result = _try_literal_find_replace(book_structure, user_instruction)
+    if literal_result is not None:
+        return literal_result
+
+    structural_result = _apply_structural_edit(book_structure, user_instruction)
+    if structural_result is not None:
+        return structural_result
+
     book_structure = _apply_global_directives(
         copy.deepcopy(book_structure), user_instruction
     )
@@ -2832,9 +3020,17 @@ def generate_edited_pdf(
     output_path: str,
     theme_name:  str = "premium",
     generate_toc: bool = False,
+    page_anchor_sink: Optional[dict] = None,
 ) -> str:
     """
     Full-featured PDF generator.
+
+    page_anchor_sink: if provided (an empty dict), this render runs in
+    "mapping pass" mode — a zero-ink marker is placed before every
+    paragraph, and after build() the dict is populated with
+    {(chapter_number, paragraph_index): page_number}. Used by
+    resolve_page_target() to translate "page N" instructions into a real
+    chapter/paragraph anchor. Leave as None for a normal render (default).
 
     Features:
       • Mirror margins: wider inner gutter for physical binding
@@ -2983,6 +3179,40 @@ def generate_edited_pdf(
 
         def __repr__(self) -> str:
             return "BlankPageFlowable()"
+
+    class _PageAnchorRecorder(Flowable):
+        """
+        Zero-ink, zero-height marker flowable used ONLY during a "mapping
+        pass" render. When draw() fires, ReportLab has already committed to
+        a real page number for this position in the story — record it.
+
+        This is how arbitrary "page N" instructions become possible despite
+        the book model being chapter/paragraph-based: render once with one
+        of these before every paragraph, read back which page each
+        (chapter_number, paragraph_index) landed on, then resolve the
+        target page to a real anchor and re-render for the final output.
+        """
+        def __init__(self, sink: Optional[dict], chapter_number: int, paragraph_index: int):
+            Flowable.__init__(self)
+            self._sink   = sink
+            self._chno   = chapter_number
+            self._pidx   = paragraph_index
+
+        def wrap(self, aW: float, aH: float) -> Tuple[float, float]:
+            return 0.0, 0.0
+
+        def draw(self) -> None:
+            if self._sink is None:
+                return
+            try:
+                page_num = self.canv._pageNumber
+            except AttributeError:
+                return
+            # First write wins — that's the page the paragraph STARTS on.
+            self._sink.setdefault((self._chno, self._pidx), page_num)
+
+        def __repr__(self) -> str:
+            return f"_PageAnchorRecorder(ch={self._chno}, p={self._pidx})"
 
     class RectoEnforcer(Flowable):
         """
@@ -3205,7 +3435,12 @@ def generate_edited_pdf(
             ]))
             story.append(tbl)
         else:
+            blank_after_paras = set(directives.get("blank_page_after_paragraphs") or [])
             for p_idx, para in enumerate(remaining_paras):
+                story.append(_PageAnchorRecorder(
+                    page_anchor_sink, ch.get("chapter_number", ch_idx + 1), p_idx
+                ))
+
                 override_font = _best_font_for_text(para, font_map)
                 if override_font:
                     para_style = S(
@@ -3231,6 +3466,12 @@ def generate_edited_pdf(
                     story.append(Paragraph(drop_markup, ch_body_s))
                 else:
                     story.append(Paragraph(_esc_pdf(para), para_style))
+
+                # Arbitrary mid-chapter blank-page insertion, resolved from a
+                # "page N" instruction via resolve_page_target().
+                if p_idx in blank_after_paras:
+                    story.append(BlankPageFlowable())
+                    story.append(PageBreak())
 
         # ── Ornament after ────────────────────────────────────────────────────
         if ornament_aft:
@@ -3606,6 +3847,7 @@ def generate_edited_docx(
         # ── Body paragraphs ───────────────────────────────────────────────────
         paragraphs = [p.strip() for p in ch.get("content", "").split("\n\n") if p.strip()]
         n_paras    = len(paragraphs)
+        blank_after_paras_docx = set(directives.get("blank_page_after_paragraphs") or [])
 
         for p_idx, para_text in enumerate(paragraphs):
             p = doc.add_paragraph()
@@ -3654,6 +3896,12 @@ def generate_edited_docx(
                     _inject_odd_page_break(p)
                 else:
                     _inject_next_page_break(p)
+
+            # ── Page-targeted blank page (anchor resolved from "page N") ───────
+            # Approximate in Word — page numbers reflow at render time — but
+            # lands at the same manuscript position as the PDF anchor.
+            if p_idx in blank_after_paras_docx and not is_last_para:
+                _inject_blank_page_docx(doc)
 
         # ── Ornament after ────────────────────────────────────────────────────
         if ornament_aft:
@@ -4372,8 +4620,18 @@ def process_editor_turn(
     )
 
     # Step 5: Apply edit
+    page_match = _PAGE_TARGET_PATTERN.search(user_message)
     try:
-        updated = apply_edit(book_structure, user_message, conversation_history)
+        if page_match:
+            target_page = int(page_match.group(1) or page_match.group(2))
+            log.info("Page-targeted blank-page instruction detected: page %d", target_page)
+            updated = insert_blank_page_at_page_number(
+                book_structure, target_page, detected_theme, generate_toc_page,
+            )
+            updated["edit_summary"]     = f"Inserted a blank page after page {target_page}."
+            updated["chapters_changed"] = []
+        else:
+            updated = apply_edit(book_structure, user_message, conversation_history)
     except Exception as ex:
         raise ValueError(f"Edit pipeline failed: {ex}") from ex
 
@@ -4518,6 +4776,120 @@ def set_blank_pages(
             if after > 0:
                 ch["layout_directives"]["blank_pages_after"] = after
     return book
+
+
+def resolve_page_target(
+    book:        dict,
+    theme_name:  str = "premium",
+    generate_toc: bool = False,
+) -> Dict[Tuple[int, int], int]:
+    """
+    Run a throwaway "mapping pass" PDF render and return the resulting
+    {(chapter_number, paragraph_index): page_number} anchor table.
+
+    This is the mechanism that makes "page N" instructions possible despite
+    the book model being chapter/paragraph-based, not page-based: render
+    once with invisible markers, read back where everything actually
+    landed, then use that table to translate a page number into a real
+    chapter/paragraph anchor (see insert_blank_page_at_page_number()).
+
+    NOTE: page numbers are reflow-dependent. Any subsequent change to the
+    book (theme, font size, content, margins) invalidates this table — it
+    must be recomputed if the book changes before you use page targeting
+    again.
+    """
+    anchors: Dict[Tuple[int, int], int] = {}
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+        tmp_path = tmp.name
+    try:
+        generate_edited_pdf(
+            book, tmp_path, theme_name,
+            generate_toc=generate_toc,
+            page_anchor_sink=anchors,
+        )
+    finally:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+    return anchors
+
+
+def _closest_anchor_at_or_before(
+    anchors: Dict[Tuple[int, int], int], target_page: int
+) -> Optional[Tuple[int, int]]:
+    """Of all (chapter, paragraph) anchors, pick the one on the highest
+    page number that is still <= target_page (i.e. the last paragraph
+    that starts on or before the requested page)."""
+    candidates = [
+        (page, key) for key, page in anchors.items() if page <= target_page
+    ]
+    if not candidates:
+        return None
+    candidates.sort(key=lambda x: x[0])
+    return candidates[-1][1]   # (chapter_number, paragraph_index)
+
+
+def insert_blank_page_at_page_number(
+    book:        dict,
+    page_number: int,
+    theme_name:  str = "premium",
+    generate_toc: bool = False,
+) -> dict:
+    """
+    Insert a blank page immediately after the given PDF page number,
+    regardless of which chapter/paragraph that page falls in.
+
+    Two-pass process:
+      1. resolve_page_target() — mapping-pass render to find which
+         (chapter, paragraph) anchor is on/just before `page_number`.
+      2. Set blank_page_after_paragraphs on that chapter's directives so
+         the NEXT (real) render injects the blank page at the right spot.
+
+    Caveat (important): this targets the PDF output specifically, since
+    PDF page breaks are deterministic for a fixed page size/theme. The
+    DOCX output uses the same chapter/paragraph anchor point, but Word
+    reflows dynamically (zoom, printer, installed fonts), so the blank
+    page may not land on the exact same page number when opened in Word —
+    it will, however, land at the same point in the manuscript.
+    """
+    anchors = resolve_page_target(book, theme_name, generate_toc)
+    if not anchors:
+        raise ValueError(
+            "Could not map any pages — the book may be empty or rendering failed."
+        )
+
+    anchor = _closest_anchor_at_or_before(anchors, page_number)
+    if anchor is None:
+        # Target page is before the first paragraph (e.g. in the cover/
+        # front matter) — fall back to the very first anchor.
+        anchor = min(anchors.items(), key=lambda kv: kv[1])[0]
+
+    chapter_number, paragraph_index = anchor
+    result = copy.deepcopy(book)
+    for ch in result.get("chapters", []):
+        if ch.get("chapter_number") == chapter_number:
+            directives = ch.get("layout_directives") or _default_layout_directives()
+            if not isinstance(directives, dict):
+                directives = _default_layout_directives()
+            existing = set(directives.get("blank_page_after_paragraphs") or [])
+            existing.add(paragraph_index)
+            directives["blank_page_after_paragraphs"] = sorted(existing)
+            ch["layout_directives"] = directives
+            break
+
+    log.info(
+        "Resolved page %d → chapter %d, paragraph %d. Blank page directive set.",
+        page_number, chapter_number, paragraph_index,
+    )
+    return result
+
+
+_PAGE_TARGET_PATTERN = re.compile(
+    r"\bblank\s+page\b[^.!?]{0,40}\bpage\s+(\d+)\b"
+    r"|\bafter\s+page\s+(\d+)\b[^.!?]{0,40}\bblank\s+page\b",
+    re.IGNORECASE,
+)
 
 
 def set_ornaments(
