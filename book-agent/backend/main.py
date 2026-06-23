@@ -526,6 +526,7 @@ def get_status(book_id: int):
         "language": book.language or "English",
         "pdf_url": book.pdf_url,
         "docx_url": book.docx_url,
+        "error_message": book.error_message,
         "created_at": str(book.created_at),
     }
 
@@ -583,6 +584,7 @@ def list_books():
             "title": b.title,
             "status": b.status,
             "pages": b.num_pages,
+            "error_message": b.error_message,
             "created_at": str(b.created_at),
         }
         for b in books
