@@ -410,7 +410,16 @@ def run_book_agent(book_id: int):
             raise
 
     except Exception as e:
-        error_str = str(e).lower()
+        # Walk the exception chain (cause) too, in case any layer wraps the
+        # original OpenAI error without including its text in str(e).
+        parts = []
+        cur = e
+        seen = set()
+        while cur is not None and id(cur) not in seen:
+            seen.add(id(cur))
+            parts.append(str(cur))
+            cur = cur.__cause__
+        error_str = " | ".join(parts).lower()
 
         # Detect OpenAI quota/billing errors and surface a friendly message
         # instead of a raw technical crash. The frontend reads book.status and

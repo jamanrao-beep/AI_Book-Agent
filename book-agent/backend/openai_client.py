@@ -75,6 +75,7 @@ def _language_instruction(title: str, writing_style: str = "") -> str:
 
 def _call(prompt: str, max_tokens: int = 2048, retries: int = 3) -> str:
     """Maintained for legacy compatibility with other pipeline modules."""
+    last_error = None
     for attempt in range(retries):
         try:
             response = client.chat.completions.create(
@@ -87,9 +88,10 @@ def _call(prompt: str, max_tokens: int = 2048, retries: int = 3) -> str:
             # Normalise to NFC so composed forms are used consistently
             return unicodedata.normalize("NFC", text)
         except Exception as e:
+            last_error = e
             print(f"  ⚠️  OpenAI attempt {attempt+1}/{retries} failed: {e}")
             time.sleep(3 * (attempt + 1))
-    raise Exception("OpenAI API failed after all retries")
+    raise Exception(f"OpenAI API failed after all retries: {last_error}") from last_error
 
 
 # ── Outline generation ────────────────────────────────────────────────────────
@@ -143,6 +145,7 @@ You MUST respond strictly with valid JSON in this exact format, with no markdown
   ]
 }}
 """
+    last_error = None
     for attempt in range(3):
         try:
             response = client.chat.completions.create(
@@ -158,10 +161,13 @@ You MUST respond strictly with valid JSON in this exact format, with no markdown
             raw = response.choices[0].message.content.strip()
             return json.loads(raw)
         except Exception as e:
+            last_error = e
             print(f"  ⚠️  Outline batch generation attempt {attempt+1} failed: {e}")
             time.sleep(3 * (attempt + 1))
-            
-    raise Exception(f"Failed to generate structured JSON outline for chapters {start}-{end}")
+
+    raise Exception(
+        f"Failed to generate structured JSON outline for chapters {start}-{end}: {last_error}"
+    ) from last_error
 
 
 # ── Section generation ────────────────────────────────────────────────────────
@@ -234,6 +240,7 @@ Write only the prose content:"""
 
     max_toks = max(2048, int(word_count * 1.5) + 200)
 
+    last_error = None
     for attempt in range(3):
         try:
             response = client.chat.completions.create(
@@ -252,7 +259,8 @@ Write only the prose content:"""
             text = response.choices[0].message.content.strip()
             return unicodedata.normalize("NFC", text)
         except Exception as e:
+            last_error = e
             print(f"  ⚠️  Section generation attempt {attempt+1} failed: {e}")
             time.sleep(3 * (attempt + 1))
 
-    raise Exception("Failed to generate section after all retries")
+    raise Exception(f"Failed to generate section after all retries: {last_error}") from last_error
