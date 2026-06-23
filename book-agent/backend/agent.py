@@ -418,8 +418,8 @@ def run_book_agent(book_id: int):
         if "insufficient_quota" in error_str or "exceeded your current quota" in error_str or "billing" in error_str:
             book.status        = "failed"
             book.error_message = (
-                "Oops! It looks like the AI service ran out of credits. "
-                "Please try again later or contact support if this keeps happening."
+                "We're sorry — the AI service has temporarily run out of available credits. "
+                "Please try again later, or contact support if the issue persists."
             )
         elif "429" in error_str or "rate limit" in error_str or "too many requests" in error_str:
             book.status        = "failed"
