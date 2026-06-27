@@ -277,7 +277,7 @@ export default function DashboardHome() {
           </h2>
           <p
             style={{
-              color: "#94a3b8",
+              color: "#555555",
               fontSize: "13px",
               lineHeight: "1.6",
               marginBottom: "20px",
@@ -353,13 +353,13 @@ export default function DashboardHome() {
         minHeight: "100vh",
         background: "#0c0f1a",
         fontFamily: "'DM Sans', sans-serif",
-        color: "#e2e8f0",
+        color: "#555555",
       }}
     >
       {/* Nav */}
       <nav
         style={{
-          borderBottom: "1px solid rgba(255,255,255,0.07)",
+          borderBottom: "1px solid rgba(0,0,0,0.08)",
           padding: "0 40px",
           height: "60px",
           display: "flex",
@@ -397,7 +397,7 @@ export default function DashboardHome() {
           </span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: "20px" }}>
-          <span style={{ fontSize: "13px", color: "#64748b" }}>
+          <span style={{ fontSize: "13px", color: "#555555" }}>
             {user?.email}
           </span>
           <button
@@ -407,23 +407,23 @@ export default function DashboardHome() {
               alignItems: "center",
               gap: "6px",
               background: "none",
-              border: "1px solid rgba(255,255,255,0.1)",
+              border: "1px solid rgba(0,0,0,0.08)",
               borderRadius: "8px",
               padding: "6px 14px",
-              color: "#94a3b8",
+              color: "#555555",
               fontSize: "13px",
               cursor: "pointer",
               transition: "all 0.2s",
             }}
             onMouseOver={(e) => {
-              (e.currentTarget as HTMLButtonElement).style.color = "#e2e8f0";
+              (e.currentTarget as HTMLButtonElement).style.color = "#555555";
               (e.currentTarget as HTMLButtonElement).style.borderColor =
-                "rgba(255,255,255,0.2)";
+                "rgba(0,0,0,0.15)";
             }}
             onMouseOut={(e) => {
-              (e.currentTarget as HTMLButtonElement).style.color = "#94a3b8";
+              (e.currentTarget as HTMLButtonElement).style.color = "#555555";
               (e.currentTarget as HTMLButtonElement).style.borderColor =
-                "rgba(255,255,255,0.1)";
+                "rgba(0,0,0,0.08)";
             }}
           >
             <LogOut size={14} /> Sign out
@@ -466,7 +466,7 @@ export default function DashboardHome() {
           >
             Welcome back, {firstName}.
           </h1>
-          <p style={{ color: "#64748b", fontSize: "16px", lineHeight: "1.6" }}>
+          <p style={{ color: "#555555", fontSize: "16px", lineHeight: "1.6" }}>
             What would you like to work on today?
           </p>
         </div>
@@ -518,8 +518,8 @@ export default function DashboardHome() {
           style={{
             marginTop: "20px",
             padding: "18px 24px",
-            background: "rgba(255,255,255,0.03)",
-            border: "1px solid rgba(255,255,255,0.06)",
+            background: "rgba(0,0,0,0.03)",
+            border: "1px solid rgba(0,0,0,0.06)",
             borderRadius: "12px",
             display: "flex",
             gap: "40px",
@@ -528,7 +528,7 @@ export default function DashboardHome() {
         >
           <div style={{ fontSize: "12px", color: "#475569" }}>
             Signed in as{" "}
-            <span style={{ color: "#94a3b8", fontWeight: "600" }}>
+            <span style={{ color: "#555555", fontWeight: "600" }}>
               {user?.email}
             </span>
           </div>

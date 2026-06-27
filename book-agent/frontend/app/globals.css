@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM Sans:wght@300;400;500;600;700&family=DM Sans+Mono:wght@400;500&display=swap');
 @import "tailwindcss";
 
 * {
@@ -13,14 +13,14 @@ html {
 
 :root {
   /* Core palette — obsidian luxury */
-  --void: #080A0F;
-  --obsidian: #0D1017;
-  --onyx: #131720;
-  --graphite: #1A2030;
-  --slate: #232B3E;
-  --mist: #8A94A8;
-  --ash: #C4C9D4;
-  --ghost: #E8EAF0;
+  --void: #f7f2e4;
+  --obsidian: #faf8f5;
+  --onyx: #ffffff;
+  --graphite: #f0f4ff;
+  --slate: #555555;
+  --mist: #555555;
+  --ash: #9ca3af;
+  --ghost: #2a2929;
   --ice: #F4F5F8;
 
   /* Accent — electric sapphire */
@@ -36,33 +36,33 @@ html {
   --violet: #9B6DFF;
 
   /* Surfaces */
-  --surface-1: #0D1017;
-  --surface-2: #131720;
-  --surface-3: #1A2030;
-  --surface-hover: rgba(255, 255, 255, 0.04);
+  --surface-1: #faf8f5;
+  --surface-2: #ffffff;
+  --surface-3: #f0f4ff;
+  --surface-hover: rgba(0,0,0, 0.04);
 
   /* Borders */
-  --border-subtle: rgba(255, 255, 255, 0.055);
-  --border-mid: rgba(255, 255, 255, 0.1);
-  --border-strong: rgba(255, 255, 255, 0.18);
+  --border-subtle: rgba(0,0,0, 0.055);
+  --border-mid: rgba(0,0,0, 0.1);
+  --border-strong: rgba(0,0,0, 0.18);
 
   /* Text */
-  --text-primary: #F0F2F8;
-  --text-secondary: #8A94A8;
-  --text-tertiary: #4A5468;
+  --text-primary: #2a2929;
+  --text-secondary: #555555;
+  --text-tertiary: #737373;
 
   /* Legacy compat */
   --cream: #F5F2EC;
   --ink: #1A1612;
   --accent: #3B6FFF;
-  --border: rgba(255, 255, 255, 0.07);
-  --warm-white: #131720;
+  --border: rgba(0,0,0, 0.07);
+  --warm-white: #ffffff;
   --success: #10D98A;
   --danger: #FF4D6A;
 }
 
 body {
-  font-family: 'Geist', 'Helvetica Neue', sans-serif;
+  font-family: 'DM Sans', 'Helvetica Neue', sans-serif;
   background: var(--obsidian);
   color: var(--text-primary);
   min-height: 100vh;
@@ -81,35 +81,35 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(0,0,0, 0.1);
   border-radius: 2px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.2);
+  background: rgba(0,0,0, 0.2);
 }
 
 /* Typography */
 .serif {
-  font-family: 'Instrument Serif', Georgia, serif;
+  font-family: 'Playfair Display', Georgia, serif;
 }
 
 .sans {
-  font-family: 'Geist', sans-serif;
+  font-family: 'DM Sans', sans-serif;
 }
 
 .mono {
-  font-family: 'Geist Mono', 'Courier New', monospace;
+  font-family: 'DM Sans Mono', 'Courier New', monospace;
 }
 
 /* ─── Buttons ─────────────────────────────────────── */
-.btn-primary {
+.btn-dark {
   background: var(--sapphire);
   color: #fff;
   border: none;
   border-radius: 8px;
   padding: 11px 22px;
-  font-family: 'Geist', sans-serif;
+  font-family: 'DM Sans', sans-serif;
   font-size: 13px;
   font-weight: 600;
   letter-spacing: 0.01em;
@@ -122,21 +122,21 @@ body {
   overflow: hidden;
 }
 
-.btn-primary::before {
+.btn-dark::before {
   content: '';
   position: absolute;
   inset: 0;
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, transparent 60%);
+  background: linear-gradient(135deg, rgba(0,0,0, 0.1) 0%, transparent 60%);
   pointer-events: none;
 }
 
-.btn-primary:hover {
+.btn-dark:hover {
   background: #4B7FFF;
   box-shadow: 0 0 0 1px rgba(59, 111, 255, 0.5), 0 8px 24px rgba(59, 111, 255, 0.3);
   transform: translateY(-1px);
 }
 
-.btn-primary:active {
+.btn-dark:active {
   transform: translateY(0);
 }
 
@@ -146,7 +146,7 @@ body {
   border: none;
   border-radius: 8px;
   padding: 11px 22px;
-  font-family: 'Geist', sans-serif;
+  font-family: 'DM Sans', sans-serif;
   font-size: 13px;
   font-weight: 700;
   cursor: pointer;
@@ -168,7 +168,7 @@ body {
   border: 1px solid var(--border-subtle);
   border-radius: 8px;
   padding: 10px 20px;
-  font-family: 'Geist', sans-serif;
+  font-family: 'DM Sans', sans-serif;
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
@@ -190,7 +190,7 @@ body {
   border: 1px solid var(--border-mid);
   border-radius: 8px;
   padding: 11px 22px;
-  font-family: 'Geist', sans-serif;
+  font-family: 'DM Sans', sans-serif;
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
@@ -212,7 +212,7 @@ body {
   border: 1px solid var(--border-subtle);
   border-radius: 8px;
   padding: 12px 14px;
-  font-family: 'Geist', sans-serif;
+  font-family: 'DM Sans', sans-serif;
   font-size: 14px;
   color: var(--text-primary);
   outline: none;
@@ -232,7 +232,7 @@ body {
 
 /* ─── Field label ──────────────────────────────────── */
 .field-label {
-  font-family: 'Geist', sans-serif;
+  font-family: 'DM Sans', sans-serif;
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.07em;
@@ -282,7 +282,7 @@ body {
   padding: 9px 16px;
   margin: 1px 8px;
   border-radius: 7px;
-  font-family: 'Geist', sans-serif;
+  font-family: 'DM Sans', sans-serif;
   font-size: 13px;
   font-weight: 500;
   color: var(--text-tertiary);
@@ -308,7 +308,7 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  font-family: 'Geist', sans-serif;
+  font-family: 'DM Sans', sans-serif;
   font-size: 11px;
   font-weight: 600;
   padding: 3px 9px;
@@ -329,9 +329,9 @@ body {
 }
 
 .badge-pending {
-  background: rgba(255, 255, 255, 0.05);
-  color: #8A94A8;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0,0,0, 0.05);
+  color: #555555;
+  border: 1px solid rgba(0,0,0, 0.08);
 }
 
 .badge-failed {
@@ -478,7 +478,7 @@ input[type="range"]::-webkit-slider-thumb:hover {
 
 /* ─── Glass panels ─────────────────────────────────── */
 .glass {
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(0,0,0, 0.03);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border: 1px solid var(--border-subtle);

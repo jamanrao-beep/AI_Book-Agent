@@ -51,14 +51,14 @@ function LoginContent() {
   const IS = mode === "signup";
 
   return (
-    <div style={{ minHeight: "100vh", display: "flex", fontFamily: "'Geist', sans-serif", background: "#080A0F" }}>
+    <div style={{ minHeight: "100vh", display: "flex", fontFamily: "'DM Sans', sans-serif", background: "#f7f2e4" }}>
 
       {/* ── LEFT panel ─────────────────────────────────── */}
       <div style={{
         flex: "0 0 52%", position: "relative", overflow: "hidden",
-        background: "#0D1017",
+        background: "#faf8f5",
         display: "flex", flexDirection: "column",
-        borderRight: "1px solid rgba(255,255,255,0.055)",
+        borderRight: "1px solid rgba(0,0,0,0.06)",
       }}>
         {/* Glow effects */}
         <div style={{
@@ -69,18 +69,18 @@ function LoginContent() {
         {/* Subtle grid lines */}
         <div style={{
           position: "absolute", inset: 0, opacity: 0.4, pointerEvents: "none",
-          backgroundImage: "linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px)",
+          backgroundImage: "linear-gradient(rgba(0,0,0,0.02) 1px, transparent 1px), linear-gradient(90deg, rgba(0,0,0,0.02) 1px, transparent 1px)",
           backgroundSize: "60px 60px",
         }} />
 
         {/* Decorative book icon */}
         <div style={{ position: "absolute", top: "40px", right: "40px", opacity: 0.07, pointerEvents: "none" }}>
           <svg width="220" height="180" viewBox="0 0 100 80" fill="none">
-            <path d="M50 8 L50 75" stroke="#F0F2F8" strokeWidth="1.5" />
-            <path d="M50 8 C35 6 15 12 5 18 L5 72 C15 66 35 70 50 72" stroke="#F0F2F8" strokeWidth="1.5" fill="none" />
-            <path d="M50 8 C65 6 85 12 95 18 L95 72 C85 66 65 70 50 72" stroke="#F0F2F8" strokeWidth="1.5" fill="none" />
-            <path d="M15 25 L45 22 M15 33 L45 30 M15 41 L45 38 M15 49 L45 46" stroke="#F0F2F8" strokeWidth="0.8" opacity="0.6" />
-            <path d="M55 22 L85 25 M55 30 L85 33 M55 38 L85 41 M55 46 L85 49" stroke="#F0F2F8" strokeWidth="0.8" opacity="0.6" />
+            <path d="M50 8 L50 75" stroke="#2a2929" strokeWidth="1.5" />
+            <path d="M50 8 C35 6 15 12 5 18 L5 72 C15 66 35 70 50 72" stroke="#2a2929" strokeWidth="1.5" fill="none" />
+            <path d="M50 8 C65 6 85 12 95 18 L95 72 C85 66 65 70 50 72" stroke="#2a2929" strokeWidth="1.5" fill="none" />
+            <path d="M15 25 L45 22 M15 33 L45 30 M15 41 L45 38 M15 49 L45 46" stroke="#2a2929" strokeWidth="0.8" opacity="0.6" />
+            <path d="M55 22 L85 25 M55 30 L85 33 M55 38 L85 41 M55 46 L85 49" stroke="#2a2929" strokeWidth="0.8" opacity="0.6" />
           </svg>
         </div>
 
@@ -96,7 +96,7 @@ function LoginContent() {
             }}>
               <FileText size={14} color="white" />
             </div>
-            <span style={{ color: "#F0F2F8", fontFamily: "'Geist', sans-serif", fontSize: "15px", fontWeight: "700", letterSpacing: "-0.01em" }}>
+            <span style={{ color: "#2a2929", fontFamily: "'DM Sans', sans-serif", fontSize: "15px", fontWeight: "700", letterSpacing: "-0.01em" }}>
               Publixo AI
             </span>
           </div>
@@ -106,18 +106,18 @@ function LoginContent() {
         <div style={{ position: "relative", zIndex: 3, padding: "44px", marginTop: "auto" }}>
           <div style={{ width: "32px", height: "2px", background: "rgba(59,111,255,0.5)", marginBottom: "24px" }} />
           <blockquote style={{
-            fontFamily: "'Instrument Serif', Georgia, serif",
+            fontFamily: "'Playfair Display', Georgia, serif",
             fontSize: "clamp(26px, 3vw, 38px)",
             fontStyle: "italic",
             fontWeight: "400",
-            color: "#F0F2F8",
+            color: "#2a2929",
             lineHeight: "1.2",
             marginBottom: "20px",
             maxWidth: "400px",
           }}>
             &ldquo;Words are the threads of reality.&rdquo;
           </blockquote>
-          <div style={{ fontSize: "11px", fontWeight: "600", letterSpacing: "0.1em", color: "#4A5468", textTransform: "uppercase" }}>
+          <div style={{ fontSize: "11px", fontWeight: "600", letterSpacing: "0.1em", color: "#737373", textTransform: "uppercase" }}>
             Enterprise Editorial Suite
           </div>
 
@@ -125,7 +125,7 @@ function LoginContent() {
           <div style={{ marginTop: "40px", display: "flex", gap: "20px" }}>
             {["256-bit encryption", "SOC 2 compliant", "99.9% uptime"].map(item => (
               <div key={item} style={{
-                fontSize: "11px", color: "#4A5468",
+                fontSize: "11px", color: "#737373",
                 display: "flex", alignItems: "center", gap: "5px",
               }}>
                 <div style={{ width: "4px", height: "4px", borderRadius: "50%", background: "#3B6FFF" }} />
@@ -149,14 +149,14 @@ function LoginContent() {
             // ── Signup ─────────────────────────────────
             <>
               <h1 style={{
-                fontFamily: "'Instrument Serif', serif",
+                fontFamily: "'Playfair Display', serif",
                 fontSize: "38px", fontWeight: "400",
-                color: "#F0F2F8", letterSpacing: "-0.02em",
+                color: "#2a2929", letterSpacing: "-0.02em",
                 lineHeight: "1.1", marginBottom: "8px",
               }}>
                 Create your<br />workspace
               </h1>
-              <p style={{ color: "#8A94A8", fontSize: "14px", marginBottom: "32px" }}>
+              <p style={{ color: "#555555", fontSize: "14px", marginBottom: "32px" }}>
                 Begin your editorial journey today.
               </p>
 
@@ -187,14 +187,14 @@ function LoginContent() {
                       required placeholder="••••••••" className="input-field" style={{ paddingRight: "44px" }} />
                     <button type="button" onClick={() => setShowPass(!showPass)} style={{
                       position: "absolute", right: "14px", top: "50%", transform: "translateY(-50%)",
-                      background: "none", border: "none", cursor: "pointer", color: "#4A5468",
+                      background: "none", border: "none", cursor: "pointer", color: "#737373",
                       display: "flex", padding: 0,
                     }}>
                       {showPass ? <EyeOff size={15} /> : <Eye size={15} />}
                     </button>
                   </div>
                 </div>
-                <button type="submit" disabled={loading} className="btn-primary" style={{
+                <button type="submit" disabled={loading} className="btn-dark" style={{
                   width: "100%", padding: "13px 24px", fontSize: "14px",
                   justifyContent: "center", marginTop: "4px",
                   opacity: loading ? 0.6 : 1, cursor: loading ? "not-allowed" : "pointer",
@@ -203,7 +203,7 @@ function LoginContent() {
                 </button>
               </form>
 
-              <p style={{ marginTop: "20px", fontSize: "13px", color: "#8A94A8" }}>
+              <p style={{ marginTop: "20px", fontSize: "13px", color: "#555555" }}>
                 Already have an account?{" "}
                 <button onClick={() => { setMode("login"); setError(""); }} style={{
                   background: "none", border: "none", color: "#6B93FF",
@@ -211,13 +211,13 @@ function LoginContent() {
                 }}>Sign In</button>
               </p>
               <p style={{
-                marginTop: "20px", fontSize: "11px", color: "#4A5468", lineHeight: "1.6",
-                borderTop: "1px solid rgba(255,255,255,0.055)", paddingTop: "16px",
+                marginTop: "20px", fontSize: "11px", color: "#737373", lineHeight: "1.6",
+                borderTop: "1px solid rgba(0,0,0,0.06)", paddingTop: "16px",
               }}>
                 By creating an account you agree to our{" "}
-                <span style={{ color: "#8A94A8", textDecoration: "underline", cursor: "pointer" }}>Terms</span>{" "}
+                <span style={{ color: "#555555", textDecoration: "underline", cursor: "pointer" }}>Terms</span>{" "}
                 and{" "}
-                <span style={{ color: "#8A94A8", textDecoration: "underline", cursor: "pointer" }}>Privacy Policy</span>.
+                <span style={{ color: "#555555", textDecoration: "underline", cursor: "pointer" }}>Privacy Policy</span>.
               </p>
             </>
           ) : (
@@ -232,18 +232,18 @@ function LoginContent() {
                 }}>
                   <FileText size={13} color="white" />
                 </div>
-                <span style={{ fontSize: "14px", fontWeight: "700", color: "#F0F2F8" }}>Publixo AI</span>
+                <span style={{ fontSize: "14px", fontWeight: "700", color: "#2a2929" }}>Publixo AI</span>
               </div>
 
               <h1 style={{
-                fontFamily: "'Instrument Serif', serif",
+                fontFamily: "'Playfair Display', serif",
                 fontSize: "42px", fontWeight: "400",
-                color: "#F0F2F8", letterSpacing: "-0.025em",
+                color: "#2a2929", letterSpacing: "-0.025em",
                 lineHeight: "1.1", marginBottom: "8px",
               }}>
                 Welcome back
               </h1>
-              <p style={{ color: "#8A94A8", fontSize: "14px", marginBottom: "32px" }}>
+              <p style={{ color: "#555555", fontSize: "14px", marginBottom: "32px" }}>
                 Access your manuscripts and AI suite.
               </p>
 
@@ -275,7 +275,7 @@ function LoginContent() {
                       required placeholder="••••••••" className="input-field" style={{ paddingRight: "44px" }} />
                     <button type="button" onClick={() => setShowPass(!showPass)} style={{
                       position: "absolute", right: "14px", top: "50%", transform: "translateY(-50%)",
-                      background: "none", border: "none", cursor: "pointer", color: "#4A5468",
+                      background: "none", border: "none", cursor: "pointer", color: "#737373",
                       display: "flex", padding: 0,
                     }}>
                       {showPass ? <EyeOff size={15} /> : <Eye size={15} />}
@@ -286,10 +286,10 @@ function LoginContent() {
                 <label style={{ display: "flex", alignItems: "center", gap: "9px", cursor: "pointer" }}>
                   <input type="checkbox" checked={staySignedIn} onChange={e => setStaySignedIn(e.target.checked)}
                     style={{ width: "14px", height: "14px", accentColor: "#3B6FFF", cursor: "pointer" }} />
-                  <span style={{ fontSize: "13px", color: "#8A94A8" }}>Stay signed in</span>
+                  <span style={{ fontSize: "13px", color: "#555555" }}>Stay signed in</span>
                 </label>
 
-                <button type="submit" disabled={loading} className="btn-primary" style={{
+                <button type="submit" disabled={loading} className="btn-dark" style={{
                   width: "100%", padding: "13px 24px", fontSize: "14px",
                   justifyContent: "center",
                   opacity: loading ? 0.6 : 1, cursor: loading ? "not-allowed" : "pointer",
@@ -300,11 +300,11 @@ function LoginContent() {
 
               {/* SSO divider */}
               <div style={{ display: "flex", alignItems: "center", gap: "12px", margin: "20px 0" }}>
-                <div style={{ flex: 1, height: "1px", background: "rgba(255,255,255,0.055)" }} />
-                <span style={{ fontSize: "11px", fontWeight: "600", letterSpacing: "0.08em", color: "#4A5468", textTransform: "uppercase", whiteSpace: "nowrap" }}>
+                <div style={{ flex: 1, height: "1px", background: "rgba(0,0,0,0.06)" }} />
+                <span style={{ fontSize: "11px", fontWeight: "600", letterSpacing: "0.08em", color: "#737373", textTransform: "uppercase", whiteSpace: "nowrap" }}>
                   Or continue with
                 </span>
-                <div style={{ flex: 1, height: "1px", background: "rgba(255,255,255,0.055)" }} />
+                <div style={{ flex: 1, height: "1px", background: "rgba(0,0,0,0.06)" }} />
               </div>
 
               <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: "10px" }}>
@@ -322,7 +322,7 @@ function LoginContent() {
                 </button>
               </div>
 
-              <p style={{ marginTop: "20px", fontSize: "13px", color: "#8A94A8" }}>
+              <p style={{ marginTop: "20px", fontSize: "13px", color: "#555555" }}>
                 New to Publixo AI?{" "}
                 <button onClick={() => { setMode("signup"); setError(""); }} style={{
                   background: "none", border: "none", color: "#6B93FF",
@@ -340,7 +340,7 @@ function LoginContent() {
 export default function LoginPage() {
   return (
     <Suspense fallback={
-      <div style={{ minHeight: "100vh", background: "#080A0F", display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ minHeight: "100vh", background: "#f7f2e4", display: "flex", alignItems: "center", justifyContent: "center" }}>
         <div style={{ width: "20px", height: "20px", border: "2px solid rgba(59,111,255,0.2)", borderTopColor: "#3B6FFF", borderRadius: "50%", animation: "spin 1s linear infinite" }} />
       </div>
     }>

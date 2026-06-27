@@ -70,7 +70,7 @@ const THEME_META: Record<string, { label: string; color: string; desc: string; i
     fantasy: { label: "Fantasy", color: "#ab47bc", desc: "Ornate display font, jewel tones", icon: "⟡" },
     minimalist: { label: "Minimal", color: "#90a4ae", desc: "Ultra-clean black on white", icon: "○" },
     retro: { label: "Vintage", color: "#a1887f", desc: "Sepia tones, old-book warmth", icon: "⊛" },
-    normal: { label: "Normal", color: "#94a3b8", desc: "Clean default layout", icon: "□" },
+    normal: { label: "Normal", color: "#555555", desc: "Clean default layout", icon: "□" },
     vibrant: { label: "Vibrant", color: "#F59E0B", desc: "Bold colors, high energy", icon: "★" },
     vintage: { label: "Vintage", color: "#a1887f", desc: "Sepia tones, old-book warmth", icon: "⊛" },
 };
@@ -204,7 +204,7 @@ export default function BookEditorPage() {
                 },
             ]);
         } catch (e: unknown) {
-            setUploadError(e instanceof Error ? e.message : "Upload failed");
+            setUploadError(parseFriendlyError(e));
         } finally {
             setUploading(false);
         }
@@ -307,11 +307,11 @@ export default function BookEditorPage() {
             );
         } catch (e: unknown) {
             setMessages((prev) => prev.filter((m) => m.content !== typingId));
-            setChatError(e instanceof Error ? e.message : "Something went wrong");
+            setChatError(parseFriendlyError(e));
             setUploadError(
                 e instanceof TypeError && e.message.includes("fetch")
                     ? `Cannot connect to server at ${API_BASE}. Is the backend running?`
-                    : e instanceof Error ? e.message : "Upload failed"
+                    : parseFriendlyError(e)
             );
         } finally {
             setSending(false);
@@ -363,7 +363,7 @@ export default function BookEditorPage() {
         return (
             <div style={{
                 minHeight: "100vh", background: "#0c0f1a",
-                fontFamily: "'DM Sans', sans-serif", color: "#e2e8f0",
+                fontFamily: "'DM Sans', sans-serif", color: "#555555",
                 display: "flex", flexDirection: "column",
             }}>
                 <style>{`
@@ -374,12 +374,12 @@ export default function BookEditorPage() {
           .upload-zone:hover { border-color: #f472b688 !important; background: rgba(244,114,182,0.06) !important; }
           .theme-opt:hover { border-color: var(--tc) !important; background: var(--tbg) !important; }
           .upload-btn:hover { opacity: 0.88; transform: translateY(-1px); }
-          .back-btn:hover { color: #e2e8f0 !important; }
+          .back-btn:hover { color: #555555 !important; }
         `}</style>
 
                 {/* Nav */}
                 <nav style={{
-                    borderBottom: "1px solid rgba(255,255,255,0.07)", padding: "0 40px",
+                    borderBottom: "1px solid rgba(0,0,0,0.08)", padding: "0 40px",
                     height: "60px", display: "flex", alignItems: "center",
                     background: "rgba(12,15,26,0.95)", backdropFilter: "blur(12px)",
                     position: "sticky", top: 0, zIndex: 50,
@@ -389,7 +389,7 @@ export default function BookEditorPage() {
                         onClick={() => router.push("/dashboard")}
                         style={{
                             display: "flex", alignItems: "center", gap: "8px",
-                            background: "none", border: "none", color: "#64748b",
+                            background: "none", border: "none", color: "#555555",
                             fontSize: "13px", cursor: "pointer", padding: 0, transition: "color 0.2s",
                         }}
                     >
@@ -429,7 +429,7 @@ export default function BookEditorPage() {
                             }}>
                                 AI Book Editor
                             </h1>
-                            <p style={{ color: "#64748b", fontSize: "15px", lineHeight: "1.6" }}>
+                            <p style={{ color: "#555555", fontSize: "15px", lineHeight: "1.6" }}>
                                 Upload your book and have a conversation to edit it — chapter by chapter, theme by theme.
                             </p>
                         </div>
@@ -442,9 +442,9 @@ export default function BookEditorPage() {
                             onDrop={handleDrop}
                             onClick={() => fileInputRef.current?.click()}
                             style={{
-                                border: `2px dashed ${dragOver ? "#f472b6" : file ? "rgba(244,114,182,0.5)" : "rgba(255,255,255,0.12)"}`,
+                                border: `2px dashed ${dragOver ? "#f472b6" : file ? "rgba(244,114,182,0.5)" : "rgba(0,0,0,0.12)"}`,
                                 borderRadius: "16px", padding: "40px 24px",
-                                background: file ? "rgba(244,114,182,0.04)" : dragOver ? "rgba(244,114,182,0.06)" : "rgba(255,255,255,0.02)",
+                                background: file ? "rgba(244,114,182,0.04)" : dragOver ? "rgba(244,114,182,0.06)" : "rgba(0,0,0,0.02)",
                                 cursor: "pointer", textAlign: "center",
                                 transition: "all 0.2s", marginBottom: "24px",
                             }}
@@ -464,10 +464,10 @@ export default function BookEditorPage() {
                                     }}>
                                         <FileText size={22} color="#f472b6" />
                                     </div>
-                                    <p style={{ fontWeight: "600", fontSize: "15px", marginBottom: "4px", color: "#e2e8f0" }}>
+                                    <p style={{ fontWeight: "600", fontSize: "15px", marginBottom: "4px", color: "#555555" }}>
                                         {file.name}
                                     </p>
-                                    <p style={{ color: "#64748b", fontSize: "12px" }}>
+                                    <p style={{ color: "#555555", fontSize: "12px" }}>
                                         {(file.size / 1024 / 1024).toFixed(2)} MB · Click to change
                                     </p>
                                 </div>
@@ -475,15 +475,15 @@ export default function BookEditorPage() {
                                 <div>
                                     <div style={{
                                         width: "48px", height: "48px", margin: "0 auto 16px",
-                                        background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)",
+                                        background: "rgba(0,0,0,0.03)", border: "1px solid rgba(0,0,0,0.08)",
                                         borderRadius: "12px", display: "flex", alignItems: "center", justifyContent: "center",
                                     }}>
-                                        <Upload size={20} color="#64748b" />
+                                        <Upload size={20} color="#555555" />
                                     </div>
                                     <p style={{ fontWeight: "600", fontSize: "15px", marginBottom: "6px" }}>
                                         Drop your book here
                                     </p>
-                                    <p style={{ color: "#64748b", fontSize: "13px" }}>
+                                    <p style={{ color: "#555555", fontSize: "13px" }}>
                                         PDF, DOCX, ZIP, TXT, MD · up to 150 MB
                                     </p>
                                 </div>
@@ -492,7 +492,7 @@ export default function BookEditorPage() {
 
                         {/* Theme picker */}
                         <div style={{ marginBottom: "28px" }}>
-                            <p style={{ fontSize: "12px", fontWeight: "600", color: "#64748b", letterSpacing: "0.08em", marginBottom: "12px" }}>
+                            <p style={{ fontSize: "12px", fontWeight: "600", color: "#555555", letterSpacing: "0.08em", marginBottom: "12px" }}>
                                 STARTING THEME
                             </p>
                             <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "8px" }}>
@@ -504,14 +504,14 @@ export default function BookEditorPage() {
                                         style={{
                                             "--tc": meta.color,
                                             "--tbg": `${meta.color}12`,
-                                            background: selectedTheme === key ? `${meta.color}18` : "rgba(255,255,255,0.03)",
-                                            border: `1px solid ${selectedTheme === key ? meta.color : "rgba(255,255,255,0.08)"}`,
+                                            background: selectedTheme === key ? `${meta.color}18` : "rgba(0,0,0,0.03)",
+                                            border: `1px solid ${selectedTheme === key ? meta.color : "rgba(0,0,0,0.08)"}`,
                                             borderRadius: "10px", padding: "10px 8px",
                                             cursor: "pointer", textAlign: "center", transition: "all 0.15s",
                                         } as React.CSSProperties}
                                     >
                                         <div style={{ fontSize: "16px", marginBottom: "4px" }}>{meta.icon}</div>
-                                        <div style={{ fontSize: "11px", fontWeight: "600", color: selectedTheme === key ? meta.color : "#94a3b8" }}>
+                                        <div style={{ fontSize: "11px", fontWeight: "600", color: selectedTheme === key ? meta.color : "#555555" }}>
                                             {meta.label}
                                         </div>
                                     </button>
@@ -540,7 +540,7 @@ export default function BookEditorPage() {
                             style={{
                                 width: "100%", padding: "14px",
                                 background: !file || uploading ? "rgba(244,114,182,0.3)" : "linear-gradient(135deg, #f472b6, #c026d3)",
-                                border: "none", borderRadius: "12px", color: "white",
+                                border: "none", borderRadius: "12px", color: "#2a2929",
                                 fontSize: "15px", fontWeight: "700", cursor: !file || uploading ? "not-allowed" : "pointer",
                                 display: "flex", alignItems: "center", justifyContent: "center", gap: "10px",
                                 transition: "all 0.2s",
@@ -568,7 +568,7 @@ export default function BookEditorPage() {
         <div style={{
             minHeight: "100vh", height: "100vh", overflow: "hidden",
             background: "#0c0f1a", fontFamily: "'DM Sans', sans-serif",
-            color: "#e2e8f0", display: "flex", flexDirection: "column",
+            color: "#555555", display: "flex", flexDirection: "column",
         }}>
             <style>{`
         @keyframes bounce { 0%,80%,100%{transform:translateY(0)} 40%{transform:translateY(-6px)} }
@@ -581,17 +581,17 @@ export default function BookEditorPage() {
         .dl-btn:hover { opacity: 0.85; transform: translateY(-1px); }
         .suggestion-chip:hover { background: rgba(244,114,182,0.12) !important; border-color: rgba(244,114,182,0.4) !important; color: #f9a8d4 !important; }
         .theme-mini:hover { border-color: var(--tc) !important; }
-        .version-row:hover { background: rgba(255,255,255,0.04) !important; }
-        .panel-close:hover { color: #e2e8f0 !important; }
+        .version-row:hover { background: rgba(0,0,0,0.03) !important; }
+        .panel-close:hover { color: #555555 !important; }
         ::-webkit-scrollbar { width: 4px; }
         ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
-        .chat-scroll { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.1) transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.08); border-radius: 2px; }
+        .chat-scroll { scrollbar-width: thin; scrollbar-color: rgba(0,0,0,0.08) transparent; }
       `}</style>
 
             {/* ── Top Bar ─────────────────────────────────────────────────────────── */}
             <header style={{
-                borderBottom: "1px solid rgba(255,255,255,0.07)",
+                borderBottom: "1px solid rgba(0,0,0,0.08)",
                 padding: "0 24px", height: "58px",
                 display: "flex", alignItems: "center", gap: "16px",
                 background: "rgba(12,15,26,0.97)", backdropFilter: "blur(12px)",
@@ -602,14 +602,14 @@ export default function BookEditorPage() {
                     onClick={resetSession}
                     style={{
                         display: "flex", alignItems: "center", gap: "6px",
-                        background: "none", border: "none", color: "#64748b",
+                        background: "none", border: "none", color: "#555555",
                         fontSize: "12px", cursor: "pointer", padding: 0, flexShrink: 0,
                     }}
                 >
                     <ArrowLeft size={14} /> New Book
                 </button>
 
-                <div style={{ width: "1px", height: "20px", background: "rgba(255,255,255,0.08)" }} />
+                <div style={{ width: "1px", height: "20px", background: "rgba(0,0,0,0.08)" }} />
 
                 <div style={{ display: "flex", alignItems: "center", gap: "10px", flex: 1, minWidth: 0 }}>
                     <div style={{
@@ -628,7 +628,7 @@ export default function BookEditorPage() {
                             {session.title}
                         </p>
                         {session.author && (
-                            <p style={{ fontSize: "11px", color: "#64748b", marginTop: "1px" }}>by {session.author}</p>
+                            <p style={{ fontSize: "11px", color: "#555555", marginTop: "1px" }}>by {session.author}</p>
                         )}
                     </div>
                 </div>
@@ -640,9 +640,9 @@ export default function BookEditorPage() {
                         onClick={() => { setShowChapters(!showChapters); setShowHistory(false); }}
                         style={{
                             display: "flex", alignItems: "center", gap: "5px",
-                            background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)",
+                            background: "rgba(0,0,0,0.03)", border: "1px solid rgba(0,0,0,0.08)",
                             borderRadius: "20px", padding: "3px 10px",
-                            fontSize: "11px", color: "#94a3b8", cursor: "pointer",
+                            fontSize: "11px", color: "#555555", cursor: "pointer",
                         }}
                     >
                         <Layers size={11} /> {session.chapters} chapters
@@ -663,10 +663,10 @@ export default function BookEditorPage() {
                         onClick={() => { setShowHistory(!showHistory); setShowChapters(false); }}
                         style={{
                             display: "flex", alignItems: "center", gap: "6px",
-                            background: showHistory ? "rgba(244,114,182,0.1)" : "rgba(255,255,255,0.04)",
-                            border: `1px solid ${showHistory ? "rgba(244,114,182,0.3)" : "rgba(255,255,255,0.08)"}`,
+                            background: showHistory ? "rgba(244,114,182,0.1)" : "rgba(0,0,0,0.03)",
+                            border: `1px solid ${showHistory ? "rgba(244,114,182,0.3)" : "rgba(0,0,0,0.08)"}`,
                             borderRadius: "8px", padding: "6px 12px",
-                            fontSize: "12px", color: showHistory ? "#f472b6" : "#94a3b8",
+                            fontSize: "12px", color: showHistory ? "#f472b6" : "#555555",
                             cursor: "pointer", transition: "all 0.15s",
                         }}
                     >
@@ -682,15 +682,15 @@ export default function BookEditorPage() {
                 {showChapters && (
                     <aside style={{
                         width: "280px", flexShrink: 0,
-                        borderRight: "1px solid rgba(255,255,255,0.07)",
+                        borderRight: "1px solid rgba(0,0,0,0.08)",
                         background: "#0e1120", display: "flex", flexDirection: "column",
                         animation: "slideIn 0.2s ease", overflow: "hidden",
                     }}>
                         <div style={{
-                            padding: "16px 20px", borderBottom: "1px solid rgba(255,255,255,0.06)",
+                            padding: "16px 20px", borderBottom: "1px solid rgba(0,0,0,0.06)",
                             display: "flex", alignItems: "center", justifyContent: "space-between",
                         }}>
-                            <span style={{ fontSize: "12px", fontWeight: "700", letterSpacing: "0.06em", color: "#64748b" }}>
+                            <span style={{ fontSize: "12px", fontWeight: "700", letterSpacing: "0.06em", color: "#555555" }}>
                                 CHAPTERS
                             </span>
                             <button
@@ -729,7 +729,7 @@ export default function BookEditorPage() {
                                 </div>
                             ))}
                         </div>
-                        <div style={{ padding: "12px", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+                        <div style={{ padding: "12px", borderTop: "1px solid rgba(0,0,0,0.06)" }}>
                             <p style={{ fontSize: "11px", color: "#475569", textAlign: "center" }}>
                                 Click a chapter to start editing it
                             </p>
@@ -783,7 +783,7 @@ export default function BookEditorPage() {
                                             border: "1px solid rgba(244,114,182,0.2)",
                                             borderRadius: "16px 16px 4px 16px",
                                             padding: "12px 18px", maxWidth: "65%",
-                                            fontSize: "14px", lineHeight: "1.6", color: "#e2e8f0",
+                                            fontSize: "14px", lineHeight: "1.6", color: "#555555",
                                         }}>
                                             {msg.content}
                                         </div>
@@ -807,8 +807,8 @@ export default function BookEditorPage() {
                                             {/* Typing indicator */}
                                             {msg.content === "__typing__" ? (
                                                 <div style={{
-                                                    background: "rgba(255,255,255,0.04)",
-                                                    border: "1px solid rgba(255,255,255,0.08)",
+                                                    background: "rgba(0,0,0,0.03)",
+                                                    border: "1px solid rgba(0,0,0,0.08)",
                                                     borderRadius: "4px 16px 16px 16px",
                                                     padding: "14px 18px",
                                                 }}>
@@ -816,8 +816,8 @@ export default function BookEditorPage() {
                                                 </div>
                                             ) : (
                                                 <div style={{
-                                                    background: "rgba(255,255,255,0.04)",
-                                                    border: "1px solid rgba(255,255,255,0.08)",
+                                                    background: "rgba(0,0,0,0.03)",
+                                                    border: "1px solid rgba(0,0,0,0.08)",
                                                     borderRadius: "4px 16px 16px 16px",
                                                     padding: "14px 18px",
                                                     fontSize: "14px", lineHeight: "1.7", color: "#cbd5e1",
@@ -826,7 +826,7 @@ export default function BookEditorPage() {
                                                         <p key={li} style={{ margin: "2px 0" }}
                                                             dangerouslySetInnerHTML={{
                                                                 __html: line
-                                                                    .replace(/\*\*(.+?)\*\*/g, "<strong style='color:#e2e8f0'>$1</strong>")
+                                                                    .replace(/\*\*(.+?)\*\*/g, "<strong style='color:#555555'>$1</strong>")
                                                                     .replace(/\*(.+?)\*/g, "<em>$1</em>"),
                                                             }}
                                                         />
@@ -849,7 +849,7 @@ export default function BookEditorPage() {
                                                         </span>
                                                         <ThemePill theme={msg.version.theme} accent={THEME_META[msg.version.theme]?.color || "#10b981"} />
                                                         {msg.version.chapters_changed.length > 0 && (
-                                                            <span style={{ fontSize: "11px", color: "#64748b" }}>
+                                                            <span style={{ fontSize: "11px", color: "#555555" }}>
                                                                 Ch. {msg.version.chapters_changed.join(", ")} edited
                                                             </span>
                                                         )}
@@ -861,7 +861,7 @@ export default function BookEditorPage() {
                                                             className="dl-btn"
                                                             style={{
                                                                 display: "flex", alignItems: "center", gap: "6px",
-                                                                background: "#10b981", color: "white",
+                                                                background: "#10b981", color: "#2a2929",
                                                                 borderRadius: "8px", padding: "8px 14px",
                                                                 fontSize: "12px", fontWeight: "700",
                                                                 textDecoration: "none", transition: "all 0.2s",
@@ -924,10 +924,10 @@ export default function BookEditorPage() {
                                             className="suggestion-chip"
                                             onClick={() => sendMessage(s)}
                                             style={{
-                                                background: "rgba(255,255,255,0.03)",
-                                                border: "1px solid rgba(255,255,255,0.08)",
+                                                background: "rgba(0,0,0,0.03)",
+                                                border: "1px solid rgba(0,0,0,0.08)",
                                                 borderRadius: "20px", padding: "7px 14px",
-                                                fontSize: "12px", color: "#94a3b8",
+                                                fontSize: "12px", color: "#555555",
                                                 cursor: "pointer", transition: "all 0.15s",
                                             }}
                                         >
@@ -944,13 +944,13 @@ export default function BookEditorPage() {
                     {/* ── Theme quick-switch bar (collapsible) ───────────────────────── */}
                     {showThemePicker && (
                         <div style={{
-                            borderTop: "1px solid rgba(255,255,255,0.06)",
+                            borderTop: "1px solid rgba(0,0,0,0.06)",
                             padding: "14px 32px",
                             background: "#0e1120",
                             display: "flex", alignItems: "center", gap: "10px",
                             flexWrap: "wrap", animation: "fadeUp 0.2s ease",
                         }}>
-                            <span style={{ fontSize: "11px", color: "#64748b", fontWeight: "600", letterSpacing: "0.07em", flexShrink: 0 }}>
+                            <span style={{ fontSize: "11px", color: "#555555", fontWeight: "600", letterSpacing: "0.07em", flexShrink: 0 }}>
                                 SWITCH THEME →
                             </span>
                             {Object.entries(THEME_META).map(([key, meta]) => (
@@ -961,10 +961,10 @@ export default function BookEditorPage() {
                                     style={{
                                         "--tc": meta.color,
                                         display: "flex", alignItems: "center", gap: "5px",
-                                        background: key === currentTheme ? `${meta.color}18` : "rgba(255,255,255,0.03)",
-                                        border: `1px solid ${key === currentTheme ? meta.color : "rgba(255,255,255,0.08)"}`,
+                                        background: key === currentTheme ? `${meta.color}18` : "rgba(0,0,0,0.03)",
+                                        border: `1px solid ${key === currentTheme ? meta.color : "rgba(0,0,0,0.08)"}`,
                                         borderRadius: "20px", padding: "5px 12px",
-                                        fontSize: "12px", color: key === currentTheme ? meta.color : "#94a3b8",
+                                        fontSize: "12px", color: key === currentTheme ? meta.color : "#555555",
                                         cursor: "pointer", transition: "all 0.15s",
                                     } as React.CSSProperties}
                                 >
@@ -982,7 +982,7 @@ export default function BookEditorPage() {
 
                     {/* ── Input bar ───────────────────────────────────────────────────── */}
                     <div style={{
-                        borderTop: "1px solid rgba(255,255,255,0.07)",
+                        borderTop: "1px solid rgba(0,0,0,0.08)",
                         padding: "16px 24px",
                         background: "rgba(12,15,26,0.98)",
                         flexShrink: 0,
@@ -992,13 +992,13 @@ export default function BookEditorPage() {
                             <div style={{
                                 display: "flex", alignItems: "center", gap: "10px",
                                 marginBottom: "12px", padding: "8px 12px",
-                                background: "rgba(255,255,255,0.02)",
-                                border: "1px solid rgba(255,255,255,0.06)",
+                                background: "rgba(0,0,0,0.02)",
+                                border: "1px solid rgba(0,0,0,0.06)",
                                 borderRadius: "10px",
                             }}>
-                                <Clock size={12} color="#64748b" />
-                                <span style={{ fontSize: "12px", color: "#64748b", flex: 1 }}>
-                                    Latest: <strong style={{ color: "#94a3b8" }}>v{latestVersion.turn}</strong> — {latestVersion.edit_summary.slice(0, 70)}{latestVersion.edit_summary.length > 70 ? "…" : ""}
+                                <Clock size={12} color="#555555" />
+                                <span style={{ fontSize: "12px", color: "#555555", flex: 1 }}>
+                                    Latest: <strong style={{ color: "#555555" }}>v{latestVersion.turn}</strong> — {latestVersion.edit_summary.slice(0, 70)}{latestVersion.edit_summary.length > 70 ? "…" : ""}
                                 </span>
                                 <a href={latestVersion.pdf_url} download style={{ display: "flex", alignItems: "center", gap: "4px", fontSize: "11px", color: "#10b981", textDecoration: "none", fontWeight: "600" }}>
                                     <Download size={11} /> PDF
@@ -1018,11 +1018,11 @@ export default function BookEditorPage() {
                                 title="Switch theme"
                                 style={{
                                     width: "40px", height: "40px", flexShrink: 0,
-                                    background: showThemePicker ? "rgba(244,114,182,0.15)" : "rgba(255,255,255,0.04)",
-                                    border: `1px solid ${showThemePicker ? "rgba(244,114,182,0.3)" : "rgba(255,255,255,0.08)"}`,
+                                    background: showThemePicker ? "rgba(244,114,182,0.15)" : "rgba(0,0,0,0.03)",
+                                    border: `1px solid ${showThemePicker ? "rgba(244,114,182,0.3)" : "rgba(0,0,0,0.08)"}`,
                                     borderRadius: "10px", cursor: "pointer",
                                     display: "flex", alignItems: "center", justifyContent: "center",
-                                    color: showThemePicker ? "#f472b6" : "#64748b",
+                                    color: showThemePicker ? "#f472b6" : "#555555",
                                     transition: "all 0.15s",
                                 }}
                             >
@@ -1032,13 +1032,13 @@ export default function BookEditorPage() {
                             {/* Textarea */}
                             <div style={{
                                 flex: 1, display: "flex", alignItems: "flex-end",
-                                background: "rgba(255,255,255,0.04)",
-                                border: "1px solid rgba(255,255,255,0.1)",
+                                background: "rgba(0,0,0,0.03)",
+                                border: "1px solid rgba(0,0,0,0.08)",
                                 borderRadius: "12px", padding: "10px 14px",
                                 transition: "border-color 0.15s",
                             }}
                                 onFocus={(e) => (e.currentTarget.style.borderColor = "rgba(244,114,182,0.4)")}
-                                onBlur={(e) => (e.currentTarget.style.borderColor = "rgba(255,255,255,0.1)")}
+                                onBlur={(e) => (e.currentTarget.style.borderColor = "rgba(0,0,0,0.08)")}
                             >
                                 <textarea
                                     ref={textareaRef}
@@ -1050,7 +1050,7 @@ export default function BookEditorPage() {
                                     rows={1}
                                     style={{
                                         flex: 1, background: "none", border: "none", outline: "none",
-                                        color: "#e2e8f0", fontSize: "14px", lineHeight: "1.5",
+                                        color: "#555555", fontSize: "14px", lineHeight: "1.5",
                                         resize: "none", fontFamily: "inherit",
                                         maxHeight: "160px", overflow: "auto",
                                         width: "100%",
@@ -1070,7 +1070,7 @@ export default function BookEditorPage() {
                                         : "linear-gradient(135deg, #f472b6, #c026d3)",
                                     border: "none", borderRadius: "10px", cursor: !input.trim() || sending ? "not-allowed" : "pointer",
                                     display: "flex", alignItems: "center", justifyContent: "center",
-                                    color: "white", transition: "all 0.15s",
+                                    color: "#2a2929", transition: "all 0.15s",
                                 }}
                             >
                                 {sending
@@ -1079,7 +1079,7 @@ export default function BookEditorPage() {
                             </button>
                         </div>
 
-                        <p style={{ fontSize: "11px", color: "#334155", marginTop: "8px", textAlign: "center" }}>
+                        <p style={{ fontSize: "11px", color: "#737373", marginTop: "8px", textAlign: "center" }}>
                             Enter to send · Shift+Enter for new line · Click <Palette size={10} style={{ display: "inline", verticalAlign: "middle" }} /> to change theme
                         </p>
                     </div>
@@ -1089,19 +1089,19 @@ export default function BookEditorPage() {
                 {showHistory && (
                     <aside style={{
                         width: "300px", flexShrink: 0,
-                        borderLeft: "1px solid rgba(255,255,255,0.07)",
+                        borderLeft: "1px solid rgba(0,0,0,0.08)",
                         background: "#0e1120",
                         display: "flex", flexDirection: "column",
                         animation: "slideIn 0.2s ease",
                     }}>
                         <div style={{
                             padding: "16px 20px",
-                            borderBottom: "1px solid rgba(255,255,255,0.06)",
+                            borderBottom: "1px solid rgba(0,0,0,0.06)",
                             display: "flex", alignItems: "center", justifyContent: "space-between",
                         }}>
                             <div style={{ display: "flex", alignItems: "center", gap: "7px" }}>
                                 <History size={13} color="#f472b6" />
-                                <span style={{ fontSize: "12px", fontWeight: "700", letterSpacing: "0.06em", color: "#64748b" }}>
+                                <span style={{ fontSize: "12px", fontWeight: "700", letterSpacing: "0.06em", color: "#555555" }}>
                                     VERSION HISTORY
                                 </span>
                             </div>
@@ -1117,7 +1117,7 @@ export default function BookEditorPage() {
                         <div className="chat-scroll" style={{ flex: 1, overflowY: "auto", padding: "12px" }}>
                             {versions.length === 0 ? (
                                 <div style={{ padding: "32px 16px", textAlign: "center" }}>
-                                    <BookMarked size={28} color="#334155" style={{ margin: "0 auto 12px" }} />
+                                    <BookMarked size={28} color="#737373" style={{ margin: "0 auto 12px" }} />
                                     <p style={{ fontSize: "13px", color: "#475569", lineHeight: "1.5" }}>
                                         No versions yet. Send your first edit instruction to get started.
                                     </p>
@@ -1129,7 +1129,7 @@ export default function BookEditorPage() {
                                         className="version-row"
                                         style={{
                                             padding: "14px", borderRadius: "10px",
-                                            marginBottom: "8px", border: "1px solid rgba(255,255,255,0.05)",
+                                            marginBottom: "8px", border: "1px solid rgba(0,0,0,0.04)",
                                             transition: "background 0.15s",
                                         }}
                                     >
@@ -1145,7 +1145,7 @@ export default function BookEditorPage() {
                                                 <ThemePill theme={v.theme} accent={THEME_META[v.theme]?.color || "#f472b6"} />
                                             </div>
                                         </div>
-                                        <p style={{ fontSize: "12px", color: "#94a3b8", lineHeight: "1.5", marginBottom: "10px" }}>
+                                        <p style={{ fontSize: "12px", color: "#555555", lineHeight: "1.5", marginBottom: "10px" }}>
                                             {v.edit_summary}
                                         </p>
                                         {v.chapters_changed.length > 0 && (
@@ -1187,7 +1187,7 @@ export default function BookEditorPage() {
                         </div>
 
                         {versions.length > 0 && (
-                            <div style={{ padding: "12px 16px", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+                            <div style={{ padding: "12px 16px", borderTop: "1px solid rgba(0,0,0,0.06)" }}>
                                 <p style={{ fontSize: "11px", color: "#475569", textAlign: "center" }}>
                                     {versions.length} version{versions.length !== 1 ? "s" : ""} · all downloads available
                                 </p>

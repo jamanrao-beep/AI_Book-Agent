@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 
 const STATUS_META: Record<string, { label: string; color: string; bg: string; border: string }> = {
-    pending: { label: "Pending", color: "#8A94A8", bg: "rgba(138,148,168,0.08)", border: "rgba(138,148,168,0.15)" },
+    pending: { label: "Pending", color: "#555555", bg: "rgba(138,148,168,0.08)", border: "rgba(138,148,168,0.15)" },
     outlining: { label: "Creating Outline", color: "#9B6DFF", bg: "rgba(155,109,255,0.08)", border: "rgba(155,109,255,0.2)" },
     generating: { label: "Writing", color: "#6B93FF", bg: "rgba(59,111,255,0.08)", border: "rgba(59,111,255,0.2)" },
     assembling: { label: "Assembling", color: "#F5A623", bg: "rgba(245,166,35,0.08)", border: "rgba(245,166,35,0.2)" },
@@ -61,11 +61,11 @@ export default function LibraryPage() {
     };
 
     return (
-        <div style={{ minHeight: "100vh", background: "#080A0F", fontFamily: "'Geist', sans-serif", color: "#F0F2F8" }}>
+        <div style={{ minHeight: "100vh", background: "#f7f2e4", fontFamily: "'DM Sans', sans-serif", color: "#2a2929" }}>
 
             {/* Nav */}
             <nav style={{
-                borderBottom: "1px solid rgba(255,255,255,0.055)",
+                borderBottom: "1px solid rgba(0,0,0,0.06)",
                 padding: "0 40px", height: "60px",
                 display: "flex", alignItems: "center", gap: "16px",
                 position: "sticky", top: 0,
@@ -76,16 +76,16 @@ export default function LibraryPage() {
                     onClick={() => router.push("/dashboard")}
                     style={{
                         display: "flex", alignItems: "center", gap: "6px",
-                        background: "none", border: "1px solid rgba(255,255,255,0.07)",
+                        background: "none", border: "1px solid rgba(0,0,0,0.08)",
                         borderRadius: "8px", padding: "6px 12px",
-                        color: "#8A94A8", fontSize: "12px", cursor: "pointer", transition: "all 0.2s",
+                        color: "#555555", fontSize: "12px", cursor: "pointer", transition: "all 0.2s",
                     }}
-                    onMouseOver={e => { (e.currentTarget as HTMLButtonElement).style.color = "#F0F2F8"; (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(255,255,255,0.14)"; }}
-                    onMouseOut={e => { (e.currentTarget as HTMLButtonElement).style.color = "#8A94A8"; (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(255,255,255,0.07)"; }}
+                    onMouseOver={e => { (e.currentTarget as HTMLButtonElement).style.color = "#2a2929"; (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(0,0,0,0.14)"; }}
+                    onMouseOut={e => { (e.currentTarget as HTMLButtonElement).style.color = "#555555"; (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(0,0,0,0.08)"; }}
                 >
                     <ArrowLeft size={13} /> Dashboard
                 </button>
-                <div style={{ height: "18px", width: "1px", background: "rgba(255,255,255,0.08)" }} />
+                <div style={{ height: "18px", width: "1px", background: "rgba(0,0,0,0.08)" }} />
                 <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                     <div style={{
                         width: "26px", height: "26px",
@@ -103,13 +103,13 @@ export default function LibraryPage() {
                 {/* Header */}
                 <div style={{ marginBottom: "36px" }}>
                     <h1 style={{
-                        fontFamily: "'Instrument Serif', serif",
+                        fontFamily: "'Playfair Display', serif",
                         fontSize: "34px", fontWeight: "400",
                         letterSpacing: "-0.02em", marginBottom: "6px",
                     }}>
                         Your Library
                     </h1>
-                    <p style={{ color: "#8A94A8", fontSize: "14px" }}>
+                    <p style={{ color: "#555555", fontSize: "14px" }}>
                         All your manuscripts, organized in one place
                     </p>
                 </div>
@@ -120,19 +120,19 @@ export default function LibraryPage() {
                     marginBottom: "28px",
                 }}>
                     {[
-                        { label: "Total Books", value: counts.all, color: "#F0F2F8" },
+                        { label: "Total Books", value: counts.all, color: "#2a2929" },
                         { label: "Completed", value: counts.done, color: "#10D98A" },
                         { label: "In Progress", value: counts.generating, color: "#6B93FF" },
                         { label: "Failed", value: counts.failed, color: "#FF4D6A" },
                     ].map(stat => (
                         <div key={stat.label} style={{
-                            background: "#0D1017", border: "1px solid rgba(255,255,255,0.055)",
+                            background: "#faf8f5", border: "1px solid rgba(0,0,0,0.06)",
                             borderRadius: "10px", padding: "16px 20px",
                         }}>
-                            <div style={{ fontSize: "11px", color: "#4A5468", fontWeight: "600", letterSpacing: "0.07em", textTransform: "uppercase", marginBottom: "6px" }}>
+                            <div style={{ fontSize: "11px", color: "#737373", fontWeight: "600", letterSpacing: "0.07em", textTransform: "uppercase", marginBottom: "6px" }}>
                                 {stat.label}
                             </div>
-                            <div style={{ fontSize: "28px", fontWeight: "700", fontFamily: "'Geist Mono', monospace", color: stat.color }}>
+                            <div style={{ fontSize: "28px", fontWeight: "700", fontFamily: "'DM Sans Mono', monospace", color: stat.color }}>
                                 {loading ? "—" : stat.value}
                             </div>
                         </div>
@@ -142,7 +142,7 @@ export default function LibraryPage() {
                 {/* Search + filter */}
                 <div style={{ display: "flex", gap: "12px", marginBottom: "20px", flexWrap: "wrap" }}>
                     <div style={{ flex: 1, minWidth: "200px", position: "relative" }}>
-                        <Search size={14} color="#4A5468" style={{ position: "absolute", left: "14px", top: "50%", transform: "translateY(-50%)" }} />
+                        <Search size={14} color="#737373" style={{ position: "absolute", left: "14px", top: "50%", transform: "translateY(-50%)" }} />
                         <input
                             type="text"
                             value={search}
@@ -160,16 +160,16 @@ export default function LibraryPage() {
                                 style={{
                                     padding: "10px 14px", borderRadius: "8px", fontSize: "12px", fontWeight: "600",
                                     cursor: "pointer", transition: "all 0.15s",
-                                    background: filter === f ? "rgba(59,111,255,0.12)" : "rgba(255,255,255,0.03)",
-                                    border: filter === f ? "1px solid rgba(59,111,255,0.3)" : "1px solid rgba(255,255,255,0.06)",
-                                    color: filter === f ? "#6B93FF" : "#8A94A8",
+                                    background: filter === f ? "rgba(59,111,255,0.12)" : "rgba(0,0,0,0.03)",
+                                    border: filter === f ? "1px solid rgba(59,111,255,0.3)" : "1px solid rgba(0,0,0,0.06)",
+                                    color: filter === f ? "#6B93FF" : "#555555",
                                 }}
                             >
                                 {f === "all" ? "All" : f === "done" ? "Complete" : f === "generating" ? "In Progress" : "Failed"}
                                 <span style={{
                                     marginLeft: "6px", fontSize: "11px",
-                                    background: filter === f ? "rgba(59,111,255,0.2)" : "rgba(255,255,255,0.06)",
-                                    color: filter === f ? "#6B93FF" : "#4A5468",
+                                    background: filter === f ? "rgba(59,111,255,0.2)" : "rgba(0,0,0,0.06)",
+                                    color: filter === f ? "#6B93FF" : "#737373",
                                     borderRadius: "20px", padding: "1px 6px",
                                 }}>
                                     {counts[f]}
@@ -185,7 +185,7 @@ export default function LibraryPage() {
                         {[1, 2, 3, 4].map(i => (
                             <div key={i} style={{
                                 height: "80px", borderRadius: "12px",
-                                background: "linear-gradient(90deg, #0D1017 25%, #131720 50%, #0D1017 75%)",
+                                background: "linear-gradient(90deg, #faf8f5 25%, #ffffff 50%, #faf8f5 75%)",
                                 backgroundSize: "200% 100%",
                                 animation: "shimmer 1.5s infinite",
                             }} />
@@ -194,18 +194,18 @@ export default function LibraryPage() {
                 ) : filtered.length === 0 ? (
                     <div style={{
                         textAlign: "center", padding: "72px 32px",
-                        background: "#0D1017", border: "1px dashed rgba(255,255,255,0.07)",
+                        background: "#faf8f5", border: "1px dashed rgba(0,0,0,0.08)",
                         borderRadius: "14px",
                     }}>
-                        <Library size={36} color="#4A5468" style={{ margin: "0 auto 14px" }} />
-                        <h3 style={{ fontSize: "18px", fontFamily: "'Instrument Serif', serif", fontWeight: "400", marginBottom: "8px" }}>
+                        <Library size={36} color="#737373" style={{ margin: "0 auto 14px" }} />
+                        <h3 style={{ fontSize: "18px", fontFamily: "'Playfair Display', serif", fontWeight: "400", marginBottom: "8px" }}>
                             {search ? "No results found" : "Your library is empty"}
                         </h3>
-                        <p style={{ color: "#8A94A8", fontSize: "14px", marginBottom: "24px" }}>
+                        <p style={{ color: "#555555", fontSize: "14px", marginBottom: "24px" }}>
                             {search ? `No books match "${search}"` : "Start creating AI manuscripts to build your library"}
                         </p>
                         {!search && (
-                            <button onClick={() => router.push("/dashboard/books")} className="btn-primary">
+                            <button onClick={() => router.push("/dashboard/books")} className="btn-dark">
                                 Create your first book
                             </button>
                         )}
@@ -216,15 +216,15 @@ export default function LibraryPage() {
                             const meta = STATUS_META[book.status] || STATUS_META.pending;
                             return (
                                 <div key={book.book_id} style={{
-                                    background: "#0D1017",
-                                    border: "1px solid rgba(255,255,255,0.055)",
+                                    background: "#faf8f5",
+                                    border: "1px solid rgba(0,0,0,0.06)",
                                     borderRadius: "12px", padding: "18px 22px",
                                     display: "flex", alignItems: "center", gap: "14px",
                                     transition: "border-color 0.2s",
                                     cursor: "default",
                                 }}
-                                    onMouseOver={e => (e.currentTarget as HTMLDivElement).style.borderColor = "rgba(255,255,255,0.1)"}
-                                    onMouseOut={e => (e.currentTarget as HTMLDivElement).style.borderColor = "rgba(255,255,255,0.055)"}
+                                    onMouseOver={e => (e.currentTarget as HTMLDivElement).style.borderColor = "rgba(0,0,0,0.08)"}
+                                    onMouseOut={e => (e.currentTarget as HTMLDivElement).style.borderColor = "rgba(0,0,0,0.06)"}
                                 >
                                     <div style={{
                                         width: "40px", height: "40px", flexShrink: 0,
@@ -239,7 +239,7 @@ export default function LibraryPage() {
                                         <div style={{ fontWeight: "600", fontSize: "14px", marginBottom: "3px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                                             {book.title}
                                         </div>
-                                        <div style={{ display: "flex", alignItems: "center", gap: "10px", fontSize: "12px", color: "#4A5468" }}>
+                                        <div style={{ display: "flex", alignItems: "center", gap: "10px", fontSize: "12px", color: "#737373" }}>
                                             <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
                                                 <Clock size={11} /> {new Date(book.created_at).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" })}
                                             </span>
@@ -280,9 +280,9 @@ export default function LibraryPage() {
                                                 href={downloadDOCX(book.book_id)} target="_blank" rel="noreferrer"
                                                 style={{
                                                     display: "flex", alignItems: "center", gap: "5px",
-                                                    background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)",
+                                                    background: "rgba(0,0,0,0.03)", border: "1px solid rgba(0,0,0,0.08)",
                                                     borderRadius: "7px", padding: "6px 12px",
-                                                    fontSize: "12px", color: "#8A94A8", fontWeight: "600",
+                                                    fontSize: "12px", color: "#555555", fontWeight: "600",
                                                     textDecoration: "none", transition: "all 0.15s",
                                                 }}
                                             >

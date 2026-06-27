@@ -45,7 +45,7 @@ interface ProgressState {
 }
 
 const STAGE_META: Record<string, { label: string; color: string; icon: string }> = {
-    idle: { label: "Ready", color: "#94a3b8", icon: "⊙" },
+    idle: { label: "Ready", color: "#555555", icon: "⊙" },
     collecting: { label: "Extracting", color: "#a78bfa", icon: "◈" },
     transcribing: { label: "Transcribing", color: "#60a5fa", icon: "✍" },
     healing: { label: "Healing", color: "#f472b6", icon: "🩹" },
@@ -244,23 +244,23 @@ export default function ScanPage() {
     };
 
     return (
-        <div style={{ minHeight: "100vh", background: "#0a0c18", fontFamily: "'DM Sans', sans-serif", color: "#e2e8f0" }}>
+        <div style={{ minHeight: "100vh", background: "#0a0c18", fontFamily: "'DM Sans', sans-serif", color: "#555555" }}>
 
             {/* ── Nav ── */}
             <nav style={{
-                borderBottom: "1px solid rgba(255,255,255,0.06)",
+                borderBottom: "1px solid rgba(0,0,0,0.06)",
                 padding: "0 40px", height: "60px",
                 display: "flex", alignItems: "center", gap: "16px",
                 position: "sticky", top: 0,
                 background: "rgba(10,12,24,0.95)", backdropFilter: "blur(14px)", zIndex: 50,
             }}>
                 <button onClick={() => router.push("/dashboard")}
-                    style={{ display: "flex", alignItems: "center", gap: "6px", background: "none", border: "none", color: "#64748b", fontSize: "13px", cursor: "pointer", transition: "color 0.2s" }}
-                    onMouseOver={e => (e.currentTarget.style.color = "#e2e8f0")}
-                    onMouseOut={e => (e.currentTarget.style.color = "#64748b")}>
+                    style={{ display: "flex", alignItems: "center", gap: "6px", background: "none", border: "none", color: "#555555", fontSize: "13px", cursor: "pointer", transition: "color 0.2s" }}
+                    onMouseOver={e => (e.currentTarget.style.color = "#555555")}
+                    onMouseOut={e => (e.currentTarget.style.color = "#555555")}>
                     <ArrowLeft size={14} /> Back to Dashboard
                 </button>
-                <span style={{ color: "rgba(255,255,255,0.08)" }}>|</span>
+                <span style={{ color: "rgba(0,0,0,0.08)" }}>|</span>
                 <div style={{ display: "flex", alignItems: "center", gap: "9px" }}>
                     <div style={{ width: "30px", height: "30px", background: "rgba(124,58,237,0.18)", border: "1px solid rgba(124,58,237,0.35)", borderRadius: "8px", display: "flex", alignItems: "center", justifyContent: "center" }}>
                         <ScanLine size={14} color="#a78bfa" />
@@ -277,10 +277,10 @@ export default function ScanPage() {
                     <div style={{ display: "inline-flex", alignItems: "center", gap: "6px", background: "rgba(124,58,237,0.1)", border: "1px solid rgba(124,58,237,0.2)", borderRadius: "20px", padding: "3px 12px", fontSize: "10px", fontWeight: "700", letterSpacing: "0.1em", color: "#a78bfa", marginBottom: "16px" }}>
                         <Sparkles size={10} /> AI HANDWRITING RECOGNITION
                     </div>
-                    <h1 style={{ fontSize: "36px", fontWeight: "800", letterSpacing: "-0.03em", fontFamily: "'Playfair Display', serif", marginBottom: "10px", background: "linear-gradient(135deg, #f1f5f9 0%, #94a3b8 100%)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
+                    <h1 style={{ fontSize: "36px", fontWeight: "800", letterSpacing: "-0.03em", fontFamily: "'Playfair Display', serif", marginBottom: "10px", background: "linear-gradient(135deg, #2a2929 0%, #555555 100%)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
                         Handwritten Book Scanner
                     </h1>
-                    <p style={{ color: "#64748b", fontSize: "15px", lineHeight: "1.6", maxWidth: "580px" }}>
+                    <p style={{ color: "#555555", fontSize: "15px", lineHeight: "1.6", maxWidth: "580px" }}>
                         Upload photos of handwritten pages, a PDF scan, or a ZIP of images — in any language.
                         AI reads, transcribes, and exports a clean, formatted book.
                     </p>
@@ -294,7 +294,7 @@ export default function ScanPage() {
                             { icon: "📚", text: "Auto chapter detection" },
                             { icon: "⬇️", text: "PDF + DOCX export" },
                         ].map(c => (
-                            <span key={c.text} style={{ display: "inline-flex", alignItems: "center", gap: "5px", fontSize: "12px", color: "#64748b", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "20px", padding: "4px 12px" }}>
+                            <span key={c.text} style={{ display: "inline-flex", alignItems: "center", gap: "5px", fontSize: "12px", color: "#555555", background: "rgba(0,0,0,0.03)", border: "1px solid rgba(0,0,0,0.08)", borderRadius: "20px", padding: "4px 12px" }}>
                                 {c.icon} {c.text}
                             </span>
                         ))}
@@ -313,11 +313,11 @@ export default function ScanPage() {
                                 onDrop={handleDrop}
                                 onClick={() => files.length === 0 && fileInputRef.current?.click()}
                                 style={{
-                                    border: `2px dashed ${dragging ? "#7c3aed" : files.length > 0 ? "rgba(124,58,237,0.45)" : "rgba(255,255,255,0.1)"}`,
+                                    border: `2px dashed ${dragging ? "#7c3aed" : files.length > 0 ? "rgba(124,58,237,0.45)" : "rgba(0,0,0,0.08)"}`,
                                     borderRadius: "16px", padding: "36px 24px",
                                     textAlign: "center",
                                     cursor: files.length > 0 ? "default" : "pointer",
-                                    background: dragging ? "rgba(124,58,237,0.07)" : files.length > 0 ? "rgba(124,58,237,0.04)" : "rgba(255,255,255,0.02)",
+                                    background: dragging ? "rgba(124,58,237,0.07)" : files.length > 0 ? "rgba(124,58,237,0.04)" : "rgba(0,0,0,0.02)",
                                     transition: "all 0.2s", marginBottom: "14px",
                                 }}
                             >
@@ -346,7 +346,7 @@ export default function ScanPage() {
                                         <p style={{ fontWeight: "600", fontSize: "14px" }}>
                                             {fileCount} file{fileCount !== 1 ? "s" : ""} selected
                                         </p>
-                                        <p style={{ color: "#64748b", fontSize: "12px", marginTop: "4px" }}>
+                                        <p style={{ color: "#555555", fontSize: "12px", marginTop: "4px" }}>
                                             {isImageOnly ? `${fileCount} page image${fileCount !== 1 ? "s" : ""}` : "Mixed document input"}
                                         </p>
                                         <button
@@ -366,13 +366,13 @@ export default function ScanPage() {
                                         const ext = f.name.split(".").pop()?.toUpperCase() || "?";
                                         const isImg = ["JPG", "JPEG", "PNG", "WEBP", "BMP", "TIFF", "TIF", "GIF"].includes(ext);
                                         return (
-                                            <div key={idx} style={{ display: "flex", alignItems: "center", gap: "10px", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: "8px", padding: "8px 10px" }}>
-                                                <div style={{ width: "28px", height: "28px", background: isImg ? "rgba(124,58,237,0.12)" : "rgba(255,255,255,0.05)", border: `1px solid ${isImg ? "rgba(124,58,237,0.25)" : "rgba(255,255,255,0.08)"}`, borderRadius: "6px", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                                                    {isImg ? <ImageIcon size={12} color="#a78bfa" /> : <FileText size={12} color="#64748b" />}
+                                            <div key={idx} style={{ display: "flex", alignItems: "center", gap: "10px", background: "rgba(0,0,0,0.03)", border: "1px solid rgba(0,0,0,0.06)", borderRadius: "8px", padding: "8px 10px" }}>
+                                                <div style={{ width: "28px", height: "28px", background: isImg ? "rgba(124,58,237,0.12)" : "rgba(0,0,0,0.04)", border: `1px solid ${isImg ? "rgba(124,58,237,0.25)" : "rgba(0,0,0,0.08)"}`, borderRadius: "6px", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                                                    {isImg ? <ImageIcon size={12} color="#a78bfa" /> : <FileText size={12} color="#555555" />}
                                                 </div>
-                                                <span style={{ flex: 1, fontSize: "12px", color: "#94a3b8", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name}</span>
-                                                <span style={{ fontSize: "10px", color: "#334155", flexShrink: 0 }}>{(f.size / 1024).toFixed(0)}KB</span>
-                                                <button onClick={() => removeFile(idx)} style={{ background: "none", border: "none", color: "#334155", cursor: "pointer", display: "flex", padding: "2px" }}>
+                                                <span style={{ flex: 1, fontSize: "12px", color: "#555555", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name}</span>
+                                                <span style={{ fontSize: "10px", color: "#737373", flexShrink: 0 }}>{(f.size / 1024).toFixed(0)}KB</span>
+                                                <button onClick={() => removeFile(idx)} style={{ background: "none", border: "none", color: "#737373", cursor: "pointer", display: "flex", padding: "2px" }}>
                                                     <X size={12} />
                                                 </button>
                                             </div>
@@ -393,26 +393,26 @@ export default function ScanPage() {
                             {/* Book title */}
                             <div>
                                 <label style={{ fontSize: "11px", fontWeight: "700", letterSpacing: "0.08em", textTransform: "uppercase", color: "#475569", display: "block", marginBottom: "8px" }}>
-                                    Book Title <span style={{ color: "#1e293b", fontWeight: "400", textTransform: "none", fontSize: "10px" }}>(optional — AI will infer)</span>
+                                    Book Title <span style={{ color: "#737373", fontWeight: "400", textTransform: "none", fontSize: "10px" }}>(optional — AI will infer)</span>
                                 </label>
                                 <input type="text" value={bookTitle} onChange={e => setBookTitle(e.target.value)}
                                     placeholder="e.g. My Grandfather's Diary"
-                                    style={{ width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "10px", padding: "12px 14px", fontSize: "14px", color: "#e2e8f0", outline: "none", transition: "border-color 0.2s", boxSizing: "border-box" }}
+                                    style={{ width: "100%", background: "rgba(0,0,0,0.04)", border: "1px solid rgba(0,0,0,0.08)", borderRadius: "10px", padding: "12px 14px", fontSize: "14px", color: "#555555", outline: "none", transition: "border-color 0.2s", boxSizing: "border-box" }}
                                     onFocus={e => e.target.style.borderColor = "#7c3aed"}
-                                    onBlur={e => e.target.style.borderColor = "rgba(255,255,255,0.1)"}
+                                    onBlur={e => e.target.style.borderColor = "rgba(0,0,0,0.08)"}
                                 />
                             </div>
 
                             {/* Info card */}
                             <div style={{ background: "rgba(124,58,237,0.05)", border: "1px solid rgba(124,58,237,0.15)", borderRadius: "12px", padding: "16px" }}>
-                                <p style={{ fontSize: "12px", color: "#64748b", lineHeight: "1.7", margin: 0 }}>
+                                <p style={{ fontSize: "12px", color: "#555555", lineHeight: "1.7", margin: 0 }}>
                                     <span style={{ color: "#a78bfa", fontWeight: "600" }}>How it works:</span> Each page photo is fed to GPT-4o vision which reads the handwriting verbatim. The AI then structures the text into chapters and exports a clean, professionally-formatted book in PDF and DOCX.
                                 </p>
                             </div>
 
                             {/* Tips */}
-                            <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: "12px", padding: "16px" }}>
-                                <p style={{ fontSize: "11px", fontWeight: "700", letterSpacing: "0.08em", textTransform: "uppercase", color: "#334155", marginBottom: "10px" }}>Tips for best results</p>
+                            <div style={{ background: "rgba(0,0,0,0.02)", border: "1px solid rgba(0,0,0,0.06)", borderRadius: "12px", padding: "16px" }}>
+                                <p style={{ fontSize: "11px", fontWeight: "700", letterSpacing: "0.08em", textTransform: "uppercase", color: "#737373", marginBottom: "10px" }}>Tips for best results</p>
                                 {["Good lighting, minimal shadows", "Keep pages flat — avoid curled edges", "Higher image resolution = better accuracy", "Include one page per image for multi-page books", "Any language works — including mixed-language text"].map(tip => (
                                     <div key={tip} style={{ display: "flex", alignItems: "flex-start", gap: "8px", marginBottom: "7px" }}>
                                         <span style={{ color: "#7c3aed", fontSize: "12px", lineHeight: "1.4", flexShrink: 0 }}>✓</span>
@@ -428,14 +428,14 @@ export default function ScanPage() {
                                         <Loader size={15} style={{ color: stageMeta.color, animation: "spin 1.2s linear infinite", flexShrink: 0 }} />
                                         <div style={{ flex: 1 }}>
                                             <p style={{ fontSize: "13px", fontWeight: "600", color: stageMeta.color }}>{stageMeta.label}</p>
-                                            <p style={{ fontSize: "11px", color: "#334155", marginTop: "2px" }}>{progress.message}</p>
+                                            <p style={{ fontSize: "11px", color: "#737373", marginTop: "2px" }}>{progress.message}</p>
                                         </div>
                                         <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "20px", fontWeight: "700", color: stageMeta.color }}>{progress.pct}%</span>
                                     </div>
-                                    <div style={{ height: "3px", background: "rgba(255,255,255,0.06)", borderRadius: "3px", overflow: "hidden" }}>
+                                    <div style={{ height: "3px", background: "rgba(0,0,0,0.06)", borderRadius: "3px", overflow: "hidden" }}>
                                         <div style={{ height: "100%", width: `${progress.pct}%`, background: `linear-gradient(90deg, #7c3aed, ${stageMeta.color})`, borderRadius: "3px", transition: "width 0.8s ease", boxShadow: `0 0 8px ${stageMeta.color}66` }} />
                                     </div>
-                                    <p style={{ fontSize: "11px", color: "#1e293b", marginTop: "10px" }}>
+                                    <p style={{ fontSize: "11px", color: "#737373", marginTop: "10px" }}>
                                         Large batches can take several minutes — please keep this tab open.
                                     </p>
                                 </div>
@@ -446,7 +446,7 @@ export default function ScanPage() {
                                 style={{
                                     background: files.length === 0 || isLoading ? "rgba(124,58,237,0.3)" : "linear-gradient(135deg, #7c3aed, #a855f7)",
                                     border: "none", borderRadius: "12px", padding: "14px 24px",
-                                    color: "white", fontSize: "14px", fontWeight: "700",
+                                    color: "#2a2929", fontSize: "14px", fontWeight: "700",
                                     cursor: files.length === 0 || isLoading ? "not-allowed" : "pointer",
                                     display: "flex", alignItems: "center", justifyContent: "center", gap: "10px",
                                     boxShadow: files.length > 0 && !isLoading ? "0 4px 20px rgba(124,58,237,0.4)" : "none",
@@ -472,7 +472,7 @@ export default function ScanPage() {
                             </div>
                             <div style={{ flex: 1 }}>
                                 <p style={{ fontWeight: "700", fontSize: "16px", letterSpacing: "-0.01em" }}>{result.title}</p>
-                                <p style={{ color: "#64748b", fontSize: "12px", marginTop: "3px" }}>
+                                <p style={{ color: "#555555", fontSize: "12px", marginTop: "3px" }}>
                                     Transcription complete · {result.content_pages} of {result.total_pages} pages contain text
                                 </p>
                             </div>
@@ -503,7 +503,7 @@ export default function ScanPage() {
                                 <div key={s.label} style={{ background: s.bg, border: `1px solid ${s.color}25`, borderRadius: "12px", padding: "16px" }}>
                                     <div style={{ display: "flex", alignItems: "center", gap: "7px", marginBottom: "8px" }}>
                                         {s.icon}
-                                        <span style={{ fontSize: "10px", fontWeight: "700", letterSpacing: "0.07em", textTransform: "uppercase", color: "#334155" }}>{s.label}</span>
+                                        <span style={{ fontSize: "10px", fontWeight: "700", letterSpacing: "0.07em", textTransform: "uppercase", color: "#737373" }}>{s.label}</span>
                                     </div>
                                     <div style={{ fontSize: "18px", fontWeight: "700", color: s.color, letterSpacing: "-0.01em", fontFamily: "'Playfair Display', serif" }}>
                                         {s.value}
@@ -514,18 +514,18 @@ export default function ScanPage() {
 
                         {/* Chapter list */}
                         {result.chapter_titles.length > 0 && (
-                            <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: "14px", padding: "20px", marginBottom: "24px" }}>
-                                <p style={{ fontSize: "11px", fontWeight: "700", letterSpacing: "0.08em", textTransform: "uppercase", color: "#334155", marginBottom: "14px" }}>
+                            <div style={{ background: "rgba(0,0,0,0.02)", border: "1px solid rgba(0,0,0,0.06)", borderRadius: "14px", padding: "20px", marginBottom: "24px" }}>
+                                <p style={{ fontSize: "11px", fontWeight: "700", letterSpacing: "0.08em", textTransform: "uppercase", color: "#737373", marginBottom: "14px" }}>
                                     Detected Chapters ({result.chapters})
                                 </p>
                                 <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                                     {result.chapter_titles.map((title, i) => (
-                                        <div key={i} style={{ display: "flex", alignItems: "center", gap: "10px", padding: "8px 12px", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.05)", borderRadius: "8px" }}>
+                                        <div key={i} style={{ display: "flex", alignItems: "center", gap: "10px", padding: "8px 12px", background: "rgba(0,0,0,0.03)", border: "1px solid rgba(0,0,0,0.04)", borderRadius: "8px" }}>
                                             <span style={{ width: "24px", height: "24px", borderRadius: "6px", background: "rgba(124,58,237,0.12)", border: "1px solid rgba(124,58,237,0.2)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "11px", fontWeight: "700", color: "#a78bfa", flexShrink: 0 }}>
                                                 {i + 1}
                                             </span>
-                                            <span style={{ fontSize: "13px", color: "#94a3b8", flex: 1 }}>{title}</span>
-                                            <ChevronRight size={13} color="#334155" />
+                                            <span style={{ fontSize: "13px", color: "#555555", flex: 1 }}>{title}</span>
+                                            <ChevronRight size={13} color="#737373" />
                                         </div>
                                     ))}
                                 </div>
@@ -534,9 +534,9 @@ export default function ScanPage() {
 
                         {/* New scan button */}
                         <button onClick={() => { setResult(null); setFiles([]); setBookTitle(""); setError(""); setProgress({ stage: "idle", pct: 0, message: "" }); }}
-                            style={{ background: "none", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "10px", padding: "10px 20px", color: "#64748b", fontSize: "13px", cursor: "pointer", transition: "all 0.2s" }}
-                            onMouseOver={e => (e.currentTarget.style.color = "#e2e8f0")}
-                            onMouseOut={e => (e.currentTarget.style.color = "#64748b")}>
+                            style={{ background: "none", border: "1px solid rgba(0,0,0,0.08)", borderRadius: "10px", padding: "10px 20px", color: "#555555", fontSize: "13px", cursor: "pointer", transition: "all 0.2s" }}
+                            onMouseOver={e => (e.currentTarget.style.color = "#555555")}
+                            onMouseOut={e => (e.currentTarget.style.color = "#555555")}>
                             ← Scan another book
                         </button>
                     </div>
@@ -546,9 +546,9 @@ export default function ScanPage() {
             <style>{`
                 @keyframes spin { to { transform: rotate(360deg); } }
                 @keyframes fadeInUp { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:translateY(0); } }
-                input::placeholder { color: #334155; }
+                input::placeholder { color: #737373; }
                 ::-webkit-scrollbar { width:3px; }
-                ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius:2px; }
+                ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.08); border-radius:2px; }
             `}</style>
         </div>
     );

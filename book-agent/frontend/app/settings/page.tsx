@@ -38,11 +38,11 @@ export default function SettingsPage() {
     };
 
     return (
-        <div style={{ minHeight: "100vh", background: "#080A0F", fontFamily: "'Geist', sans-serif", color: "#F0F2F8" }}>
+        <div style={{ minHeight: "100vh", background: "#f7f2e4", fontFamily: "'DM Sans', sans-serif", color: "#2a2929" }}>
 
             {/* Nav */}
             <nav style={{
-                borderBottom: "1px solid rgba(255,255,255,0.055)",
+                borderBottom: "1px solid rgba(0,0,0,0.06)",
                 padding: "0 40px", height: "60px",
                 display: "flex", alignItems: "center", gap: "16px",
                 position: "sticky", top: 0,
@@ -53,23 +53,23 @@ export default function SettingsPage() {
                     onClick={() => router.push("/dashboard")}
                     style={{
                         display: "flex", alignItems: "center", gap: "6px",
-                        background: "none", border: "1px solid rgba(255,255,255,0.07)",
+                        background: "none", border: "1px solid rgba(0,0,0,0.08)",
                         borderRadius: "8px", padding: "6px 12px",
-                        color: "#8A94A8", fontSize: "12px", cursor: "pointer", transition: "all 0.2s",
+                        color: "#555555", fontSize: "12px", cursor: "pointer", transition: "all 0.2s",
                     }}
-                    onMouseOver={e => { (e.currentTarget as HTMLButtonElement).style.color = "#F0F2F8"; (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(255,255,255,0.14)"; }}
-                    onMouseOut={e => { (e.currentTarget as HTMLButtonElement).style.color = "#8A94A8"; (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(255,255,255,0.07)"; }}
+                    onMouseOver={e => { (e.currentTarget as HTMLButtonElement).style.color = "#2a2929"; (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(0,0,0,0.14)"; }}
+                    onMouseOut={e => { (e.currentTarget as HTMLButtonElement).style.color = "#555555"; (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(0,0,0,0.08)"; }}
                 >
                     <ArrowLeft size={13} /> Dashboard
                 </button>
-                <div style={{ height: "18px", width: "1px", background: "rgba(255,255,255,0.08)" }} />
+                <div style={{ height: "18px", width: "1px", background: "rgba(0,0,0,0.08)" }} />
                 <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                     <div style={{
                         width: "26px", height: "26px",
                         background: "rgba(138,148,168,0.1)", border: "1px solid rgba(138,148,168,0.18)",
                         borderRadius: "7px", display: "flex", alignItems: "center", justifyContent: "center",
                     }}>
-                        <Settings size={13} color="#8A94A8" />
+                        <Settings size={13} color="#555555" />
                     </div>
                     <span style={{ fontWeight: "600", fontSize: "14px" }}>Settings</span>
                 </div>
@@ -80,13 +80,13 @@ export default function SettingsPage() {
                 {/* Header */}
                 <div style={{ marginBottom: "40px" }}>
                     <h1 style={{
-                        fontFamily: "'Instrument Serif', serif",
+                        fontFamily: "'Playfair Display', serif",
                         fontSize: "34px", fontWeight: "400",
                         letterSpacing: "-0.02em", marginBottom: "6px",
                     }}>
                         Preferences & Identity
                     </h1>
-                    <p style={{ color: "#8A94A8", fontSize: "14px" }}>
+                    <p style={{ color: "#555555", fontSize: "14px" }}>
                         Configure your editorial environment and AI behavioral parameters
                     </p>
                 </div>
@@ -94,10 +94,10 @@ export default function SettingsPage() {
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginBottom: "16px" }}>
 
                     {/* Profile settings */}
-                    <div style={{ background: "#0D1017", border: "1px solid rgba(255,255,255,0.055)", borderRadius: "14px", padding: "24px" }}>
+                    <div style={{ background: "#faf8f5", border: "1px solid rgba(0,0,0,0.06)", borderRadius: "14px", padding: "24px" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "20px" }}>
-                            <UserIcon size={14} color="#8A94A8" />
-                            <span style={{ fontSize: "11px", fontWeight: "700", letterSpacing: "0.08em", color: "#4A5468", textTransform: "uppercase" }}>
+                            <UserIcon size={14} color="#555555" />
+                            <span style={{ fontSize: "11px", fontWeight: "700", letterSpacing: "0.08em", color: "#737373", textTransform: "uppercase" }}>
                                 Profile Settings
                             </span>
                         </div>
@@ -108,8 +108,8 @@ export default function SettingsPage() {
                                 width: "52px", height: "52px", borderRadius: "12px",
                                 background: "linear-gradient(135deg, #3B6FFF, #9B6DFF)",
                                 display: "flex", alignItems: "center", justifyContent: "center",
-                                fontSize: "20px", fontFamily: "'Instrument Serif', serif",
-                                color: "white", fontWeight: "400", flexShrink: 0,
+                                fontSize: "20px", fontFamily: "'Playfair Display', serif",
+                                color: "#2a2929", fontWeight: "400", flexShrink: 0,
                             }}>
                                 {user?.displayName?.[0] || user?.email?.[0]?.toUpperCase() || "?"}
                             </div>
@@ -117,7 +117,7 @@ export default function SettingsPage() {
                                 <div style={{ fontSize: "15px", fontWeight: "600" }}>
                                     {user?.displayName || "Anonymous User"}
                                 </div>
-                                <div style={{ fontSize: "12px", color: "#8A94A8", marginTop: "2px" }}>
+                                <div style={{ fontSize: "12px", color: "#555555", marginTop: "2px" }}>
                                     {user?.email}
                                 </div>
                             </div>
@@ -147,10 +147,10 @@ export default function SettingsPage() {
                     </div>
 
                     {/* Account preferences */}
-                    <div style={{ background: "#0D1017", border: "1px solid rgba(255,255,255,0.055)", borderRadius: "14px", padding: "24px" }}>
+                    <div style={{ background: "#faf8f5", border: "1px solid rgba(0,0,0,0.06)", borderRadius: "14px", padding: "24px" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "20px" }}>
-                            <Database size={14} color="#8A94A8" />
-                            <span style={{ fontSize: "11px", fontWeight: "700", letterSpacing: "0.08em", color: "#4A5468", textTransform: "uppercase" }}>
+                            <Database size={14} color="#555555" />
+                            <span style={{ fontSize: "11px", fontWeight: "700", letterSpacing: "0.08em", color: "#737373", textTransform: "uppercase" }}>
                                 Account Preferences
                             </span>
                         </div>
@@ -181,7 +181,7 @@ export default function SettingsPage() {
                                     value={wppDefault} onChange={e => setWppDefault(Number(e.target.value))}
                                     style={{ width: "100%", marginTop: "8px" }}
                                 />
-                                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "10px", color: "#4A5468", marginTop: "4px" }}>
+                                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "10px", color: "#737373", marginTop: "4px" }}>
                                     <span>100</span><span>Used for progress estimation</span><span>600</span>
                                 </div>
                             </div>
@@ -192,11 +192,11 @@ export default function SettingsPage() {
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginBottom: "16px" }}>
 
                     {/* Security */}
-                    <div style={{ background: "#0D1017", border: "1px solid rgba(255,255,255,0.055)", borderRadius: "14px", padding: "24px" }}>
+                    <div style={{ background: "#faf8f5", border: "1px solid rgba(0,0,0,0.06)", borderRadius: "14px", padding: "24px" }}>
                         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "20px" }}>
                             <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                                <Shield size={14} color="#8A94A8" />
-                                <span style={{ fontSize: "11px", fontWeight: "700", letterSpacing: "0.08em", color: "#4A5468", textTransform: "uppercase" }}>
+                                <Shield size={14} color="#555555" />
+                                <span style={{ fontSize: "11px", fontWeight: "700", letterSpacing: "0.08em", color: "#737373", textTransform: "uppercase" }}>
                                     Security & Access
                                 </span>
                             </div>
@@ -205,13 +205,13 @@ export default function SettingsPage() {
 
                         <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                             <div style={{
-                                background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.055)",
+                                background: "rgba(0,0,0,0.03)", border: "1px solid rgba(0,0,0,0.06)",
                                 borderRadius: "10px", padding: "14px 16px",
                                 display: "flex", alignItems: "center", justifyContent: "space-between",
                             }}>
                                 <div>
                                     <div style={{ fontWeight: "600", fontSize: "14px" }}>Password</div>
-                                    <div style={{ fontSize: "11px", color: "#4A5468", marginTop: "2px" }}>Last changed 4 months ago</div>
+                                    <div style={{ fontSize: "11px", color: "#737373", marginTop: "2px" }}>Last changed 4 months ago</div>
                                 </div>
                                 <button style={{
                                     background: "rgba(59,111,255,0.1)", border: "1px solid rgba(59,111,255,0.2)",
@@ -221,13 +221,13 @@ export default function SettingsPage() {
                             </div>
 
                             <div style={{
-                                background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.055)",
+                                background: "rgba(0,0,0,0.03)", border: "1px solid rgba(0,0,0,0.06)",
                                 borderRadius: "10px", padding: "14px 16px",
                                 display: "flex", alignItems: "center", justifyContent: "space-between",
                             }}>
                                 <div>
                                     <div style={{ fontWeight: "600", fontSize: "14px" }}>Two-factor authentication</div>
-                                    <div style={{ fontSize: "11px", color: "#4A5468", marginTop: "2px" }}>Security key or mobile app</div>
+                                    <div style={{ fontSize: "11px", color: "#737373", marginTop: "2px" }}>Security key or mobile app</div>
                                 </div>
                                 <button
                                     onClick={() => setTwoFactor(!twoFactor)}
@@ -237,8 +237,8 @@ export default function SettingsPage() {
                                         ? <div style={{ width: "40px", height: "22px", borderRadius: "11px", background: "#3B6FFF", position: "relative", transition: "all 0.2s" }}>
                                             <div style={{ position: "absolute", right: "3px", top: "3px", width: "16px", height: "16px", borderRadius: "50%", background: "white" }} />
                                         </div>
-                                        : <div style={{ width: "40px", height: "22px", borderRadius: "11px", background: "rgba(255,255,255,0.1)", position: "relative", transition: "all 0.2s" }}>
-                                            <div style={{ position: "absolute", left: "3px", top: "3px", width: "16px", height: "16px", borderRadius: "50%", background: "rgba(255,255,255,0.4)" }} />
+                                        : <div style={{ width: "40px", height: "22px", borderRadius: "11px", background: "rgba(0,0,0,0.08)", position: "relative", transition: "all 0.2s" }}>
+                                            <div style={{ position: "absolute", left: "3px", top: "3px", width: "16px", height: "16px", borderRadius: "50%", background: "rgba(0,0,0,0.4)" }} />
                                         </div>
                                     }
                                 </button>
@@ -247,17 +247,17 @@ export default function SettingsPage() {
                     </div>
 
                     {/* API & Integrations */}
-                    <div style={{ background: "#131720", border: "1px solid rgba(255,255,255,0.055)", borderRadius: "14px", padding: "24px" }}>
+                    <div style={{ background: "#ffffff", border: "1px solid rgba(0,0,0,0.06)", borderRadius: "14px", padding: "24px" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "20px" }}>
-                            <Key size={14} color="#8A94A8" />
-                            <span style={{ fontSize: "11px", fontWeight: "700", letterSpacing: "0.08em", color: "#4A5468", textTransform: "uppercase" }}>
+                            <Key size={14} color="#555555" />
+                            <span style={{ fontSize: "11px", fontWeight: "700", letterSpacing: "0.08em", color: "#737373", textTransform: "uppercase" }}>
                                 API & Integrations
                             </span>
                         </div>
 
                         <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                             <div style={{
-                                background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.055)",
+                                background: "rgba(0,0,0,0.03)", border: "1px solid rgba(0,0,0,0.06)",
                                 borderRadius: "10px", padding: "14px 16px",
                                 display: "flex", alignItems: "center", gap: "12px",
                             }}>
@@ -273,9 +273,9 @@ export default function SettingsPage() {
                                     <div style={{ fontSize: "11px", color: "#10D98A", marginTop: "2px" }}>Operational · Latency 42ms</div>
                                 </div>
                                 <button style={{
-                                    background: "none", border: "1px solid rgba(255,255,255,0.08)",
+                                    background: "none", border: "1px solid rgba(0,0,0,0.08)",
                                     borderRadius: "7px", padding: "6px 12px",
-                                    color: "#8A94A8", fontSize: "12px", cursor: "pointer",
+                                    color: "#555555", fontSize: "12px", cursor: "pointer",
                                     display: "flex", alignItems: "center", gap: "4px",
                                 }}>
                                     Manage <ExternalLink size={11} />
@@ -283,7 +283,7 @@ export default function SettingsPage() {
                             </div>
 
                             <div style={{
-                                background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.055)",
+                                background: "rgba(0,0,0,0.03)", border: "1px solid rgba(0,0,0,0.06)",
                                 borderRadius: "10px", padding: "14px 16px",
                                 display: "flex", alignItems: "center", gap: "12px",
                             }}>
@@ -296,7 +296,7 @@ export default function SettingsPage() {
                                 </div>
                                 <div style={{ flex: 1 }}>
                                     <div style={{ fontWeight: "600", fontSize: "13px" }}>Data & Archiving</div>
-                                    <div style={{ fontSize: "11px", color: "#4A5468", marginTop: "2px" }}>Last export 2 days ago</div>
+                                    <div style={{ fontSize: "11px", color: "#737373", marginTop: "2px" }}>Last export 2 days ago</div>
                                 </div>
                                 <button style={{
                                     background: "rgba(59,111,255,0.1)", border: "1px solid rgba(59,111,255,0.2)",
@@ -316,7 +316,7 @@ export default function SettingsPage() {
                         Cancel
                     </button>
                     <button
-                        className="btn-primary"
+                        className="btn-dark"
                         onClick={handleSave}
                         style={{ padding: "11px 28px" }}
                     >
@@ -336,7 +336,7 @@ export default function SettingsPage() {
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                         <div>
                             <div style={{ fontWeight: "600", fontSize: "14px", marginBottom: "4px" }}>Deactivate Workspace</div>
-                            <div style={{ fontSize: "13px", color: "#8A94A8" }}>
+                            <div style={{ fontSize: "13px", color: "#555555" }}>
                                 Temporarily disable your Publixo AI account and freeze all active manuscript tokens.
                             </div>
                         </div>
@@ -358,9 +358,9 @@ export default function SettingsPage() {
                 {/* Footer */}
                 <div style={{
                     marginTop: "32px", paddingTop: "24px",
-                    borderTop: "1px solid rgba(255,255,255,0.055)",
+                    borderTop: "1px solid rgba(0,0,0,0.06)",
                     display: "flex", alignItems: "center", justifyContent: "space-between",
-                    fontSize: "12px", color: "#4A5468",
+                    fontSize: "12px", color: "#737373",
                 }}>
                     <span>© 2025 Publixo AI Suite · v2.4.0-Stable</span>
                     <div style={{ display: "flex", gap: "16px" }}>

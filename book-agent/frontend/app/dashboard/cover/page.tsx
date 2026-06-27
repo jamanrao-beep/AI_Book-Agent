@@ -268,7 +268,7 @@ function CoverPreview({ concept }: { concept: CoverConcept }) {
             >
                 {concept.author_line && (
                     <span
-                        style={{ fontSize: "7px", color: "rgba(255,255,255,0.55)" }}
+                        style={{ fontSize: "7px", color: "rgba(0,0,0,0.55)" }}
                     >
                         {concept.author_line}
                     </span>
@@ -350,9 +350,7 @@ export default function CoverDesignerPage() {
             }
         } catch (err: unknown) {
             setError(
-                err instanceof Error
-                    ? err.message
-                    : "Cover design failed. Make sure the backend is running.",
+                parseFriendlyError(err),
             );
         } finally {
             setLoading(false);
@@ -384,13 +382,13 @@ export default function CoverDesignerPage() {
                 minHeight: "100vh",
                 background: "#0c0f1a",
                 fontFamily: "'DM Sans', sans-serif",
-                color: "#e2e8f0",
+                color: "#555555",
             }}
         >
             {/* Nav */}
             <nav
                 style={{
-                    borderBottom: "1px solid rgba(255,255,255,0.07)",
+                    borderBottom: "1px solid rgba(0,0,0,0.08)",
                     padding: "0 40px",
                     height: "60px",
                     display: "flex",
@@ -411,22 +409,22 @@ export default function CoverDesignerPage() {
                         gap: "6px",
                         background: "none",
                         border: "none",
-                        color: "#64748b",
+                        color: "#555555",
                         fontSize: "13px",
                         cursor: "pointer",
                         padding: "6px 0",
                         transition: "color 0.2s",
                     }}
                     onMouseOver={(e) =>
-                        ((e.currentTarget as HTMLButtonElement).style.color = "#e2e8f0")
+                        ((e.currentTarget as HTMLButtonElement).style.color = "#555555")
                     }
                     onMouseOut={(e) =>
-                        ((e.currentTarget as HTMLButtonElement).style.color = "#64748b")
+                        ((e.currentTarget as HTMLButtonElement).style.color = "#555555")
                     }
                 >
                     <ArrowLeft size={14} /> Back to Dashboard
                 </button>
-                <span style={{ color: "rgba(255,255,255,0.1)" }}>|</span>
+                <span style={{ color: "rgba(0,0,0,0.08)" }}>|</span>
                 <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                     <div
                         style={{
@@ -464,7 +462,7 @@ export default function CoverDesignerPage() {
                     >
                         AI Book Cover Designer — Nano Banana 🍌
                     </h1>
-                    <p style={{ color: "#64748b", fontSize: "15px", lineHeight: "1.6" }}>
+                    <p style={{ color: "#555555", fontSize: "15px", lineHeight: "1.6" }}>
                         Upload your .pdf or .docx manuscript — or a .zip containing multiple files.
                         Nano Banana (Gemini) generates a full-bleed cover page for each and attaches it — zero design skills needed.
                     </p>
@@ -482,7 +480,7 @@ export default function CoverDesignerPage() {
                             onDrop={handleDrop}
                             onClick={() => !file && fileInputRef.current?.click()}
                             style={{
-                                border: `2px dashed ${dragging ? "#fb923c" : file ? "rgba(251,146,60,0.4)" : "rgba(255,255,255,0.1)"}`,
+                                border: `2px dashed ${dragging ? "#fb923c" : file ? "rgba(251,146,60,0.4)" : "rgba(0,0,0,0.08)"}`,
                                 borderRadius: "16px",
                                 padding: "40px 32px",
                                 textAlign: "center",
@@ -491,7 +489,7 @@ export default function CoverDesignerPage() {
                                     ? "rgba(251,146,60,0.06)"
                                     : file
                                         ? "rgba(251,146,60,0.04)"
-                                        : "rgba(255,255,255,0.02)",
+                                        : "rgba(0,0,0,0.02)",
                                 transition: "all 0.2s",
                                 marginBottom: "24px",
                             }}
@@ -529,7 +527,7 @@ export default function CoverDesignerPage() {
                                     <p style={{ fontWeight: "600", fontSize: "14px" }}>
                                         {file.name}
                                     </p>
-                                    <p style={{ color: "#64748b", fontSize: "12px", marginTop: "4px" }}>
+                                    <p style={{ color: "#555555", fontSize: "12px", marginTop: "4px" }}>
                                         {(file.size / 1024).toFixed(1)} KB ·{" "}
                                         {file.name.split(".").pop()?.toUpperCase()}
                                     </p>
@@ -544,7 +542,7 @@ export default function CoverDesignerPage() {
                                             marginTop: "10px",
                                             background: "none",
                                             border: "none",
-                                            color: "#64748b",
+                                            color: "#555555",
                                             cursor: "pointer",
                                             fontSize: "12px",
                                             display: "inline-flex",
@@ -561,7 +559,7 @@ export default function CoverDesignerPage() {
                                         style={{
                                             width: "52px",
                                             height: "52px",
-                                            background: "rgba(255,255,255,0.05)",
+                                            background: "rgba(0,0,0,0.04)",
                                             borderRadius: "12px",
                                             display: "flex",
                                             alignItems: "center",
@@ -569,7 +567,7 @@ export default function CoverDesignerPage() {
                                             margin: "0 auto 14px",
                                         }}
                                     >
-                                        <Upload size={22} color="#64748b" />
+                                        <Upload size={22} color="#555555" />
                                     </div>
                                     <p style={{ fontWeight: "500", fontSize: "14px", marginBottom: "6px" }}>
                                         Drop your manuscript here
@@ -590,14 +588,14 @@ export default function CoverDesignerPage() {
                                         fontWeight: "700",
                                         letterSpacing: "0.08em",
                                         textTransform: "uppercase",
-                                        color: "#64748b",
+                                        color: "#555555",
                                         display: "block",
                                         marginBottom: "8px",
                                     }}
                                 >
                                     Book Title{" "}
                                     {file?.name.endsWith(".zip") && (
-                                        <span style={{ color: "#334155", fontWeight: "400", textTransform: "none", fontSize: "10px" }}>
+                                        <span style={{ color: "#737373", fontWeight: "400", textTransform: "none", fontSize: "10px" }}>
                                             (optional for ZIP — inferred per file)
                                         </span>
                                     )}
@@ -609,12 +607,12 @@ export default function CoverDesignerPage() {
                                     placeholder="e.g. The Art of Leadership"
                                     style={{
                                         width: "100%",
-                                        background: "rgba(255,255,255,0.05)",
-                                        border: "1px solid rgba(255,255,255,0.1)",
+                                        background: "rgba(0,0,0,0.04)",
+                                        border: "1px solid rgba(0,0,0,0.08)",
                                         borderRadius: "10px",
                                         padding: "12px 14px",
                                         fontSize: "14px",
-                                        color: "#e2e8f0",
+                                        color: "#555555",
                                         outline: "none",
                                         transition: "border-color 0.2s",
                                     }}
@@ -622,7 +620,7 @@ export default function CoverDesignerPage() {
                                         (e.currentTarget.style.borderColor = "#fb923c")
                                     }
                                     onBlur={(e) =>
-                                        (e.currentTarget.style.borderColor = "rgba(255,255,255,0.1)")
+                                        (e.currentTarget.style.borderColor = "rgba(0,0,0,0.08)")
                                     }
                                 />
                             </div>
@@ -633,13 +631,13 @@ export default function CoverDesignerPage() {
                                         fontWeight: "700",
                                         letterSpacing: "0.08em",
                                         textTransform: "uppercase",
-                                        color: "#64748b",
+                                        color: "#555555",
                                         display: "block",
                                         marginBottom: "8px",
                                     }}
                                 >
                                     Brief Description{" "}
-                                    <span style={{ color: "#334155", fontWeight: "400", textTransform: "none", fontSize: "10px" }}>
+                                    <span style={{ color: "#737373", fontWeight: "400", textTransform: "none", fontSize: "10px" }}>
                                         (optional — helps AI design better)
                                     </span>
                                 </label>
@@ -650,12 +648,12 @@ export default function CoverDesignerPage() {
                                     placeholder="e.g. A business guide for modern managers"
                                     style={{
                                         width: "100%",
-                                        background: "rgba(255,255,255,0.05)",
-                                        border: "1px solid rgba(255,255,255,0.1)",
+                                        background: "rgba(0,0,0,0.04)",
+                                        border: "1px solid rgba(0,0,0,0.08)",
                                         borderRadius: "10px",
                                         padding: "12px 14px",
                                         fontSize: "14px",
-                                        color: "#e2e8f0",
+                                        color: "#555555",
                                         outline: "none",
                                         transition: "border-color 0.2s",
                                     }}
@@ -663,7 +661,7 @@ export default function CoverDesignerPage() {
                                         (e.currentTarget.style.borderColor = "#fb923c")
                                     }
                                     onBlur={(e) =>
-                                        (e.currentTarget.style.borderColor = "rgba(255,255,255,0.1)")
+                                        (e.currentTarget.style.borderColor = "rgba(0,0,0,0.08)")
                                     }
                                 />
                             </div>
@@ -677,13 +675,13 @@ export default function CoverDesignerPage() {
                                     fontWeight: "700",
                                     letterSpacing: "0.08em",
                                     textTransform: "uppercase",
-                                    color: "#64748b",
+                                    color: "#555555",
                                     display: "block",
                                     marginBottom: "8px",
                                 }}
                             >
                                 🖼️ Custom Cover Image{" "}
-                                <span style={{ color: "#334155", fontWeight: "400", textTransform: "none", fontSize: "10px" }}>
+                                <span style={{ color: "#737373", fontWeight: "400", textTransform: "none", fontSize: "10px" }}>
                                     (optional — skips Nano Banana image generation)
                                 </span>
                             </label>
@@ -693,7 +691,7 @@ export default function CoverDesignerPage() {
                                 onChange={(e) => setCoverImage(e.target.files?.[0] ?? null)}
                                 style={{
                                     fontSize: "13px",
-                                    color: "#94a3b8",
+                                    color: "#555555",
                                     cursor: "pointer",
                                     width: "100%",
                                 }}
@@ -719,13 +717,13 @@ export default function CoverDesignerPage() {
                                     fontWeight: "700",
                                     letterSpacing: "0.08em",
                                     textTransform: "uppercase",
-                                    color: "#64748b",
+                                    color: "#555555",
                                     display: "block",
                                     marginBottom: "10px",
                                 }}
                             >
                                 Design Style{" "}
-                                <span style={{ color: "#334155", fontWeight: "400", textTransform: "none", fontSize: "10px" }}>
+                                <span style={{ color: "#737373", fontWeight: "400", textTransform: "none", fontSize: "10px" }}>
                                     (default: Premium)
                                 </span>
                             </label>
@@ -753,13 +751,13 @@ export default function CoverDesignerPage() {
                                             style={{
                                                 background: selected
                                                     ? "rgba(251,146,60,0.18)"
-                                                    : "rgba(255,255,255,0.04)",
-                                                border: `1px solid ${selected ? "#fb923c" : "rgba(255,255,255,0.1)"}`,
+                                                    : "rgba(0,0,0,0.03)",
+                                                border: `1px solid ${selected ? "#fb923c" : "rgba(0,0,0,0.08)"}`,
                                                 borderRadius: "8px",
                                                 padding: "7px 14px",
                                                 fontSize: "12px",
                                                 fontWeight: selected ? "700" : "500",
-                                                color: selected ? "#fb923c" : "#94a3b8",
+                                                color: selected ? "#fb923c" : "#555555",
                                                 cursor: "pointer",
                                                 transition: "all 0.15s",
                                                 whiteSpace: "nowrap",
@@ -767,13 +765,13 @@ export default function CoverDesignerPage() {
                                             onMouseOver={(e) => {
                                                 if (!selected) {
                                                     (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(251,146,60,0.4)";
-                                                    (e.currentTarget as HTMLButtonElement).style.color = "#e2e8f0";
+                                                    (e.currentTarget as HTMLButtonElement).style.color = "#555555";
                                                 }
                                             }}
                                             onMouseOut={(e) => {
                                                 if (!selected) {
-                                                    (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(255,255,255,0.1)";
-                                                    (e.currentTarget as HTMLButtonElement).style.color = "#94a3b8";
+                                                    (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(0,0,0,0.08)";
+                                                    (e.currentTarget as HTMLButtonElement).style.color = "#555555";
                                                 }
                                             }}
                                         >
@@ -797,7 +795,7 @@ export default function CoverDesignerPage() {
                                             borderRadius: "10px",
                                             padding: "11px 14px",
                                             fontSize: "13px",
-                                            color: "#e2e8f0",
+                                            color: "#555555",
                                             outline: "none",
                                             transition: "border-color 0.2s",
                                             boxSizing: "border-box",
@@ -873,7 +871,7 @@ export default function CoverDesignerPage() {
                                     !file || loading
                                         ? "rgba(251,146,60,0.3)"
                                         : "linear-gradient(135deg, #fb923c, #f97316)",
-                                color: "white",
+                                color: "#2a2929",
                                 border: "none",
                                 borderRadius: "12px",
                                 padding: "14px 24px",
@@ -940,7 +938,7 @@ export default function CoverDesignerPage() {
                                         : "Cover designed successfully"
                                     }
                                 </p>
-                                <p style={{ color: "#64748b", fontSize: "12px", marginTop: "2px" }}>
+                                <p style={{ color: "#555555", fontSize: "12px", marginTop: "2px" }}>
                                     {result!.original_filename}
                                     {isZipBundle && (
                                         <span style={{ marginLeft: "6px", color: "#fb923c" }}>
@@ -957,7 +955,7 @@ export default function CoverDesignerPage() {
                                     alignItems: "center",
                                     gap: "6px",
                                     background: "linear-gradient(135deg, #fb923c, #f97316)",
-                                    color: "white",
+                                    color: "#2a2929",
                                     border: "none",
                                     borderRadius: "8px",
                                     padding: "9px 18px",
@@ -1025,11 +1023,11 @@ export default function CoverDesignerPage() {
                                                         marginBottom: "2px",
                                                     }}
                                                 >
-                                                    <span style={{ color: "#64748b" }}>Style:</span>{" "}
+                                                    <span style={{ color: "#555555" }}>Style:</span>{" "}
                                                     {f.concept.style} · {f.concept.genre_label}
                                                 </p>
                                                 <p style={{ fontSize: "11px", color: "#475569" }}>
-                                                    <span style={{ color: "#64748b" }}>Motif:</span>{" "}
+                                                    <span style={{ color: "#555555" }}>Motif:</span>{" "}
                                                     {f.concept.motif}
                                                 </p>
                                                 <div
@@ -1049,7 +1047,7 @@ export default function CoverDesignerPage() {
                                                                 height: "18px",
                                                                 borderRadius: "4px",
                                                                 background: val,
-                                                                border: "1px solid rgba(255,255,255,0.1)",
+                                                                border: "1px solid rgba(0,0,0,0.08)",
                                                                 cursor: "help",
                                                             }}
                                                         />
@@ -1145,7 +1143,7 @@ export default function CoverDesignerPage() {
                                                             height: "28px",
                                                             borderRadius: "6px",
                                                             background: val,
-                                                            border: "1px solid rgba(255,255,255,0.1)",
+                                                            border: "1px solid rgba(0,0,0,0.08)",
                                                             cursor: "help",
                                                         }}
                                                     />
@@ -1170,19 +1168,19 @@ export default function CoverDesignerPage() {
                             style={{
                                 marginTop: "28px",
                                 background: "none",
-                                border: "1px solid rgba(255,255,255,0.1)",
+                                border: "1px solid rgba(0,0,0,0.08)",
                                 borderRadius: "10px",
                                 padding: "10px 20px",
-                                color: "#64748b",
+                                color: "#555555",
                                 fontSize: "13px",
                                 cursor: "pointer",
                                 transition: "all 0.2s",
                             }}
                             onMouseOver={(e) =>
-                                ((e.currentTarget as HTMLButtonElement).style.color = "#e2e8f0")
+                                ((e.currentTarget as HTMLButtonElement).style.color = "#555555")
                             }
                             onMouseOut={(e) =>
-                                ((e.currentTarget as HTMLButtonElement).style.color = "#64748b")
+                                ((e.currentTarget as HTMLButtonElement).style.color = "#555555")
                             }
                         >
                             ← Design another cover

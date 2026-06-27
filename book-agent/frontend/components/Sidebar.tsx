@@ -26,7 +26,7 @@ export default function Sidebar() {
   return (
     <div className="sidebar">
       {/* Brand */}
-      <div style={{ padding: "20px 16px 16px", borderBottom: "1px solid rgba(255,255,255,0.055)" }}>
+      <div style={{ padding: "20px 16px 16px", borderBottom: "1px solid rgba(0,0,0,0.06)" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "2px" }}>
           <div style={{
             width: "28px", height: "28px",
@@ -39,16 +39,16 @@ export default function Sidebar() {
           </div>
           <span style={{
             fontWeight: "700", fontSize: "14px",
-            letterSpacing: "-0.01em", color: "#F0F2F8",
-            fontFamily: "'Geist', sans-serif",
+            letterSpacing: "-0.01em", color: "#2a2929",
+            fontFamily: "'DM Sans', sans-serif",
           }}>
             Publixo AI
           </span>
         </div>
         <p style={{
-          fontSize: "10px", color: "#4A5468",
+          fontSize: "10px", color: "#737373",
           marginLeft: "38px", letterSpacing: "0.08em",
-          textTransform: "uppercase", fontFamily: "'Geist', sans-serif",
+          textTransform: "uppercase", fontFamily: "'DM Sans', sans-serif",
           fontWeight: "500",
         }}>
           Enterprise Suite
@@ -57,7 +57,7 @@ export default function Sidebar() {
 
       {/* Nav */}
       <nav style={{ flex: 1, paddingTop: "12px" }}>
-        <div style={{ padding: "0 8px 8px", fontSize: "10px", fontWeight: "600", letterSpacing: "0.08em", color: "#4A5468", textTransform: "uppercase", marginLeft: "8px", marginBottom: "4px" }}>
+        <div style={{ padding: "0 8px 8px", fontSize: "10px", fontWeight: "600", letterSpacing: "0.08em", color: "#737373", textTransform: "uppercase", marginLeft: "8px", marginBottom: "4px" }}>
           Navigation
         </div>
         {navItems.map(({ href, label, icon: Icon }) => {
@@ -89,13 +89,13 @@ export default function Sidebar() {
             display: "flex", alignItems: "center", justifyContent: "center",
             gap: "8px",
             background: "linear-gradient(135deg, #3B6FFF 0%, #5B85FF 100%)",
-            color: "white",
+            color: "#ffffff",
             border: "none",
             borderRadius: "8px",
             padding: "10px 16px",
             fontSize: "13px", fontWeight: "600",
             cursor: "pointer",
-            fontFamily: "'Geist', sans-serif",
+            fontFamily: "'DM Sans', sans-serif",
             boxShadow: "0 2px 12px rgba(59,111,255,0.3)",
             transition: "all 0.2s",
           }}>
@@ -112,22 +112,22 @@ export default function Sidebar() {
             display: "flex", alignItems: "center", justifyContent: "center",
             gap: "8px",
             background: "transparent",
-            color: "#4A5468",
-            border: "1px solid rgba(255,255,255,0.055)",
+            color: "#737373",
+            border: "1px solid rgba(0,0,0,0.06)",
             borderRadius: "8px",
             padding: "8px 16px",
             fontSize: "12px", fontWeight: "500",
             cursor: "pointer",
-            fontFamily: "'Geist', sans-serif",
+            fontFamily: "'DM Sans', sans-serif",
             transition: "all 0.2s",
           }}
           onMouseOver={e => {
-            (e.currentTarget as HTMLButtonElement).style.color = "#8A94A8";
-            (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(255,255,255,0.1)";
+            (e.currentTarget as HTMLButtonElement).style.color = "#555555";
+            (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(0,0,0,0.08)";
           }}
           onMouseOut={e => {
-            (e.currentTarget as HTMLButtonElement).style.color = "#4A5468";
-            (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(255,255,255,0.055)";
+            (e.currentTarget as HTMLButtonElement).style.color = "#737373";
+            (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(0,0,0,0.06)";
           }}
         >
           <LogOut size={13} /> Sign out

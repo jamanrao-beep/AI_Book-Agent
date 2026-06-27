@@ -34,7 +34,7 @@ import {
 
 // ── Status config ──────────────────────────────────────────────────────────────
 const STATUS_META: Record<string, { label: string; color: string; bg: string; border: string; glow: string }> = {
-  pending: { label: "Pending", color: "#94a3b8", bg: "rgba(148,163,184,0.08)", border: "rgba(148,163,184,0.2)", glow: "rgba(148,163,184,0.0)" },
+  pending: { label: "Pending", color: "#555555", bg: "rgba(148,163,184,0.08)", border: "rgba(148,163,184,0.2)", glow: "rgba(148,163,184,0.0)" },
   outlining: { label: "Creating Outline…", color: "#a78bfa", bg: "rgba(167,139,250,0.08)", border: "rgba(167,139,250,0.25)", glow: "rgba(167,139,250,0.15)" },
   generating: { label: "Writing Chapters…", color: "#60a5fa", bg: "rgba(96,165,250,0.08)", border: "rgba(96,165,250,0.25)", glow: "rgba(96,165,250,0.15)" },
   assembling: { label: "Assembling Book…", color: "#fbbf24", bg: "rgba(251,191,36,0.08)", border: "rgba(251,191,36,0.25)", glow: "rgba(251,191,36,0.15)" },
@@ -220,7 +220,7 @@ export default function BooksPage() {
 
   // ── Render ──────────────────────────────────────────────────────────────────
   return (
-    <div style={{ minHeight: "100vh", background: "#080b14", color: "#e2e8f0", fontFamily: "'DM Sans', sans-serif", position: "relative", overflowX: "hidden" }}>
+    <div style={{ minHeight: "100vh", background: "#080b14", color: "#555555", fontFamily: "'DM Sans', sans-serif", position: "relative", overflowX: "hidden" }}>
 
       {/* Ambient background orbs */}
       <div style={{ position: "fixed", inset: 0, pointerEvents: "none", zIndex: 0 }}>
@@ -232,8 +232,8 @@ export default function BooksPage() {
       {/* ── Nav ──────────────────────────────────────────────────────────────── */}
       <nav style={{
         position: "sticky", top: 0, zIndex: 50,
-        borderBottom: "1px solid rgba(255,255,255,0.06)",
-        background: "rgba(8,11,20,0.85)",
+        borderBottom: "1px solid rgba(0,0,0,0.06)",
+        background: "#ffffff",
         backdropFilter: "blur(20px)",
         padding: "0 32px",
         height: "58px",
@@ -250,13 +250,13 @@ export default function BooksPage() {
               fontSize: "13px", cursor: "pointer", padding: "6px 0",
               transition: "color 0.2s",
             }}
-            onMouseOver={e => (e.currentTarget.style.color = "#e2e8f0")}
+            onMouseOver={e => (e.currentTarget.style.color = "#555555")}
             onMouseOut={e => (e.currentTarget.style.color = "#475569")}
           >
             <ArrowLeft size={13} /> Dashboard
           </button>
 
-          <div style={{ width: "1px", height: "16px", background: "rgba(255,255,255,0.08)" }} />
+          <div style={{ width: "1px", height: "16px", background: "rgba(0,0,0,0.08)" }} />
 
           <div style={{ display: "flex", alignItems: "center", gap: "9px" }}>
             <div style={{
@@ -273,19 +273,19 @@ export default function BooksPage() {
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
-          <span style={{ fontSize: "12px", color: "#334155" }}>{user?.email}</span>
+          <span style={{ fontSize: "12px", color: "#737373" }}>{user?.email}</span>
           <button
             onClick={() => logout().then(() => router.push("/login"))}
             style={{
               display: "flex", alignItems: "center", gap: "6px",
-              background: "rgba(255,255,255,0.04)",
-              border: "1px solid rgba(255,255,255,0.08)",
+              background: "rgba(0,0,0,0.03)",
+              border: "1px solid rgba(0,0,0,0.08)",
               borderRadius: "8px", padding: "6px 12px",
-              color: "#64748b", fontSize: "12px", cursor: "pointer",
+              color: "#555555", fontSize: "12px", cursor: "pointer",
               transition: "all 0.2s",
             }}
-            onMouseOver={e => { e.currentTarget.style.color = "#e2e8f0"; e.currentTarget.style.borderColor = "rgba(255,255,255,0.15)"; }}
-            onMouseOut={e => { e.currentTarget.style.color = "#64748b"; e.currentTarget.style.borderColor = "rgba(255,255,255,0.08)"; }}
+            onMouseOver={e => { e.currentTarget.style.color = "#555555"; e.currentTarget.style.borderColor = "rgba(0,0,0,0.12)"; }}
+            onMouseOut={e => { e.currentTarget.style.color = "#555555"; e.currentTarget.style.borderColor = "rgba(0,0,0,0.08)"; }}
           >
             <LogOut size={12} /> Sign out
           </button>
@@ -311,12 +311,12 @@ export default function BooksPage() {
               fontSize: "32px", fontWeight: "800", letterSpacing: "-0.03em",
               fontFamily: "'Playfair Display', Georgia, serif",
               lineHeight: "1.1", marginBottom: "6px",
-              background: "linear-gradient(135deg, #f1f5f9 0%, #94a3b8 100%)",
+              background: "linear-gradient(135deg, #2a2929 0%, #555555 100%)",
               WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
             }}>
               My Books
             </h1>
-            <p style={{ color: "#334155", fontSize: "13px" }}>Generate and manage your AI-written manuscripts</p>
+            <p style={{ color: "#737373", fontSize: "13px" }}>Generate and manage your AI-written manuscripts</p>
           </div>
 
           <button
@@ -328,7 +328,7 @@ export default function BooksPage() {
                 : "linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)",
               border: showForm ? "1px solid rgba(99,102,241,0.4)" : "1px solid transparent",
               borderRadius: "12px", padding: "11px 20px",
-              color: "white", fontSize: "13px", fontWeight: "600",
+              color: showForm ? "#2a2929" : "#ffffff", fontSize: "13px", fontWeight: "600",
               cursor: "pointer",
               boxShadow: showForm ? "none" : "0 4px 20px rgba(99,102,241,0.4)",
               transition: "all 0.2s",
@@ -346,7 +346,7 @@ export default function BooksPage() {
         {/* ── New Book Form ───────────────────────────────────────────────────── */}
         {showForm && (
           <div style={{
-            background: "rgba(15,18,32,0.9)",
+            background: "#ffffff",
             border: "1px solid rgba(99,102,241,0.2)",
             borderRadius: "20px",
             padding: "32px",
@@ -367,7 +367,7 @@ export default function BooksPage() {
               </div>
               <div>
                 <h2 style={{ fontWeight: "700", fontSize: "16px", letterSpacing: "-0.01em" }}>Generate New Book</h2>
-                <p style={{ color: "#334155", fontSize: "12px", marginTop: "1px" }}>Configure your manuscript parameters</p>
+                <p style={{ color: "#737373", fontSize: "12px", marginTop: "1px" }}>Configure your manuscript parameters</p>
               </div>
             </div>
 
@@ -384,16 +384,16 @@ export default function BooksPage() {
                   placeholder="e.g. A thriller about an AI that gains consciousness, or a self-help book on building better habits…"
                   rows={3}
                   style={{
-                    width: "100%", background: "rgba(255,255,255,0.04)",
-                    border: "1px solid rgba(255,255,255,0.08)",
+                    width: "100%", background: "rgba(0,0,0,0.03)",
+                    border: "1px solid rgba(0,0,0,0.08)",
                     borderRadius: "12px", padding: "13px 16px",
-                    fontSize: "14px", color: "#e2e8f0",
+                    fontSize: "14px", color: "#555555",
                     outline: "none", resize: "vertical", lineHeight: "1.6",
                     fontFamily: "inherit", boxSizing: "border-box",
                     transition: "border-color 0.2s, box-shadow 0.2s",
                   }}
                   onFocus={e => { e.target.style.borderColor = "rgba(99,102,241,0.5)"; e.target.style.boxShadow = "0 0 0 3px rgba(99,102,241,0.1)"; }}
-                  onBlur={e => { e.target.style.borderColor = "rgba(255,255,255,0.08)"; e.target.style.boxShadow = "none"; }}
+                  onBlur={e => { e.target.style.borderColor = "rgba(0,0,0,0.08)"; e.target.style.boxShadow = "none"; }}
                 />
                 <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "8px" }}>
                   <button
@@ -439,9 +439,9 @@ export default function BooksPage() {
                             padding: "7px 14px",
                             borderRadius: "20px",
                             fontSize: "13px", fontWeight: "500",
-                            border: isSelected ? "1px solid rgba(167,139,250,0.6)" : "1px solid rgba(255,255,255,0.09)",
-                            background: isSelected ? "rgba(167,139,250,0.18)" : "rgba(255,255,255,0.03)",
-                            color: isSelected ? "#c4b5fd" : "#64748b",
+                            border: isSelected ? "1px solid rgba(167,139,250,0.6)" : "1px solid rgba(0,0,0,0.09)",
+                            background: isSelected ? "rgba(167,139,250,0.18)" : "rgba(0,0,0,0.03)",
+                            color: isSelected ? "#c4b5fd" : "#555555",
                             cursor: "pointer",
                             boxShadow: isSelected ? "0 0 12px rgba(167,139,250,0.2)" : "none",
                             transition: "all 0.15s",
@@ -467,15 +467,15 @@ export default function BooksPage() {
                   required
                   placeholder="e.g. The Art of Leadership"
                   style={{
-                    width: "100%", background: "rgba(255,255,255,0.04)",
-                    border: "1px solid rgba(255,255,255,0.08)",
+                    width: "100%", background: "rgba(0,0,0,0.03)",
+                    border: "1px solid rgba(0,0,0,0.08)",
                     borderRadius: "12px", padding: "13px 16px",
-                    fontSize: "14px", color: "#e2e8f0",
+                    fontSize: "14px", color: "#555555",
                     outline: "none", transition: "border-color 0.2s, box-shadow 0.2s",
                     boxSizing: "border-box",
                   }}
                   onFocus={e => { e.target.style.borderColor = "rgba(99,102,241,0.5)"; e.target.style.boxShadow = "0 0 0 3px rgba(99,102,241,0.1)"; }}
-                  onBlur={e => { e.target.style.borderColor = "rgba(255,255,255,0.08)"; e.target.style.boxShadow = "none"; }}
+                  onBlur={e => { e.target.style.borderColor = "rgba(0,0,0,0.08)"; e.target.style.boxShadow = "none"; }}
                 />
               </div>
 
@@ -484,7 +484,7 @@ export default function BooksPage() {
                 <label style={{ display: "block", fontSize: "11px", fontWeight: "700", letterSpacing: "0.08em", textTransform: "uppercase", color: "#475569", marginBottom: "10px" }}>
                   <span style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}>
                     <Globe size={11} /> Output language
-                    <span style={{ color: "#1e293b", fontSize: "10px", fontWeight: "400", textTransform: "none", letterSpacing: "0", marginLeft: "4px" }}>
+                    <span style={{ color: "#737373", fontSize: "10px", fontWeight: "400", textTransform: "none", letterSpacing: "0", marginLeft: "4px" }}>
                       — book will be written in this language
                     </span>
                   </span>
@@ -501,9 +501,9 @@ export default function BooksPage() {
                           padding: "5px 12px",
                           borderRadius: "8px",
                           fontSize: "12px", fontWeight: "500",
-                          border: isSelected ? "1px solid rgba(96,165,250,0.6)" : "1px solid rgba(255,255,255,0.07)",
-                          background: isSelected ? "rgba(96,165,250,0.15)" : "rgba(255,255,255,0.03)",
-                          color: isSelected ? "#93c5fd" : "#64748b",
+                          border: isSelected ? "1px solid rgba(96,165,250,0.6)" : "1px solid rgba(0,0,0,0.08)",
+                          background: isSelected ? "rgba(96,165,250,0.15)" : "rgba(0,0,0,0.03)",
+                          color: isSelected ? "#93c5fd" : "#555555",
                           cursor: "pointer",
                           boxShadow: isSelected ? "0 0 10px rgba(96,165,250,0.18)" : "none",
                           transition: "all 0.15s",
@@ -525,7 +525,7 @@ export default function BooksPage() {
                       width: "100%", background: "rgba(96,165,250,0.05)",
                       border: "1px solid rgba(96,165,250,0.25)",
                       borderRadius: "10px", padding: "11px 14px",
-                      fontSize: "13px", color: "#e2e8f0",
+                      fontSize: "13px", color: "#555555",
                       outline: "none", boxSizing: "border-box",
                       transition: "border-color 0.2s",
                     }}
@@ -534,7 +534,7 @@ export default function BooksPage() {
                   />
                 )}
                 {selectedLanguage && selectedLanguage !== "Other" && (
-                  <p style={{ color: "#334155", fontSize: "11px", marginTop: "6px" }}>
+                  <p style={{ color: "#737373", fontSize: "11px", marginTop: "6px" }}>
                     Book will be written entirely in <span style={{ color: "#60a5fa", fontWeight: "600" }}>{selectedLanguage}</span>.
                   </p>
                 )}
@@ -548,7 +548,7 @@ export default function BooksPage() {
                   color: "#475569", marginBottom: "10px",
                 }}>
                   Writing Style
-                  <span style={{ color: "#1e293b", fontSize: "10px", fontWeight: "400", marginLeft: "8px", textTransform: "none", letterSpacing: "0" }}>
+                  <span style={{ color: "#737373", fontSize: "10px", fontWeight: "400", marginLeft: "8px", textTransform: "none", letterSpacing: "0" }}>
                     (hover for details)
                   </span>
                 </label>
@@ -565,15 +565,15 @@ export default function BooksPage() {
                           padding: "6px 13px",
                           borderRadius: "8px",
                           fontSize: "12px", fontWeight: "500",
-                          border: selected ? "1px solid rgba(99,102,241,0.6)" : "1px solid rgba(255,255,255,0.07)",
-                          background: selected ? "rgba(99,102,241,0.18)" : "rgba(255,255,255,0.03)",
-                          color: selected ? "#a5b4fc" : "#64748b",
+                          border: selected ? "1px solid rgba(99,102,241,0.6)" : "1px solid rgba(0,0,0,0.08)",
+                          background: selected ? "rgba(99,102,241,0.18)" : "rgba(0,0,0,0.03)",
+                          color: selected ? "#a5b4fc" : "#555555",
                           cursor: "pointer", whiteSpace: "nowrap",
                           transition: "all 0.15s",
                           boxShadow: selected ? "0 0 12px rgba(99,102,241,0.2)" : "none",
                         }}
-                        onMouseOver={e => { if (!selected) { e.currentTarget.style.borderColor = "rgba(99,102,241,0.3)"; e.currentTarget.style.color = "#94a3b8"; } }}
-                        onMouseOut={e => { if (!selected) { e.currentTarget.style.borderColor = "rgba(255,255,255,0.07)"; e.currentTarget.style.color = "#64748b"; } }}
+                        onMouseOver={e => { if (!selected) { e.currentTarget.style.borderColor = "rgba(99,102,241,0.3)"; e.currentTarget.style.color = "#555555"; } }}
+                        onMouseOut={e => { if (!selected) { e.currentTarget.style.borderColor = "rgba(0,0,0,0.08)"; e.currentTarget.style.color = "#555555"; } }}
                       >
                         {label}
                       </button>
@@ -593,21 +593,21 @@ export default function BooksPage() {
                         width: "100%", background: "rgba(99,102,241,0.05)",
                         border: "1px solid rgba(99,102,241,0.25)",
                         borderRadius: "10px", padding: "11px 14px",
-                        fontSize: "13px", color: "#e2e8f0",
+                        fontSize: "13px", color: "#555555",
                         outline: "none", transition: "border-color 0.2s",
                         boxSizing: "border-box",
                       }}
                       onFocus={e => e.target.style.borderColor = "rgba(99,102,241,0.5)"}
                       onBlur={e => e.target.style.borderColor = "rgba(99,102,241,0.25)"}
                     />
-                    <p style={{ color: "#334155", fontSize: "11px", marginTop: "6px" }}>
+                    <p style={{ color: "#737373", fontSize: "11px", marginTop: "6px" }}>
                       Describe any style — AI will interpret and apply it throughout.
                     </p>
                   </div>
                 )}
 
                 {writingStyle && writingStyle !== "other" && (
-                  <p style={{ color: "#334155", fontSize: "11px", marginTop: "8px" }}>
+                  <p style={{ color: "#737373", fontSize: "11px", marginTop: "8px" }}>
                     Writing in a <span style={{ color: "#818cf8", fontWeight: "600" }}>{writingStyle}</span> style throughout.
                   </p>
                 )}
@@ -615,24 +615,24 @@ export default function BooksPage() {
 
               {/* ── Sliders ── */}
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px", marginBottom: "24px" }}>
-                <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: "12px", padding: "16px" }}>
+                <div style={{ background: "rgba(0,0,0,0.02)", border: "1px solid rgba(0,0,0,0.06)", borderRadius: "12px", padding: "16px" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
                     <label style={{ fontSize: "11px", fontWeight: "700", letterSpacing: "0.08em", textTransform: "uppercase", color: "#475569" }}>Pages</label>
                     <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "22px", fontWeight: "700", color: "#a78bfa", letterSpacing: "-0.02em" }}>{pages}</span>
                   </div>
                   <input type="range" min={5} max={200} step={5} value={pages} onChange={e => setPages(Number(e.target.value))} style={{ width: "100%", accentColor: "#6366f1" }} />
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "10px", color: "#334155", marginTop: "4px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "10px", color: "#737373", marginTop: "4px" }}>
                     <span>5</span><span>200</span>
                   </div>
                 </div>
 
-                <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: "12px", padding: "16px" }}>
+                <div style={{ background: "rgba(0,0,0,0.02)", border: "1px solid rgba(0,0,0,0.06)", borderRadius: "12px", padding: "16px" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
                     <label style={{ fontSize: "11px", fontWeight: "700", letterSpacing: "0.08em", textTransform: "uppercase", color: "#475569" }}>Words / Page</label>
                     <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "22px", fontWeight: "700", color: "#60a5fa", letterSpacing: "-0.02em" }}>{wpp}</span>
                   </div>
                   <input type="range" min={150} max={300} step={10} value={wpp} onChange={e => setWpp(Number(e.target.value))} style={{ width: "100%", accentColor: "#6366f1" }} />
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "10px", color: "#334155", marginTop: "4px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "10px", color: "#737373", marginTop: "4px" }}>
                     <span>150</span><span>300</span>
                   </div>
                 </div>
@@ -641,8 +641,8 @@ export default function BooksPage() {
               {/* ── Estimate strip ── */}
               <div style={{
                 display: "flex", gap: "0",
-                background: "rgba(255,255,255,0.02)",
-                border: "1px solid rgba(255,255,255,0.05)",
+                background: "rgba(0,0,0,0.02)",
+                border: "1px solid rgba(0,0,0,0.04)",
                 borderRadius: "12px", overflow: "hidden",
                 marginBottom: "24px",
               }}>
@@ -651,9 +651,9 @@ export default function BooksPage() {
                   { label: "Sections", value: `~${Math.ceil((pages * wpp) / 250) * 4}` },
                   { label: "Est. Time", value: `~${estimatedTime} min` },
                 ].map((stat, i) => (
-                  <div key={stat.label} style={{ flex: 1, padding: "14px 16px", textAlign: "center", borderRight: i < 2 ? "1px solid rgba(255,255,255,0.05)" : "none" }}>
-                    <div style={{ fontSize: "15px", fontWeight: "700", color: "#e2e8f0", fontFamily: "'Playfair Display', serif", letterSpacing: "-0.01em" }}>{stat.value}</div>
-                    <div style={{ fontSize: "10px", color: "#334155", fontWeight: "600", letterSpacing: "0.06em", textTransform: "uppercase", marginTop: "3px" }}>{stat.label}</div>
+                  <div key={stat.label} style={{ flex: 1, padding: "14px 16px", textAlign: "center", borderRight: i < 2 ? "1px solid rgba(0,0,0,0.04)" : "none" }}>
+                    <div style={{ fontSize: "15px", fontWeight: "700", color: "#555555", fontFamily: "'Playfair Display', serif", letterSpacing: "-0.01em" }}>{stat.value}</div>
+                    <div style={{ fontSize: "10px", color: "#737373", fontWeight: "600", letterSpacing: "0.06em", textTransform: "uppercase", marginTop: "3px" }}>{stat.label}</div>
                   </div>
                 ))}
               </div>
@@ -677,7 +677,7 @@ export default function BooksPage() {
                       : "linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)",
                     border: "none", borderRadius: "12px",
                     padding: "13px 24px",
-                    color: "white", fontSize: "14px", fontWeight: "700",
+                    color: "#2a2929", fontSize: "14px", fontWeight: "700",
                     cursor: loading || !title.trim() ? "not-allowed" : "pointer",
                     display: "flex", alignItems: "center", justifyContent: "center", gap: "8px",
                     boxShadow: loading || !title.trim() ? "none" : "0 4px 20px rgba(99,102,241,0.4)",
@@ -695,14 +695,14 @@ export default function BooksPage() {
                   type="button"
                   onClick={() => setShowForm(false)}
                   style={{
-                    background: "rgba(255,255,255,0.04)",
-                    border: "1px solid rgba(255,255,255,0.08)",
+                    background: "rgba(0,0,0,0.03)",
+                    border: "1px solid rgba(0,0,0,0.08)",
                     borderRadius: "12px", padding: "13px 20px",
-                    color: "#64748b", fontSize: "13px", fontWeight: "500",
+                    color: "#555555", fontSize: "13px", fontWeight: "500",
                     cursor: "pointer", transition: "all 0.2s",
                   }}
-                  onMouseOver={e => { e.currentTarget.style.color = "#e2e8f0"; e.currentTarget.style.borderColor = "rgba(255,255,255,0.15)"; }}
-                  onMouseOut={e => { e.currentTarget.style.color = "#64748b"; e.currentTarget.style.borderColor = "rgba(255,255,255,0.08)"; }}
+                  onMouseOver={e => { e.currentTarget.style.color = "#555555"; e.currentTarget.style.borderColor = "rgba(0,0,0,0.12)"; }}
+                  onMouseOut={e => { e.currentTarget.style.color = "#555555"; e.currentTarget.style.borderColor = "rgba(0,0,0,0.08)"; }}
                 >
                   Cancel
                 </button>
@@ -741,7 +741,7 @@ export default function BooksPage() {
                   <p style={{ fontWeight: "700", fontSize: "14px", color: "#fca5a5", marginBottom: "5px", letterSpacing: "-0.01em" }}>
                     "{activeJob.title}" couldn't be generated
                   </p>
-                  <p style={{ fontSize: "13px", color: "#94a3b8", lineHeight: "1.65" }}>
+                  <p style={{ fontSize: "13px", color: "#555555", lineHeight: "1.65" }}>
                     {activeJob.errorMessage ?? "Something went wrong while generating your book. Please try again."}
                   </p>
                   <div style={{ display: "flex", gap: "8px", marginTop: "12px" }}>
@@ -755,9 +755,9 @@ export default function BooksPage() {
                     </button>
                     <button
                       onClick={() => setActiveJob(null)}
-                      style={{ background: "none", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "8px", padding: "7px 14px", color: "#64748b", fontSize: "12px", cursor: "pointer", transition: "all 0.15s" }}
-                      onMouseOver={e => e.currentTarget.style.color = "#e2e8f0"}
-                      onMouseOut={e => e.currentTarget.style.color = "#64748b"}
+                      style={{ background: "none", border: "1px solid rgba(0,0,0,0.08)", borderRadius: "8px", padding: "7px 14px", color: "#555555", fontSize: "12px", cursor: "pointer", transition: "all 0.15s" }}
+                      onMouseOver={e => e.currentTarget.style.color = "#555555"}
+                      onMouseOut={e => e.currentTarget.style.color = "#555555"}
                     >
                       Dismiss
                     </button>
@@ -771,7 +771,7 @@ export default function BooksPage() {
           const meta = STATUS_META[activeJob.status] || STATUS_META.pending;
           return (
             <div style={{
-              background: `linear-gradient(135deg, ${meta.bg}, rgba(8,11,20,0.6))`,
+              background: `linear-gradient(135deg, ${meta.bg}, rgba(255,255,255,0.6))`,
               border: `1px solid ${meta.border}`,
               borderRadius: "16px",
               padding: "20px 24px",
@@ -807,7 +807,7 @@ export default function BooksPage() {
               </div>
 
               {/* Progress bar */}
-              <div style={{ height: "4px", background: "rgba(255,255,255,0.06)", borderRadius: "4px", overflow: "hidden", marginBottom: "10px" }}>
+              <div style={{ height: "4px", background: "rgba(0,0,0,0.06)", borderRadius: "4px", overflow: "hidden", marginBottom: "10px" }}>
                 <div style={{
                   height: "100%",
                   width: `${Math.max(4, progress)}%`,
@@ -828,14 +828,14 @@ export default function BooksPage() {
                   return (
                     <div key={step} style={{
                       flex: 1, height: "3px", borderRadius: "3px",
-                      background: isDone ? meta.color : isActive ? `${meta.color}66` : "rgba(255,255,255,0.06)",
+                      background: isDone ? meta.color : isActive ? `${meta.color}66` : "rgba(0,0,0,0.06)",
                       transition: "background 0.4s",
                     }} />
                   );
                 })}
               </div>
 
-              <p style={{ fontSize: "11px", color: "#334155", marginTop: "10px" }}>
+              <p style={{ fontSize: "11px", color: "#737373", marginTop: "10px" }}>
                 {activeJob.segments} sections written of ~{totalSegments}
               </p>
             </div>
@@ -852,14 +852,14 @@ export default function BooksPage() {
             }}>
               <Loader size={20} color="#818cf8" style={{ animation: "spin 1s linear infinite" }} />
             </div>
-            <p style={{ color: "#334155", fontSize: "13px" }}>Loading your manuscripts…</p>
+            <p style={{ color: "#737373", fontSize: "13px" }}>Loading your manuscripts…</p>
           </div>
 
         ) : books.length === 0 ? (
           <div style={{
             textAlign: "center", padding: "80px 0",
-            background: "rgba(255,255,255,0.01)",
-            border: "1px dashed rgba(255,255,255,0.06)",
+            background: "rgba(0,0,0,0.01)",
+            border: "1px dashed rgba(0,0,0,0.06)",
             borderRadius: "20px",
           }}>
             <div style={{
@@ -869,10 +869,10 @@ export default function BooksPage() {
             }}>
               <BookOpen size={28} color="#6366f1" style={{ opacity: 0.5 }} />
             </div>
-            <p style={{ fontSize: "16px", fontWeight: "600", color: "#64748b", marginBottom: "6px", fontFamily: "'Playfair Display', serif" }}>
+            <p style={{ fontSize: "16px", fontWeight: "600", color: "#555555", marginBottom: "6px", fontFamily: "'Playfair Display', serif" }}>
               No manuscripts yet
             </p>
-            <p style={{ fontSize: "13px", color: "#334155" }}>Click "New Book" above to generate your first AI manuscript</p>
+            <p style={{ fontSize: "13px", color: "#737373" }}>Click "New Book" above to generate your first AI manuscript</p>
           </div>
 
         ) : (
@@ -880,13 +880,13 @@ export default function BooksPage() {
             {/* List header */}
             <div style={{
               display: "flex", alignItems: "center", justifyContent: "space-between",
-              paddingBottom: "12px", borderBottom: "1px solid rgba(255,255,255,0.05)",
+              paddingBottom: "12px", borderBottom: "1px solid rgba(0,0,0,0.04)",
               marginBottom: "4px",
             }}>
-              <span style={{ fontSize: "11px", fontWeight: "700", letterSpacing: "0.1em", textTransform: "uppercase", color: "#334155" }}>
+              <span style={{ fontSize: "11px", fontWeight: "700", letterSpacing: "0.1em", textTransform: "uppercase", color: "#737373" }}>
                 {books.length} Manuscript{books.length !== 1 ? "s" : ""}
               </span>
-              <span style={{ fontSize: "11px", color: "#1e293b" }}>
+              <span style={{ fontSize: "11px", color: "#737373" }}>
                 {books.filter(b => b.status === "done").length} complete
               </span>
             </div>
@@ -902,9 +902,9 @@ export default function BooksPage() {
                   key={book.book_id}
                   style={{
                     background: isComplete
-                      ? "linear-gradient(135deg, rgba(52,211,153,0.04), rgba(15,18,32,0.6))"
-                      : "rgba(255,255,255,0.02)",
-                    border: `1px solid ${isComplete ? "rgba(52,211,153,0.15)" : "rgba(255,255,255,0.06)"}`,
+                      ? "linear-gradient(135deg, rgba(52,211,153,0.04), rgba(255,255,255,0.6))"
+                      : "rgba(0,0,0,0.02)",
+                    border: `1px solid ${isComplete ? "rgba(52,211,153,0.15)" : "rgba(0,0,0,0.06)"}`,
                     borderRadius: "14px",
                     padding: "18px 20px",
                     transition: "all 0.2s",
@@ -914,13 +914,13 @@ export default function BooksPage() {
                   }}
                   onMouseOver={e => {
                     const el = e.currentTarget;
-                    el.style.borderColor = isComplete ? "rgba(52,211,153,0.3)" : "rgba(255,255,255,0.1)";
+                    el.style.borderColor = isComplete ? "rgba(52,211,153,0.3)" : "rgba(0,0,0,0.08)";
                     el.style.transform = "translateY(-1px)";
                     el.style.boxShadow = `0 8px 32px rgba(0,0,0,0.3)`;
                   }}
                   onMouseOut={e => {
                     const el = e.currentTarget;
-                    el.style.borderColor = isComplete ? "rgba(52,211,153,0.15)" : "rgba(255,255,255,0.06)";
+                    el.style.borderColor = isComplete ? "rgba(52,211,153,0.15)" : "rgba(0,0,0,0.06)";
                     el.style.transform = "translateY(0)";
                     el.style.boxShadow = "none";
                   }}
@@ -942,8 +942,8 @@ export default function BooksPage() {
                         ? "rgba(52,211,153,0.1)"
                         : isFailed
                           ? "rgba(248,113,113,0.08)"
-                          : "rgba(255,255,255,0.04)",
-                      border: `1px solid ${isComplete ? "rgba(52,211,153,0.2)" : isFailed ? "rgba(248,113,113,0.15)" : "rgba(255,255,255,0.07)"}`,
+                          : "rgba(0,0,0,0.03)",
+                      border: `1px solid ${isComplete ? "rgba(52,211,153,0.2)" : isFailed ? "rgba(248,113,113,0.15)" : "rgba(0,0,0,0.08)"}`,
                       borderRadius: "11px",
                       display: "flex", alignItems: "center", justifyContent: "center",
                     }}>
@@ -961,13 +961,13 @@ export default function BooksPage() {
                         fontWeight: "600", fontSize: "14px",
                         letterSpacing: "-0.01em",
                         whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-                        color: isComplete ? "#f1f5f9" : "#94a3b8",
+                        color: isComplete ? "#2a2929" : "#555555",
                         marginBottom: "3px",
                       }}>
                         {book.title}
                       </p>
                       <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                        <span style={{ fontSize: "11px", color: "#1e293b" }}>
+                        <span style={{ fontSize: "11px", color: "#737373" }}>
                           {new Date(book.created_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
                         </span>
                         {isActive && (
@@ -1071,7 +1071,7 @@ export default function BooksPage() {
         @keyframes slideDown  { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes pulse      { 0%,100% { opacity:1; } 50% { opacity:0.3; } }
         @keyframes shimmer    { 0%,100% { opacity:0.4; } 50% { opacity:1; } }
-        input::placeholder    { color: #334155; }
+        input::placeholder    { color: #737373; }
       `}</style>
     </div>
   );
