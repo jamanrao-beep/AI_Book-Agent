@@ -91,7 +91,7 @@ function LoginContent() {
               <FileText size={14} color="white" />
             </div>
             <span style={{ color: "#F0F2F8", fontFamily: "'Geist', sans-serif", fontSize: "15px", fontWeight: "700", letterSpacing: "-0.01em" }}>
-              Editorial AI
+              Publixo AI
             </span>
           </div>
         </div>
@@ -226,7 +226,7 @@ function LoginContent() {
                 }}>
                   <FileText size={13} color="white" />
                 </div>
-                <span style={{ fontSize: "14px", fontWeight: "700", color: "#F0F2F8" }}>Editorial AI</span>
+                <span style={{ fontSize: "14px", fontWeight: "700", color: "#F0F2F8" }}>Publixo AI</span>
               </div>
 
               <h1 style={{
@@ -320,7 +320,7 @@ function LoginContent() {
               </div>
 
               <p style={{ marginTop: "20px", fontSize: "13px", color: "#8A94A8" }}>
-                New to Editorial AI?{" "}
+                New to Publixo AI?{" "}
                 <button onClick={() => { setMode("signup"); setError(""); }} style={{
                   background: "none", border: "none", color: "#6B93FF",
                   cursor: "pointer", fontSize: "13px", fontWeight: "600",

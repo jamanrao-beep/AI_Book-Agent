@@ -354,7 +354,7 @@ function HomeScreen({ onSelect }: { onSelect: (m: AppMode) => void }) {
                     <div style={{ width: "28px", height: "28px", background: "linear-gradient(135deg,#f59e0b,#d97706)", borderRadius: "7px", display: "flex", alignItems: "center", justifyContent: "center" }}>
                         <LayoutTemplate size={14} color="white" />
                     </div>
-                    <span style={{ fontSize: "12px", fontWeight: "800", color: "#fbbf24", letterSpacing: "0.08em" }}>EDITORIAL AI · BOOK LAYOUT DESIGNER</span>
+                    <span style={{ fontSize: "12px", fontWeight: "800", color: "#fbbf24", letterSpacing: "0.08em" }}>PUBLIXO AI · BOOK LAYOUT DESIGNER</span>
                 </div>
                 <h1 style={{ fontSize: "52px", fontWeight: "900", letterSpacing: "-0.04em", color: "#e2e8f0", marginBottom: "16px", fontFamily: "'Playfair Display', serif", lineHeight: "1.05" }}>
                     Design Your Book<br /><span style={{ color: "#f59e0b" }}>Like a Publisher</span>
@@ -874,7 +874,7 @@ export default function LayoutDesignerPage() {
                     <div style={{ width: "32px", height: "32px", background: "linear-gradient(135deg,#f59e0b,#d97706)", borderRadius: "8px", display: "flex", alignItems: "center", justifyContent: "center" }}>
                         <LayoutTemplate size={16} color="white" />
                     </div>
-                    <span style={{ fontWeight: "700", fontSize: "15px", letterSpacing: "-0.01em" }}>Editorial AI</span>
+                    <span style={{ fontWeight: "700", fontSize: "15px", letterSpacing: "-0.01em" }}>Publixo AI</span>
                     <div style={{ marginLeft: "8px", background: isAdvanced ? "rgba(245,158,11,0.15)" : "rgba(99,102,241,0.15)", border: `1px solid ${isAdvanced ? "rgba(245,158,11,0.4)" : "rgba(99,102,241,0.4)"}`, borderRadius: "6px", padding: "2px 10px", fontSize: "10px", fontWeight: "700", letterSpacing: "0.06em", color: isAdvanced ? "#fbbf24" : "#a5b4fc" }}>
                         {isAdvanced ? "⚙️ ADVANCED" : "👤 AUTHOR"}
                     </div>

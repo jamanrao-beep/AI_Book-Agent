@@ -393,7 +393,7 @@ export default function DashboardHome() {
               letterSpacing: "-0.01em",
             }}
           >
-            Editorial AI
+            Publixo AI
           </span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: "20px" }}>

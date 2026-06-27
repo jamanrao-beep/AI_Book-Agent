@@ -42,7 +42,7 @@ export default function Sidebar() {
             letterSpacing: "-0.01em", color: "#F0F2F8",
             fontFamily: "'Geist', sans-serif",
           }}>
-            Editorial AI
+            Publixo AI
           </span>
         </div>
         <p style={{

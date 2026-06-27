@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Editorial AI — Enterprise Manuscript Suite",
+  title: "Publixo AI — Enterprise Manuscript Suite",
   description:
     "Generate full print-ready books in PDF and DOCX using AI. Enterprise-grade manuscript authoring.",
 };

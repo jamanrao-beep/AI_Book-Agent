@@ -1025,7 +1025,7 @@ def save_corrected_docx(corrected_text: str, output_path: str, original_title: s
     for run in title_para.runs:
         _set_run_unicode_font(run, body_font_name)
 
-    sub = doc.add_paragraph("Proofread and corrected by Editorial AI")
+    sub = doc.add_paragraph("Proofread and corrected by Publixo AI")
     if sub.runs:
         sub.runs[0].italic = True
     doc.add_paragraph()
@@ -1228,7 +1228,7 @@ def save_corrected_pdf(
     story = []
     safe_title = _safe_html(original_title)
     story.append(Paragraph(safe_title, title_style))
-    story.append(Paragraph("Proofread and corrected by Editorial AI", subtitle_style))
+    story.append(Paragraph("Proofread and corrected by Publixo AI", subtitle_style))
     story.append(Spacer(1, 4))
     story.append(Paragraph(f"Corrections applied: {applied_str}", badge_style))
     story.append(Spacer(1, 6))

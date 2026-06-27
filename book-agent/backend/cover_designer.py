@@ -1444,7 +1444,7 @@ def _render_cover_pdf_legacy(concept: dict, output_path: str,
             
         c.setFillColorRGB(*acc)
         c.setFont("Helvetica-Bold", 8.5)
-        c.drawRightString(W - 20 * mm, BAND_H * 0.38, "EDITORIAL AI")
+        c.drawRightString(W - 20 * mm, BAND_H * 0.38, "PUBLIXO AI")
 
         c.saveState()
         c.setFillAlpha(0.28)

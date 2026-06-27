@@ -4744,7 +4744,7 @@ hr.rule {{
         return _html.escape(t or "", quote=False)
 
     # ── Build chapter XHTML files ─────────────────────────────────────────────
-    xhtml_items: list[tuple[str, str]] = []   # (manifest_id, filename_in_OEBPS)
+    xhtml_items: list[tuple[str, str, str]] = []   # (manifest_id, filename_in_OEBPS, content)
 
     # Title page
     title_xhtml = f"""<?xml version="1.0" encoding="UTF-8"?>

@@ -337,7 +337,7 @@ export default function SettingsPage() {
                         <div>
                             <div style={{ fontWeight: "600", fontSize: "14px", marginBottom: "4px" }}>Deactivate Workspace</div>
                             <div style={{ fontSize: "13px", color: "#8A94A8" }}>
-                                Temporarily disable your Editorial AI account and freeze all active manuscript tokens.
+                                Temporarily disable your Publixo AI account and freeze all active manuscript tokens.
                             </div>
                         </div>
                         <button style={{
@@ -362,7 +362,7 @@ export default function SettingsPage() {
                     display: "flex", alignItems: "center", justifyContent: "space-between",
                     fontSize: "12px", color: "#4A5468",
                 }}>
-                    <span>© 2025 Editorial AI Suite · v2.4.0-Stable</span>
+                    <span>© 2025 Publixo AI Suite · v2.4.0-Stable</span>
                     <div style={{ display: "flex", gap: "16px" }}>
                         <span style={{ cursor: "pointer" }}>Privacy Policy</span>
                         <span style={{ cursor: "pointer" }}>Terms of Excellence</span>

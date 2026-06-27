@@ -318,7 +318,7 @@ export default function TranslatePage() {
                     <div style={{ width: "32px", height: "32px", background: "linear-gradient(135deg, #6366f1, #8b5cf6)", borderRadius: "8px", display: "flex", alignItems: "center", justifyContent: "center" }}>
                         <FileText size={16} color="white" />
                     </div>
-                    <span style={{ fontWeight: "700", fontSize: "15px", letterSpacing: "-0.01em" }}>Editorial AI</span>
+                    <span style={{ fontWeight: "700", fontSize: "15px", letterSpacing: "-0.01em" }}>Publixo AI</span>
                 </div>
                 <button
                     onClick={() => router.push("/dashboard")}

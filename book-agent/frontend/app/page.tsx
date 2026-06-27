@@ -49,7 +49,7 @@ export default function Home() {
             <FileText size={14} color="white" />
           </div>
           <span style={{ fontWeight: "700", fontSize: "15px", color: "#2a2929ff" }}>
-            Editorial AI
+            Publixo AI
           </span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
@@ -512,7 +512,7 @@ export default function Home() {
           Ready to Write Your Book?
         </h2>
         <p style={{ color: "#888", fontSize: "16px", marginBottom: "36px" }}>
-          The blank page is a thing of the past. Join authors using Editorial AI
+          The blank page is a thing of the past. Join authors using Publixo AI
           to bring their stories to life.
         </p>
         <Link href="/login?signup=true">
@@ -556,7 +556,7 @@ export default function Home() {
           }}
         >
           <FileText size={14} />
-          Editorial AI
+          Publixo AI
         </div>
         <div
           style={{
@@ -571,7 +571,7 @@ export default function Home() {
           <span style={{ cursor: "pointer" }}>Documentation</span>
         </div>
         <span style={{ fontSize: "12px", color: "#aaa" }}>
-          © 2026 Editorial AI Suite
+          © 2026 Publixo AI Suite
         </span>
       </footer>
     </div>

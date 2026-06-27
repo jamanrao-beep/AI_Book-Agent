@@ -59,7 +59,7 @@ from cover_designer import design_cover
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
-    title="Editorial AI — Book Writing + Proofreading + Cover Design",
+    title="Publixo AI — Book Writing + Proofreading + Cover Design",
     description="Generate full books, proofread documents, and design covers using Google Gemini (Nano Banana)",
     version="5.0.0",
     lifespan=lifespan,
@@ -71,13 +71,17 @@ app = FastAPI(
 # echoes the origin back on both preflight (OPTIONS) and actual requests.
 # ─────────────────────────────────────────────────────────────────────────────
 
-ALLOWED_ORIGINS = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "").split(",") if o.strip()] or [
+_env_origins = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "").split(",") if o.strip()]
+_fallback_origins = [
     "https://ai-book-agent-23.vercel.app",  # production frontend
+    "https://publixoai.com",                 # production frontend (new domain)
+    "https://www.publixoai.com",             # production frontend (new domain)
     "http://localhost:3000",                 # local dev
     "http://localhost:3001",                 # alternate local dev port
     "http://localhost:3002",                 # fallback Next.js port
     "http://localhost:3003",                 # fallback Next.js port
 ]
+ALLOWED_ORIGINS = list(set(_env_origins + _fallback_origins))
 
 app.add_middleware(
     CORSMiddleware,
@@ -465,7 +469,7 @@ class BookRequest(BaseModel):
 
 @app.get("/")
 def root():
-    return {"status": "running", "message": "Editorial AI Backend v4.1 🚀"}
+    return {"status": "running", "message": "Publixo AI Backend v4.1 🚀"}
 
 
 # ─────────────────────────────────────────────────────────────────────────────

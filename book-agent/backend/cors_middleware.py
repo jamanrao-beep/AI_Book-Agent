@@ -1,7 +1,7 @@
 """
 cors_middleware.py
 ──────────────────
-Drop-in CORS fix for the Editorial AI backend.
+Drop-in CORS fix for the Publixo AI backend.
 
 USAGE (Flask)
 ─────────────
