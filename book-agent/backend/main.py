@@ -578,9 +578,9 @@ def download_docx(book_id: int):
 
 
 @app.get("/books")
-def list_books():
+def list_books(user_id: str):
     db = SessionLocal()
-    books = db.query(Book).order_by(Book.created_at.desc()).all()
+    books = db.query(Book).filter(Book.user_id == user_id).order_by(Book.created_at.desc()).all()
     db.close()
     return [
         {

@@ -94,25 +94,27 @@ export default function BooksPage() {
   const [selectedLanguage, setSelectedLanguage] = useState("English");
   const [customLanguage, setCustomLanguage] = useState("");
 
-  // ── Auth ────────────────────────────────────────────────────────────────────
-  useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (u) => {
-      if (!u) router.push("/login");
-      else setUser(u);
-    });
-    return () => unsub();
-  }, [router]);
-
   // ── Fetch books ─────────────────────────────────────────────────────────────
-  const fetchBooks = useCallback(async () => {
+  const fetchBooks = useCallback(async (uid?: string) => {
+    const targetUid = uid || auth.currentUser?.uid || "anon";
     try {
-      const res = await listBooks();
+      const res = await listBooks(targetUid);
       setBooks(res.data);
     } catch { /* ignore */ }
     finally { setLoadingBooks(false); }
   }, []);
 
-  useEffect(() => { fetchBooks(); }, [fetchBooks]);
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (u) => {
+      if (!u) {
+        router.push("/login");
+      } else {
+        setUser(u);
+        fetchBooks(u.uid);
+      }
+    });
+    return () => unsub();
+  }, [router, fetchBooks]);
 
   // ── Poll active job ─────────────────────────────────────────────────────────
   useEffect(() => {

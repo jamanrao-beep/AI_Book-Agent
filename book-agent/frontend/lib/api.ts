@@ -169,7 +169,7 @@ export const getBookStatus = (id: number) =>
 export const getProgress = (id: number) =>
   API.get<BookProgress>(`/book/${id}/progress`);
 
-export const listBooks = () => API.get<BookStatus[]>("/books");
+export const listBooks = (user_id: string) => API.get<BookStatus[]>(`/books?user_id=${user_id}`);
 
 export const downloadPDF = (id: number) =>
   `${API.defaults.baseURL}/book/${id}/download/pdf`;

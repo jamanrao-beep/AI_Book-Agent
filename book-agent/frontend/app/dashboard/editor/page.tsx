@@ -262,14 +262,16 @@ export default function BookEditorPage() {
                         const statusRes = await fetch(
                             `${API_BASE}/editor/${session.session_id}/job/${job_id}/status`
                         );
+                        if (!statusRes.ok) throw new Error("Status endpoint returned " + statusRes.status);
                         const status = await statusRes.json();
                         consecutiveErrors = 0;
                         if (status.state === "done") return resolve(status.result as EditorResult);
-                        if (status.state === "error") return reject(new Error(status.error || "Edit failed"));
+                        if (status.state === "error") return reject(new Error(status.error || "Edit failed in backend"));
                         setTimeout(poll, 3000);
                     } catch (err) {
+                        console.warn("Polling error:", err);
                         consecutiveErrors++;
-                        if (consecutiveErrors >= 10) return reject(new Error("Polling failed repeatedly"));
+                        if (consecutiveErrors >= 10) return reject(new Error("Polling failed repeatedly. Backend might be restarting."));
                         setTimeout(poll, Math.min(3000 * consecutiveErrors, 15000));
                     }
                 };

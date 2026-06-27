@@ -10,7 +10,36 @@ import {
   ArrowRight,
 } from "lucide-react";
 
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { loginWithGoogle, auth } from "@/lib/firebase";
+import { onAuthStateChanged, getRedirectResult } from "firebase/auth";
+
 export default function Home() {
+  const router = useRouter();
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (user) => {
+      if (user) router.push("/dashboard");
+    });
+    getRedirectResult(auth).catch((err) => {
+      console.error(err);
+      setLoading(false);
+    });
+    return () => unsub();
+  }, [router]);
+
+  const handleGoogle = async () => {
+    setLoading(true);
+    try {
+      await loginWithGoogle();
+    } catch (err) {
+      console.error(err);
+      setLoading(false);
+    }
+  };
+
   return (
     <div
       style={{
@@ -85,14 +114,14 @@ export default function Home() {
           >
             Sign In
           </Link>
-          <Link href="/login?signup=true">
-            <button
-              className="btn-dark"
-              style={{ padding: "8px 18px", fontSize: "13px" }}
-            >
-              Start Writing Free
-            </button>
-          </Link>
+          <button
+            onClick={handleGoogle}
+            disabled={loading}
+            className="btn-dark"
+            style={{ padding: "8px 18px", fontSize: "13px", opacity: loading ? 0.7 : 1 }}
+          >
+            {loading ? "Connecting..." : "Start Writing Free"}
+          </button>
         </div>
       </nav>
 
@@ -158,22 +187,23 @@ export default function Home() {
           or Word document.
         </p>
         <div style={{ display: "flex", gap: "12px", justifyContent: "center" }}>
-          <Link href="/login?signup=true">
-            <button
-              className="btn-dark"
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "8px",
-                padding: "14px 28px",
-                fontSize: "14px",
-                justifyContent: "center",
-                margin: "0 auto",
-              }}
-            >
-              Generate Your Book Free <ArrowRight size={16} />
-            </button>
-          </Link>
+          <button
+            onClick={handleGoogle}
+            disabled={loading}
+            className="btn-dark"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+              padding: "14px 28px",
+              fontSize: "14px",
+              justifyContent: "center",
+              margin: "0 auto",
+              opacity: loading ? 0.7 : 1,
+            }}
+          >
+            {loading ? "Connecting..." : <>Generate Your Book Free <ArrowRight size={16} /></>}
+          </button>
           <Link href="/login">
             <button
               className="btn-outline"
