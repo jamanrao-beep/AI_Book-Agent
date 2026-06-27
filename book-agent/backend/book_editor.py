@@ -1732,6 +1732,7 @@ def _edit_chunk_via_api(
     is_first_chunk: bool,
     context_prefix: str = "",
     context_suffix: str = "",
+    conversation_history: Optional[List[dict]] = None,
 ) -> Tuple[str, bool]:
     """
     Edit a single text chunk via the OpenAI API.
@@ -1763,20 +1764,31 @@ def _edit_chunk_via_api(
         ensure_ascii=False,
     )
 
-    messages = [
-        {"role": "system", "content": _CHAPTER_EDIT_SYSTEM},
-        {
-            "role": "user",
-            "content": (
-                f"Book: \"{book_title}\" | "
-                f"Chapter {chapter_idx + 1}/{total_chapters}"
-                f"{continuation_note}"
-                f"{context_block}\n\n"
-                f"Edit instruction: {instruction}\n\n"
-                f"Chapter JSON:\n{payload}"
-            ),
-        },
-    ]
+    safe_history = []
+    if conversation_history:
+        safe_history = [
+            {**m, "content": str(m.get("content") or "")}
+            for m in (
+                conversation_history[-4:]
+                if len(conversation_history) > 4
+                else conversation_history
+            )
+            if isinstance(m, dict) and m.get("role") in ("user", "assistant", "system")
+        ]
+
+    messages = [{"role": "system", "content": _CHAPTER_EDIT_SYSTEM}]
+    messages.extend(safe_history)
+    messages.append({
+        "role": "user",
+        "content": (
+            f"Book: \"{book_title}\" | "
+            f"Chapter {chapter_idx + 1}/{total_chapters}"
+            f"{continuation_note}"
+            f"{context_block}\n\n"
+            f"Edit instruction: {instruction}\n\n"
+            f"Chapter JSON:\n{payload}"
+        ),
+    })
 
     estimated_out = min(MAX_EDIT_TOKENS, max(2048, int(len(chunk_text) * 0.7)))
     last_exc: Optional[Exception] = None
@@ -1790,8 +1802,6 @@ def _edit_chunk_via_api(
                 temperature=0.7,
             )
             raw = (resp.choices[0].message.content or "").strip()
-            raw = re.sub(r"^```json\s*", "", raw, flags=re.IGNORECASE)
-            raw = re.sub(r"\s*```$", "", raw)
             result = _try_parse_json(raw)
             if result and isinstance(result, dict) and "content" in result:
                 return str(result["content"]), bool(result.get("changed", True))
@@ -1812,6 +1822,7 @@ def _edit_single_chapter(
     book_title:     str,
     chapter_idx:    int,
     total_chapters: int,
+    conversation_history: Optional[List[dict]] = None,
 ) -> dict:
     """
     Edit one chapter with full sub-chunking and optional swarm quality pass.
@@ -1839,6 +1850,7 @@ def _edit_single_chapter(
         draft, changed = _edit_chunk_via_api(
             content, title, instruction, book_title,
             chapter_idx, total_chapters, True,
+            conversation_history=conversation_history,
         )
         if changed and len(content) >= SWARM_THRESHOLD:
             log.info("Swarm quality pass for chapter %d", chapter_idx + 1)
@@ -1878,6 +1890,7 @@ def _edit_single_chapter(
             i == 0,
             context_prefix,
             ctx_suffix,
+            conversation_history=conversation_history,
         )
         context_prefix = edited[-CHUNK_OVERLAP_CHARS:]
         edited_chunks.append(edited)
@@ -2007,8 +2020,6 @@ def _apply_edit_whole_book(
         temperature=0.7,
     )
     raw = (resp.choices[0].message.content or "").strip()
-    raw = re.sub(r"^```json\s*", "", raw, flags=re.IGNORECASE)
-    raw = re.sub(r"\s*```$", "", raw)
 
     result = _try_parse_json(raw)
     if result and isinstance(result, dict) and "chapters" in result:
@@ -2091,10 +2102,15 @@ def _apply_edit_chunked(
 
     updated_chapters: List[Optional[dict]] = [None] * n
     changed_numbers:  List[int]            = []
+    target_numbers = set(_extract_chapter_targets(user_instruction, book_structure))
 
     def _worker(idx_and_chapter: Tuple[int, dict]) -> Tuple[int, dict]:
         idx, chapter = idx_and_chapter
-        return idx, _edit_single_chapter(chapter, user_instruction, book_title, idx, n)
+        if chapter.get("chapter_number", idx + 1) not in target_numbers:
+            ch_copy = copy.deepcopy(chapter)
+            ch_copy.pop("_changed", None)
+            return idx, ch_copy
+        return idx, _edit_single_chapter(chapter, user_instruction, book_title, idx, n, _conversation_history)
 
     if n >= 3 and MAX_WORKERS > 1:
         with ThreadPoolExecutor(max_workers=min(MAX_WORKERS, n)) as executor:
@@ -2114,7 +2130,12 @@ def _apply_edit_chunked(
                     updated_chapters[idx] = chapters[idx]
     else:
         for idx, chapter in enumerate(chapters):
-            result_ch = _edit_single_chapter(chapter, user_instruction, book_title, idx, n)
+            if chapter.get("chapter_number", idx + 1) not in target_numbers:
+                ch_copy = copy.deepcopy(chapter)
+                ch_copy.pop("_changed", None)
+                result_ch = ch_copy
+            else:
+                result_ch = _edit_single_chapter(chapter, user_instruction, book_title, idx, n, _conversation_history)
             if result_ch.pop("_changed", False):
                 changed_numbers.append(result_ch.get("chapter_number", idx + 1))
             updated_chapters[idx] = result_ch

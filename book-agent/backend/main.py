@@ -130,7 +130,7 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
     return JSONResponse(
         status_code=500,
-        content={"detail": f"Internal server error: {exc}"},
+        content={"detail": "Something went wrong on our end. Please try again later."},
     )
 
 
@@ -734,7 +734,7 @@ async def proofread_upload(file: UploadFile = File(...)):
     logger.info("Proofread/upload: filename=%s size=%s", filename, file.size or "unknown")
 
     if ext not in ALLOWED_PROOFREAD_EXTENSIONS:
-        raise HTTPException(400, f"Unsupported file type '{ext}'. Upload .txt, .docx, .pdf, .md, .rtf, or .zip")
+        raise HTTPException(400, "That file type isn\'t supported. Please upload a .txt, .docx, .pdf, .md, .rtf, or .zip file.")
 
     job_id = uuid.uuid4().hex
     tmp_path = os.path.join(OUTPUT_DIR, f"upload_{job_id}{ext}")
@@ -745,7 +745,7 @@ async def proofread_upload(file: UploadFile = File(...)):
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(500, f"Upload failed: {exc}") from exc
+        raise HTTPException(500, "We encountered an issue uploading your file. Please try again.") from exc
 
     _proofread_jobs[job_id] = {"stage": "queued", "original_filename": filename}
 
@@ -794,7 +794,7 @@ async def proofread_document(file: UploadFile = File(...)):
     logger.info("Proofread request: filename=%s size_hint=%s", filename, file.size)
 
     if ext not in ALLOWED_PROOFREAD_EXTENSIONS:
-        raise HTTPException(400, f"Unsupported file type '{ext}'. Upload .txt, .docx, .pdf, .md, .rtf, or .zip")
+        raise HTTPException(400, "That file type isn\'t supported. Please upload a .txt, .docx, .pdf, .md, .rtf, or .zip file.")
 
     tmp_path = os.path.join(OUTPUT_DIR, f"upload_{uuid.uuid4().hex}{ext}")
     try:
@@ -861,7 +861,7 @@ async def proofread_document(file: UploadFile = File(...)):
     except Exception as exc:
         # Log the full traceback so we can see exactly what crashed
         logger.error("Proofread failed for '%s': %s\n%s", filename, exc, traceback.format_exc())
-        raise HTTPException(500, f"Proofreading failed: {exc}") from exc
+        raise HTTPException(500, "We encountered an issue proofreading your file. Please try again.") from exc
 
     finally:
         if os.path.exists(tmp_path):
@@ -1195,7 +1195,7 @@ async def design_cover_endpoint(
             try:
                 cover_results = _process_zip_for_covers(tmp_path, book_title, description, design_style)
             except ValueError as e:
-                raise HTTPException(400, str(e))
+                raise HTTPException(400, "We encountered an issue processing your request. Please check your inputs.")
 
             zip_job_id   = uuid.uuid4().hex
             bundle_path  = _build_result_zip(cover_results, zip_job_id)
@@ -1383,7 +1383,7 @@ async def scan_handwritten(
     for u in all_uploads:
         ext = os.path.splitext(u.filename or "")[1].lower()
         if ext not in SCAN_ALLOWED_EXTS:
-            raise HTTPException(400, f"Unsupported file type '{ext}'. Accepted: images, .pdf, .docx, .zip")
+            raise HTTPException(400, "That file type isn\'t supported. Please upload an image, .pdf, .docx, or .zip file.")
 
     job_id = uuid.uuid4().hex
     staged_paths: list[str] = []
@@ -1475,7 +1475,7 @@ def download_scan_pdf(job_id: str):
     if not job:
         raise HTTPException(404, "Scan job not found. Re-upload to scan again.")
     if job.get("stage") != "done":
-        raise HTTPException(400, f"Scan not complete yet (stage: {job.get('stage', 'unknown')}).")
+        raise HTTPException(400, "The scan is not complete yet. Please wait.")
     path = job.get("pdf_path", "")
     if not path or not os.path.exists(path):
         raise HTTPException(404, "PDF file not found on disk.")
@@ -1490,7 +1490,7 @@ def download_scan_docx(job_id: str):
     if not job:
         raise HTTPException(404, "Scan job not found. Re-upload to scan again.")
     if job.get("stage") != "done":
-        raise HTTPException(400, f"Scan not complete yet (stage: {job.get('stage', 'unknown')}).")
+        raise HTTPException(400, "The scan is not complete yet. Please wait.")
     path = job.get("docx_path", "")
     if not path or not os.path.exists(path):
         raise HTTPException(404, "DOCX file not found on disk.")
@@ -1522,7 +1522,7 @@ async def editor_upload(
     filename = file.filename or "book"
     ext = os.path.splitext(filename)[1].lower()
     if ext not in EDITOR_ALLOWED_EXTS:
-        raise HTTPException(400, f"Unsupported file type '{ext}'. Upload .pdf, .docx, .zip, .txt, or .md")
+        raise HTTPException(400, "That file type isn\'t supported. Please upload a .pdf, .docx, .zip, .txt, or .md file.")
 
     tmp_path = os.path.join(OUTPUT_DIR, f"editor_upload_{uuid.uuid4().hex}{ext}")
     try:

@@ -16,6 +16,60 @@ const API = axios.create({
   timeout: 3600000,
 });
 
+/**
+ * Universal error parser to ensure no technical jargon reaches the user.
+ * Catches Axios errors, native Fetch errors, Network errors, and HTML responses.
+ */
+export function parseFriendlyError(error: any): string {
+  // If it's a known string, return it
+  if (typeof error === "string") return error;
+
+  let message = "Something went wrong. Please try again.";
+
+  // Handle Axios errors
+  if (axios.isAxiosError(error)) {
+    if (!error.response) {
+      return "We couldn't connect to the server. Please check your internet connection.";
+    }
+    // If backend returns a JSON error with "detail"
+    if (error.response.data && typeof error.response.data.detail === "string") {
+      return error.response.data.detail;
+    }
+    // Generic HTTP errors
+    if (error.response.status >= 500) {
+      return "Something went wrong on our end. Please try again later.";
+    }
+    if (error.response.status === 404) {
+      return "We couldn't find what you were looking for.";
+    }
+    if (error.response.status === 413) {
+      return "The file you uploaded is too large.";
+    }
+  }
+
+  // Handle native Error objects (like thrown in fetch catches)
+  if (error instanceof Error) {
+    if (error.message.includes("Failed to fetch") || error.message.includes("NetworkError")) {
+      return "We couldn't connect to the server. Please check your internet connection.";
+    }
+    if (error.message.includes("Unexpected token") || error.message.includes("JSON")) {
+      return "We received an unexpected response from the server. Please try again later.";
+    }
+    // If we've explicitly thrown a friendly error string (e.g. `throw new Error("Friendly message")`)
+    return error.message;
+  }
+
+  return message;
+}
+
+// Automatically apply friendly errors to all Axios calls
+API.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    return Promise.reject(new Error(parseFriendlyError(error)));
+  }
+);
+
 // ─────────────────────────────────────────────
 // Types — Book Writing
 // ─────────────────────────────────────────────
