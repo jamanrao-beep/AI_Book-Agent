@@ -711,8 +711,8 @@ export default function BooksPage() {
                 <button
                   onClick={async () => {
                     try {
-                      await cancelBookGeneration(activeJob.book_id);
-                      loadBooks(); // refresh list
+                      await cancelBookGeneration(activeJob.bookId);
+                      fetchBooks(); // refresh list
                     } catch (e: any) {
                       alert(e.message || "Failed to cancel");
                     }
