@@ -338,15 +338,15 @@ export default function ProofreadPage() {
     <div
       style={{
         minHeight: "100vh",
-        background: "#0c0f1a",
+        background: "#f7f2e4",
         fontFamily: "'DM Sans', sans-serif",
-        color: "#555555",
+        color: "#2b2b2b",
       }}
     >
       {/* Nav */}
       <nav
         style={{
-          borderBottom: "1px solid rgba(0,0,0,0.08)",
+          borderBottom: "1px solid #efefcf",
           padding: "0 40px",
           height: "60px",
           display: "flex",
@@ -354,8 +354,7 @@ export default function ProofreadPage() {
           gap: "16px",
           position: "sticky",
           top: 0,
-          background: "rgba(12,15,26,0.95)",
-          backdropFilter: "blur(12px)",
+          background: "#ffffff",
           zIndex: 50,
         }}
       >
@@ -367,36 +366,36 @@ export default function ProofreadPage() {
             gap: "6px",
             background: "none",
             border: "none",
-            color: "#555555",
+            color: "#6b6b63",
             fontSize: "13px",
             cursor: "pointer",
             padding: "6px 0",
             transition: "color 0.2s",
           }}
           onMouseOver={(e) =>
-            ((e.currentTarget as HTMLButtonElement).style.color = "#555555")
+            ((e.currentTarget as HTMLButtonElement).style.color = "#2b2b2b")
           }
           onMouseOut={(e) =>
-            ((e.currentTarget as HTMLButtonElement).style.color = "#555555")
+            ((e.currentTarget as HTMLButtonElement).style.color = "#6b6b63")
           }
         >
           <ArrowLeft size={14} /> Back to Dashboard
         </button>
-        <span style={{ color: "rgba(0,0,0,0.08)" }}>|</span>
+        <span style={{ color: "#e8e8e4" }}>|</span>
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
           <div
             style={{
               width: "28px",
               height: "28px",
-              background: "rgba(16,185,129,0.15)",
-              border: "1px solid rgba(16,185,129,0.3)",
+              background: "#1a1a1a",
+              border: "1px solid #1a1a1a",
               borderRadius: "8px",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
             }}
           >
-            <Sparkles size={14} color="#10b981" />
+            <Sparkles size={14} color="#ffffff" />
           </div>
           <span style={{ fontWeight: "600", fontSize: "14px" }}>
             AI Proofreader
@@ -420,7 +419,7 @@ export default function ProofreadPage() {
           >
             Proofread Your Document
           </h1>
-          <p style={{ color: "#555555", fontSize: "15px", lineHeight: "1.6" }}>
+          <p style={{ color: "#6b6b63", fontSize: "15px", lineHeight: "1.6" }}>
             Upload a .txt, .docx, .pdf, .md, .rtf, or .zip file. AI will correct grammar,
             punctuation, and suggest style improvements — with full error breakdowns.
           </p>
@@ -437,7 +436,7 @@ export default function ProofreadPage() {
             onDrop={handleDrop}
             onClick={() => !file && fileInputRef.current?.click()}
             style={{
-              border: `2px dashed ${dragging ? "#10b981" : file ? "rgba(16,185,129,0.4)" : "rgba(0,0,0,0.08)"}`,
+              border: `2px dashed ${dragging ? "#10b981" : file ? "rgba(16,185,129,0.4)" : "#d0d0cc"}`,
               borderRadius: "16px",
               padding: "48px 32px",
               textAlign: "center",
@@ -446,7 +445,7 @@ export default function ProofreadPage() {
                 ? "rgba(16,185,129,0.06)"
                 : file
                   ? "rgba(16,185,129,0.04)"
-                  : "rgba(0,0,0,0.02)",
+                  : "#ffffff",
               transition: "all 0.2s",
               marginBottom: "20px",
             }}
@@ -481,7 +480,7 @@ export default function ProofreadPage() {
                 <p style={{ fontWeight: "600", fontSize: "15px", marginBottom: "4px" }}>
                   {file.name}
                 </p>
-                <p style={{ color: "#555555", fontSize: "13px", marginBottom: "12px" }}>
+                <p style={{ color: "#6b6b63", fontSize: "13px", marginBottom: "12px" }}>
                   {(file.size / 1024).toFixed(1)} KB
                 </p>
                 <button
@@ -490,11 +489,11 @@ export default function ProofreadPage() {
                     setFile(null);
                   }}
                   style={{
-                    background: "rgba(0,0,0,0.06)",
-                    border: "1px solid rgba(0,0,0,0.08)",
+                    background: "#fff0f0",
+                    border: "1px solid #f5d5d5",
                     borderRadius: "8px",
                     padding: "6px 14px",
-                    color: "#555555",
+                    color: "#c23b3b",
                     fontSize: "12px",
                     cursor: "pointer",
                     display: "inline-flex",
@@ -511,8 +510,8 @@ export default function ProofreadPage() {
                   style={{
                     width: "56px",
                     height: "56px",
-                    background: "rgba(0,0,0,0.03)",
-                    border: "1px solid rgba(0,0,0,0.08)",
+                    background: "#f7f2e4",
+                    border: "1px solid #e8e8e4",
                     borderRadius: "12px",
                     display: "flex",
                     alignItems: "center",
@@ -520,12 +519,12 @@ export default function ProofreadPage() {
                     margin: "0 auto 16px",
                   }}
                 >
-                  <Upload size={24} color="#555555" />
+                  <Upload size={24} color="#2b2b2b" />
                 </div>
                 <p style={{ fontWeight: "600", fontSize: "15px", marginBottom: "6px" }}>
                   Drop your document here
                 </p>
-                <p style={{ color: "#555555", fontSize: "13px" }}>
+                <p style={{ color: "#6b6b63", fontSize: "13px" }}>
                   or click to browse · .txt .docx .pdf .md .rtf .zip · max 150 MB
                 </p>
               </div>
@@ -557,10 +556,8 @@ export default function ProofreadPage() {
               disabled={loading}
               style={{
                 width: "100%",
-                background: loading
-                  ? "rgba(16,185,129,0.4)"
-                  : "linear-gradient(135deg, #10b981 0%, #059669 100%)",
-                color: "#2a2929",
+                background: loading ? "#3d3d3d" : "#1a1a1a",
+                color: "#ffffff",
                 border: "none",
                 borderRadius: "12px",
                 padding: "14px 24px",
@@ -594,7 +591,7 @@ export default function ProofreadPage() {
                   marginTop: "10px",
                   height: "4px",
                   borderRadius: "99px",
-                  background: "rgba(0,0,0,0.08)",
+                  background: "#e8e8e4",
                   overflow: "hidden",
                 }}
               >
@@ -602,7 +599,7 @@ export default function ProofreadPage() {
                   style={{
                     height: "100%",
                     width: `${uploadProgress}%`,
-                    background: "linear-gradient(90deg, #10b981, #059669)",
+                    background: "#1a1a1a",
                     borderRadius: "99px",
                     transition: "width 0.3s ease",
                   }}
@@ -616,7 +613,7 @@ export default function ProofreadPage() {
                 style={{
                   marginTop: "10px",
                   fontSize: "12px",
-                  color: "#475569",
+                  color: "#6b6b63",
                   textAlign: "center",
                 }}
               >
@@ -647,7 +644,7 @@ export default function ProofreadPage() {
                 <p style={{ fontWeight: "600", fontSize: "14px" }}>
                   Proofreading complete
                 </p>
-                <p style={{ color: "#555555", fontSize: "12px", marginTop: "2px" }}>
+                <p style={{ color: "#6b6b63", fontSize: "12px", marginTop: "2px" }}>
                   {result.original_filename}
                 </p>
               </div>
@@ -656,8 +653,8 @@ export default function ProofreadPage() {
             {/* ── Selective PDF Generator ─────────────────────────────────── */}
             <div
               style={{
-                background: "rgba(0,0,0,0.03)",
-                border: "1px solid rgba(0,0,0,0.08)",
+                background: "#ffffff",
+                border: "1px solid #e8e8e4",
                 borderRadius: "14px",
                 padding: "22px 24px",
                 marginBottom: "28px",
@@ -669,13 +666,13 @@ export default function ProofreadPage() {
                   fontWeight: "700",
                   letterSpacing: "0.06em",
                   textTransform: "uppercase",
-                  color: "#555555",
+                  color: "#2563eb",
                   marginBottom: "14px",
                 }}
               >
                 Generate Corrected PDF
               </p>
-              <p style={{ fontSize: "13px", color: "#555555", marginBottom: "16px", lineHeight: "1.6" }}>
+              <p style={{ fontSize: "13px", color: "#6b6b63", marginBottom: "16px", lineHeight: "1.6" }}>
                 Choose which types of corrections to include in your downloaded PDF:
               </p>
 
@@ -725,7 +722,7 @@ export default function ProofreadPage() {
                       gap: "14px",
                       padding: "12px 16px",
                       borderRadius: "10px",
-                      border: `1px solid ${opt.checked ? opt.border : "rgba(0,0,0,0.08)"}`,
+                      border: `1px solid ${opt.checked ? opt.border : "#e8e8e4"}`,
                       background: opt.checked ? opt.bg : "transparent",
                       cursor: "pointer",
                       transition: "all 0.15s",
@@ -738,7 +735,7 @@ export default function ProofreadPage() {
                         width: "18px",
                         height: "18px",
                         borderRadius: "5px",
-                        border: `2px solid ${opt.checked ? opt.color : "rgba(0,0,0,0.15)"}`,
+                        border: `2px solid ${opt.checked ? opt.color : "#d0d0cc"}`,
                         background: opt.checked ? opt.color : "transparent",
                         display: "flex",
                         alignItems: "center",
@@ -756,15 +753,15 @@ export default function ProofreadPage() {
 
                     {/* Icon + Label */}
                     <span style={{ fontSize: "16px", opacity: 0.8 }}>{opt.icon}</span>
-                    <span style={{ flex: 1, fontSize: "13px", fontWeight: "600", color: opt.checked ? "#555555" : "#555555" }}>
+                    <span style={{ flex: 1, fontSize: "13px", fontWeight: "600", color: "#2b2b2b" }}>
                       {opt.label}
                     </span>
 
                     {/* Count badge */}
                     <span
                       style={{
-                        background: opt.checked ? `${opt.color}22` : "rgba(0,0,0,0.04)",
-                        color: opt.checked ? opt.color : "#475569",
+                        background: opt.checked ? `${opt.color}22` : "#f7f2e4",
+                        color: opt.checked ? opt.color : "#6b6b63",
                         borderRadius: "20px",
                         padding: "2px 10px",
                         fontSize: "12px",
@@ -822,9 +819,9 @@ export default function ProofreadPage() {
                     flex: 1,
                     background:
                       pdfGenerating || (!applyGrammar && !applyPunctuation && !applyStyle)
-                        ? "rgba(99,102,241,0.3)"
-                        : "linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)",
-                    color: "#2a2929",
+                        ? "#bdbdb8"
+                        : "#1a1a1a",
+                    color: "#ffffff",
                     border: "none",
                     borderRadius: "10px",
                     padding: "12px 16px",
@@ -861,12 +858,12 @@ export default function ProofreadPage() {
                   disabled={docxGenerating || (!applyGrammar && !applyPunctuation && !applyStyle)}
                   style={{
                     flex: 1,
-                    background:
+                    background: "#ffffff",
+                    color:
                       docxGenerating || (!applyGrammar && !applyPunctuation && !applyStyle)
-                        ? "rgba(16,185,129,0.3)"
-                        : "linear-gradient(135deg, #10b981 0%, #059669 100%)",
-                    color: "#2a2929",
-                    border: "none",
+                        ? "#bdbdb8"
+                        : "#1a1a1a",
+                    border: `1px solid ${docxGenerating || (!applyGrammar && !applyPunctuation && !applyStyle) ? "#e8e8e4" : "#1a1a1a"}`,
                     borderRadius: "10px",
                     padding: "12px 16px",
                     fontSize: "13px",
@@ -924,15 +921,15 @@ export default function ProofreadPage() {
                   key={s.label}
                   onClick={() => setActiveTab(s.id)}
                   style={{
-                    background: activeTab === s.id ? `${s.color}18` : `${s.color}10`,
-                    border: `1px solid ${activeTab === s.id ? s.color + "55" : s.color + "25"}`,
+                    background: "#ffffff",
+                    border: `1px solid ${activeTab === s.id ? s.color : "#e8e8e4"}`,
                     borderRadius: "12px",
                     padding: "20px",
                     textAlign: "center",
                     cursor: "pointer",
                     transition: "all 0.2s",
                     transform: activeTab === s.id ? "translateY(-2px)" : "none",
-                    boxShadow: activeTab === s.id ? `0 8px 24px ${s.color}22` : "none",
+                    boxShadow: activeTab === s.id ? "0 8px 24px rgba(0,0,0,0.10)" : "none",
                   }}
                 >
                   <div style={{ fontSize: "24px", marginBottom: "4px" }}>{s.icon}</div>
@@ -941,7 +938,7 @@ export default function ProofreadPage() {
                       fontSize: "32px",
                       fontWeight: "800",
                       fontFamily: "'Playfair Display', serif",
-                      color: s.color,
+                      color: "#2b2b2b",
                       letterSpacing: "-0.02em",
                     }}
                   >
@@ -950,7 +947,7 @@ export default function ProofreadPage() {
                   <div
                     style={{
                       fontSize: "11px",
-                      color: "#555555",
+                      color: "#6b6b63",
                       marginTop: "4px",
                       fontWeight: "600",
                       letterSpacing: "0.06em",
@@ -978,7 +975,7 @@ export default function ProofreadPage() {
               style={{
                 display: "flex",
                 gap: "4px",
-                background: "rgba(0,0,0,0.03)",
+                background: "#f7f2e4",
                 borderRadius: "10px",
                 padding: "4px",
                 marginBottom: "16px",
@@ -998,9 +995,9 @@ export default function ProofreadPage() {
                     fontWeight: "600",
                     background:
                       activeTab === tab.id
-                        ? "rgba(0,0,0,0.08)"
+                        ? "#ffffff"
                         : "transparent",
-                    color: activeTab === tab.id ? tab.color : "#555555",
+                    color: activeTab === tab.id ? tab.color : "#6b6b63",
                     transition: "all 0.15s",
                     whiteSpace: "nowrap",
                     display: "flex",
@@ -1030,8 +1027,8 @@ export default function ProofreadPage() {
             {/* Tab content panel */}
             <div
               style={{
-                background: "rgba(0,0,0,0.03)",
-                border: "1px solid rgba(0,0,0,0.08)",
+                background: "#ffffff",
+                border: "1px solid #e8e8e4",
                 borderRadius: "12px",
                 padding: "24px",
                 minHeight: "200px",
@@ -1042,7 +1039,7 @@ export default function ProofreadPage() {
                 <p
                   style={{
                     fontSize: "14px",
-                    color: "#555555",
+                    color: "#2b2b2b",
                     lineHeight: "1.9",
                     whiteSpace: "pre-wrap",
                   }}
@@ -1054,26 +1051,29 @@ export default function ProofreadPage() {
               {/* Corrected text tab */}
               {activeTab === "corrected" && (
                 correctedTextLoading ? (
-                  <div style={{ color: "#555555", fontSize: "14px", padding: "24px 0", textAlign: "center" }}>
+                  <div style={{ color: "#6b6b63", fontSize: "14px", padding: "24px 0", textAlign: "center" }}>
                     Loading corrected text…
                   </div>
                 ) : result.corrected_text ? (
                   <pre
                     style={{
                       fontSize: "13px",
-                      color: "#cbd5e1",
+                      color: "#2b2b2b",
                       lineHeight: "1.9",
                       whiteSpace: "pre-wrap",
                       wordBreak: "break-word",
                       fontFamily: "'DM Mono', monospace",
                       maxHeight: "500px",
                       overflowY: "auto",
+                      background: "#f7f2e4",
+                      borderRadius: "10px",
+                      padding: "16px",
                     }}
                   >
                     {result.corrected_text}
                   </pre>
                 ) : (
-                  <div style={{ color: "#555555", fontSize: "14px", padding: "24px 0", textAlign: "center" }}>
+                  <div style={{ color: "#6b6b63", fontSize: "14px", padding: "24px 0", textAlign: "center" }}>
                     Corrected text preview unavailable — use the Download button above to get the full corrected document.
                   </div>
                 )
@@ -1092,7 +1092,7 @@ export default function ProofreadPage() {
                         alignItems: "center",
                         justifyContent: "center",
                         padding: "40px",
-                        color: "#475569",
+                        color: "#6b6b63",
                         gap: "8px",
                       }}
                     >
@@ -1110,7 +1110,7 @@ export default function ProofreadPage() {
                         <div
                           key={key}
                           style={{
-                            border: `1px solid rgba(0,0,0,0.08)`,
+                            border: "1px solid #e8e8e4",
                             borderRadius: "10px",
                             overflow: "hidden",
                             transition: "border-color 0.2s",
@@ -1126,7 +1126,7 @@ export default function ProofreadPage() {
                               padding: "14px 16px",
                               cursor: "pointer",
                               background: isOpen
-                                ? "rgba(0,0,0,0.03)"
+                                ? "#f7f2e4"
                                 : "transparent",
                               transition: "background 0.15s",
                             }}
@@ -1173,7 +1173,7 @@ export default function ProofreadPage() {
                                 >
                                   {item.original}
                                 </span>
-                                <span style={{ color: "#475569", fontSize: "12px" }}>→</span>
+                                <span style={{ color: "#9b9b91", fontSize: "12px" }}>→</span>
                                 <span
                                   style={{
                                     fontSize: "13px",
@@ -1192,7 +1192,7 @@ export default function ProofreadPage() {
                             <span
                               style={{
                                 flexShrink: 0,
-                                color: "#475569",
+                                color: "#9b9b91",
                                 display: "flex",
                                 alignItems: "center",
                               }}
@@ -1210,7 +1210,7 @@ export default function ProofreadPage() {
                             <div
                               style={{
                                 padding: "0 16px 14px 50px",
-                                borderTop: "1px solid rgba(0,0,0,0.04)",
+                                borderTop: "1px solid #e8e8e4",
                               }}
                             >
                               <div
@@ -1236,7 +1236,7 @@ export default function ProofreadPage() {
                               <p
                                 style={{
                                   fontSize: "13px",
-                                  color: "#555555",
+                                  color: "#2b2b2b",
                                   lineHeight: "1.6",
                                 }}
                               >
@@ -1262,19 +1262,19 @@ export default function ProofreadPage() {
               style={{
                 marginTop: "20px",
                 background: "none",
-                border: "1px solid rgba(0,0,0,0.08)",
+                border: "1px solid #e8e8e4",
                 borderRadius: "10px",
                 padding: "10px 20px",
-                color: "#555555",
+                color: "#2b2b2b",
                 fontSize: "13px",
                 cursor: "pointer",
                 transition: "all 0.2s",
               }}
               onMouseOver={(e) => {
-                (e.currentTarget as HTMLButtonElement).style.color = "#555555";
+                (e.currentTarget as HTMLButtonElement).style.background = "#f7f2e4";
               }}
               onMouseOut={(e) => {
-                (e.currentTarget as HTMLButtonElement).style.color = "#555555";
+                (e.currentTarget as HTMLButtonElement).style.background = "none";
               }}
             >
               ← Proofread another document

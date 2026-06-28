@@ -256,12 +256,12 @@ interface LayoutResult {
 // ─── Shared styles ────────────────────────────────────────────────────────────
 const inputStyle: React.CSSProperties = {
     width: "100%",
-    background: "rgba(0,0,0,0.3)",
-    border: "1px solid rgba(0,0,0,0.08)",
+    background: "#f7f2e4",
+    border: "1px solid #d0d0cc",
     borderRadius: "8px",
     padding: "10px 12px",
     fontSize: "13px",
-    color: "#555555",
+    color: "#2b2b2b",
     outline: "none",
     boxSizing: "border-box",
     transition: "border-color 0.2s",
@@ -270,10 +270,11 @@ const inputStyle: React.CSSProperties = {
 const labelStyle: React.CSSProperties = {
     fontSize: "11px",
     fontWeight: "700",
-    color: "#555555",
-    letterSpacing: "0.06em",
+    color: "#0c43bb",
+    letterSpacing: "0.08em",
     display: "block",
     marginBottom: "6px",
+    textTransform: "uppercase" as React.CSSProperties["textTransform"],
 };
 
 const selectStyle: React.CSSProperties = {
@@ -286,12 +287,12 @@ const selectStyle: React.CSSProperties = {
 function CollapsibleSection({ title, icon, children, defaultOpen = false }: { title: string; icon: React.ReactNode; children: React.ReactNode; defaultOpen?: boolean }) {
     const [open, setOpen] = useState(defaultOpen);
     return (
-        <div style={{ border: "1px solid rgba(0,0,0,0.08)", borderRadius: "12px", overflow: "hidden" }}>
-            <button onClick={() => setOpen(!open)} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 18px", background: "rgba(0,0,0,0.03)", border: "none", color: "#555555", cursor: "pointer", fontSize: "13px", fontWeight: "700" }}>
+        <div style={{ border: "1px solid #e8e8e4", borderRadius: "12px", overflow: "hidden" }}>
+            <button onClick={() => setOpen(!open)} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 18px", background: "#fff", border: "none", color: "#2b2b2b", cursor: "pointer", fontSize: "13px", fontWeight: "700" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>{icon}<span>{title}</span></div>
-                {open ? <ChevronUp size={14} color="#555555" /> : <ChevronDown size={14} color="#555555" />}
+                {open ? <ChevronUp size={14} color="#2b2b2b" /> : <ChevronDown size={14} color="#2b2b2b" />}
             </button>
-            {open && <div style={{ padding: "18px", display: "flex", flexDirection: "column", gap: "14px", borderTop: "1px solid rgba(0,0,0,0.04)" }}>{children}</div>}
+            {open && <div style={{ padding: "18px", display: "flex", flexDirection: "column", gap: "14px", borderTop: "1px solid #e8e8e4", background: "#fff" }}>{children}</div>}
         </div>
     );
 }
@@ -302,8 +303,8 @@ function MatterCheckbox({ items, selected, onChange }: { items: { key: string; l
             {items.map((item) => {
                 const checked = selected.includes(item.key);
                 return (
-                    <label key={item.key} style={{ display: "flex", alignItems: "center", gap: "8px", padding: "8px 12px", background: checked ? "rgba(245,158,11,0.1)" : "rgba(0,0,0,0.2)", border: `1px solid ${checked ? "rgba(245,158,11,0.4)" : "rgba(0,0,0,0.08)"}`, borderRadius: "8px", cursor: "pointer", fontSize: "12px", color: checked ? "#fbbf24" : "#555555", transition: "all 0.15s" }}>
-                        <input type="checkbox" checked={checked} onChange={() => { if (checked) onChange(selected.filter((k) => k !== item.key)); else onChange([...selected, item.key]); }} style={{ accentColor: "#f59e0b" }} />
+                    <label key={item.key} style={{ display: "flex", alignItems: "center", gap: "8px", padding: "8px 12px", background: checked ? "#f7f2e4" : "#fff", border: `1px solid ${checked ? "#2563eb" : "#e8e8e4"}`, borderRadius: "8px", cursor: "pointer", fontSize: "12px", color: checked ? "#2563eb" : "#2b2b2b", transition: "all 0.15s" }}>
+                        <input type="checkbox" checked={checked} onChange={() => { if (checked) onChange(selected.filter((k) => k !== item.key)); else onChange([...selected, item.key]); }} style={{ accentColor: "#2563eb" }} />
                         {item.label}
                     </label>
                 );
@@ -318,7 +319,7 @@ function TriToggle({ label, value, onChange }: { label: string; value: boolean |
             <span style={labelStyle}>{label}</span>
             <div style={{ display: "flex", gap: "6px" }}>
                 {([null, true, false] as const).map((v) => (
-                    <button key={String(v)} onClick={() => onChange(v)} style={{ flex: 1, padding: "7px 0", borderRadius: "7px", border: `1px solid ${value === v ? "rgba(245,158,11,0.5)" : "rgba(0,0,0,0.08)"}`, background: value === v ? "rgba(245,158,11,0.15)" : "rgba(0,0,0,0.2)", color: value === v ? "#fbbf24" : "#555555", fontSize: "11px", fontWeight: "700", cursor: "pointer", transition: "all 0.15s" }}>
+                    <button key={String(v)} onClick={() => onChange(v)} style={{ flex: 1, padding: "7px 0", borderRadius: "7px", border: `1px solid ${value === v ? "#2563eb" : "#e8e8e4"}`, background: value === v ? "#2563eb" : "#fff", color: value === v ? "#fff" : "#2b2b2b", fontSize: "11px", fontWeight: "700", cursor: "pointer", transition: "all 0.15s" }}>
                         {v === null ? "AI" : v ? "On" : "Off"}
                     </button>
                 ))}
@@ -329,9 +330,9 @@ function TriToggle({ label, value, onChange }: { label: string; value: boolean |
 
 function UnitSelector({ value, onChange }: { value: DimUnit; onChange: (u: DimUnit) => void }) {
     return (
-        <div style={{ display: "inline-flex", alignItems: "center", gap: "2px", background: "rgba(0,0,0,0.3)", border: "1px solid rgba(0,0,0,0.08)", borderRadius: "8px", padding: "3px" }}>
+        <div style={{ display: "inline-flex", alignItems: "center", gap: "2px", background: "#f7f2e4", border: "1px solid #e8e8e4", borderRadius: "8px", padding: "3px" }}>
             {(["mm", "inch", "pt"] as DimUnit[]).map((u) => (
-                <button key={u} onClick={() => onChange(u)} style={{ padding: "4px 10px", borderRadius: "6px", border: "none", background: value === u ? "rgba(245,158,11,0.2)" : "transparent", color: value === u ? "#fbbf24" : "#475569", fontSize: "11px", fontWeight: "700", cursor: "pointer", transition: "all 0.15s" }}>
+                <button key={u} onClick={() => onChange(u)} style={{ padding: "4px 10px", borderRadius: "6px", border: "none", background: value === u ? "#1a1a1a" : "transparent", color: value === u ? "#fff" : "#2b2b2b", fontSize: "11px", fontWeight: "700", cursor: "pointer", transition: "all 0.15s" }}>
                     {UNIT_LABELS[u]}
                 </button>
             ))}
@@ -340,74 +341,74 @@ function UnitSelector({ value, onChange }: { value: DimUnit; onChange: (u: DimUn
 }
 
 function focusBorder(e: React.FocusEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) {
-    e.currentTarget.style.borderColor = "rgba(245,158,11,0.5)";
+    e.currentTarget.style.borderColor = "#2563eb";
 }
 function blurBorder(e: React.FocusEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) {
-    e.currentTarget.style.borderColor = "rgba(0,0,0,0.08)";
+    e.currentTarget.style.borderColor = "#d0d0cc";
 }
 
 // ─── Home Screen ──────────────────────────────────────────────────────────────
 function HomeScreen({ onSelect }: { onSelect: (m: AppMode) => void }) {
     return (
-        <div style={{ minHeight: "100vh", background: "#0c0f1a", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "60px 40px", fontFamily: "'DM Sans', sans-serif" }}>
+        <div style={{ minHeight: "100vh", background: "#f7f2e4", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "60px 40px", fontFamily: "'DM Sans', sans-serif" }}>
             <div style={{ textAlign: "center", marginBottom: "56px" }}>
-                <div style={{ display: "inline-flex", alignItems: "center", gap: "10px", background: "rgba(245,158,11,0.1)", border: "1px solid rgba(245,158,11,0.3)", borderRadius: "24px", padding: "8px 20px", marginBottom: "24px" }}>
-                    <div style={{ width: "28px", height: "28px", background: "linear-gradient(135deg,#f59e0b,#d97706)", borderRadius: "7px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <div style={{ display: "inline-flex", alignItems: "center", gap: "10px", background: "#fff", border: "1px solid #e8e8e4", borderRadius: "24px", padding: "8px 20px", marginBottom: "24px" }}>
+                    <div style={{ width: "28px", height: "28px", background: "#1a1a1a", borderRadius: "7px", display: "flex", alignItems: "center", justifyContent: "center" }}>
                         <LayoutTemplate size={14} color="white" />
                     </div>
-                    <span style={{ fontSize: "12px", fontWeight: "800", color: "#fbbf24", letterSpacing: "0.08em" }}>PUBLIXO AI · BOOK LAYOUT DESIGNER</span>
+                    <span style={{ fontSize: "12px", fontWeight: "800", color: "#2563eb", letterSpacing: "0.08em" }}>PUBLIXO AI · BOOK LAYOUT DESIGNER</span>
                 </div>
-                <h1 style={{ fontSize: "52px", fontWeight: "900", letterSpacing: "-0.04em", color: "#555555", marginBottom: "16px", fontFamily: "'Playfair Display', serif", lineHeight: "1.05" }}>
-                    Design Your Book<br /><span style={{ color: "#f59e0b" }}>Like a Publisher</span>
+                <h1 style={{ fontSize: "52px", fontWeight: "900", letterSpacing: "-0.03em", color: "#2b2b2b", marginBottom: "16px", fontFamily: "'Playfair Display', serif", lineHeight: "1.05" }}>
+                    Design Your Book<br /><span style={{ color: "#2563eb" }}>Like a Publisher</span>
                 </h1>
-                <p style={{ color: "#555555", fontSize: "16px", lineHeight: "1.7", maxWidth: "520px", margin: "0 auto" }}>
+                <p style={{ color: "#2b2b2b", fontSize: "16px", lineHeight: "1.7", maxWidth: "520px", margin: "0 auto" }}>
                     Choose your experience. Authors get one-click AI formatting. Professionals get full publishing-grade control.
                 </p>
             </div>
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "24px", maxWidth: "820px", width: "100%" }}>
                 {/* Author Mode */}
-                <button onClick={() => onSelect("author")} style={{ background: "rgba(99,102,241,0.07)", border: "2px solid rgba(99,102,241,0.25)", borderRadius: "20px", padding: "40px 36px", textAlign: "left", cursor: "pointer", transition: "all 0.25s", position: "relative", overflow: "hidden" }}
-                    onMouseOver={(e) => { (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(99,102,241,0.6)"; (e.currentTarget as HTMLButtonElement).style.background = "rgba(99,102,241,0.12)"; }}
-                    onMouseOut={(e) => { (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(99,102,241,0.25)"; (e.currentTarget as HTMLButtonElement).style.background = "rgba(99,102,241,0.07)"; }}>
+                <button onClick={() => onSelect("author")} style={{ background: "#fff", border: "2px solid #e8e8e4", borderRadius: "20px", padding: "40px 36px", textAlign: "left", cursor: "pointer", transition: "all 0.25s", position: "relative", overflow: "hidden", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}
+                    onMouseOver={(e) => { (e.currentTarget as HTMLButtonElement).style.borderColor = "#2563eb"; (e.currentTarget as HTMLButtonElement).style.boxShadow = "0 8px 32px rgba(0,0,0,0.10)"; }}
+                    onMouseOut={(e) => { (e.currentTarget as HTMLButtonElement).style.borderColor = "#e8e8e4"; (e.currentTarget as HTMLButtonElement).style.boxShadow = "0 2px 8px rgba(0,0,0,0.04)"; }}>
                     <div style={{ fontSize: "42px", marginBottom: "18px" }}>👤</div>
-                    <h2 style={{ fontSize: "22px", fontWeight: "800", color: "#555555", marginBottom: "8px", fontFamily: "'Playfair Display', serif" }}>Author Mode</h2>
-                    <p style={{ fontSize: "12px", fontWeight: "700", color: "#6366f1", marginBottom: "16px", letterSpacing: "0.06em" }}>SIMPLE · GUIDED · ONE-CLICK</p>
-                    <p style={{ fontSize: "14px", color: "#555555", lineHeight: "1.6", marginBottom: "24px" }}>Best for authors who want AI to handle the entire formatting process automatically. No technical knowledge needed.</p>
+                    <h2 style={{ fontSize: "22px", fontWeight: "800", color: "#2b2b2b", marginBottom: "8px", fontFamily: "'Playfair Display', serif" }}>Author Mode</h2>
+                    <p style={{ fontSize: "12px", fontWeight: "700", color: "#2563eb", marginBottom: "16px", letterSpacing: "0.06em" }}>SIMPLE · GUIDED · ONE-CLICK</p>
+                    <p style={{ fontSize: "14px", color: "#2b2b2b", lineHeight: "1.6", marginBottom: "24px" }}>Best for authors who want AI to handle the entire formatting process automatically. No technical knowledge needed.</p>
                     <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginBottom: "28px" }}>
                         {["Upload manuscript → AI does everything", "Auto-detect chapters & headings", "Generate TOC, title pages, footers", "One-click print-ready PDF + DOCX"].map((t, i) => (
-                            <div key={i} style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "12px", color: "#555555" }}>
-                                <div style={{ width: "5px", height: "5px", borderRadius: "50%", background: "#6366f1", flexShrink: 0 }} /> {t}
+                            <div key={i} style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "12px", color: "#2b2b2b" }}>
+                                <div style={{ width: "5px", height: "5px", borderRadius: "50%", background: "#2563eb", flexShrink: 0 }} /> {t}
                             </div>
                         ))}
                     </div>
-                    <div style={{ display: "inline-flex", alignItems: "center", gap: "8px", background: "rgba(99,102,241,0.2)", border: "1px solid rgba(99,102,241,0.4)", borderRadius: "10px", padding: "10px 20px", fontSize: "14px", fontWeight: "700", color: "#a5b4fc" }}>
+                    <div style={{ display: "inline-flex", alignItems: "center", gap: "8px", background: "#1a1a1a", border: "none", borderRadius: "10px", padding: "10px 20px", fontSize: "14px", fontWeight: "700", color: "#fff" }}>
                         Get Started <ChevronRight size={15} />
                     </div>
                 </button>
 
                 {/* Advanced Mode */}
-                <button onClick={() => onSelect("advanced")} style={{ background: "rgba(245,158,11,0.06)", border: "2px solid rgba(245,158,11,0.2)", borderRadius: "20px", padding: "40px 36px", textAlign: "left", cursor: "pointer", transition: "all 0.25s", position: "relative", overflow: "hidden" }}
-                    onMouseOver={(e) => { (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(245,158,11,0.55)"; (e.currentTarget as HTMLButtonElement).style.background = "rgba(245,158,11,0.1)"; }}
-                    onMouseOut={(e) => { (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(245,158,11,0.2)"; (e.currentTarget as HTMLButtonElement).style.background = "rgba(245,158,11,0.06)"; }}>
+                <button onClick={() => onSelect("advanced")} style={{ background: "#fff", border: "2px solid #e8e8e4", borderRadius: "20px", padding: "40px 36px", textAlign: "left", cursor: "pointer", transition: "all 0.25s", position: "relative", overflow: "hidden", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}
+                    onMouseOver={(e) => { (e.currentTarget as HTMLButtonElement).style.borderColor = "#2563eb"; (e.currentTarget as HTMLButtonElement).style.boxShadow = "0 8px 32px rgba(0,0,0,0.10)"; }}
+                    onMouseOut={(e) => { (e.currentTarget as HTMLButtonElement).style.borderColor = "#e8e8e4"; (e.currentTarget as HTMLButtonElement).style.boxShadow = "0 2px 8px rgba(0,0,0,0.04)"; }}>
                     <div style={{ fontSize: "42px", marginBottom: "18px" }}>⚙️</div>
-                    <h2 style={{ fontSize: "22px", fontWeight: "800", color: "#555555", marginBottom: "8px", fontFamily: "'Playfair Display', serif" }}>Advanced Mode</h2>
-                    <p style={{ fontSize: "12px", fontWeight: "700", color: "#f59e0b", marginBottom: "16px", letterSpacing: "0.06em" }}>PROFESSIONAL · CUSTOMISABLE · AI COMMAND</p>
-                    <p style={{ fontSize: "14px", color: "#555555", lineHeight: "1.6", marginBottom: "24px" }}>For publishers, editors, designers and advanced users who require complete control over layout and print-production settings.</p>
+                    <h2 style={{ fontSize: "22px", fontWeight: "800", color: "#2b2b2b", marginBottom: "8px", fontFamily: "'Playfair Display', serif" }}>Advanced Mode</h2>
+                    <p style={{ fontSize: "12px", fontWeight: "700", color: "#2563eb", marginBottom: "16px", letterSpacing: "0.06em" }}>PROFESSIONAL · CUSTOMISABLE · AI COMMAND</p>
+                    <p style={{ fontSize: "14px", color: "#2b2b2b", lineHeight: "1.6", marginBottom: "24px" }}>For publishers, editors, designers and advanced users who require complete control over layout and print-production settings.</p>
                     <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginBottom: "28px" }}>
                         {["Custom trim size, margins, gutter & bleed", "Mirror margins & section breaks", "Front & back matter configuration", "Print platform packages: KDP, IngramSpark"].map((t, i) => (
-                            <div key={i} style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "12px", color: "#555555" }}>
-                                <div style={{ width: "5px", height: "5px", borderRadius: "50%", background: "#f59e0b", flexShrink: 0 }} /> {t}
+                            <div key={i} style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "12px", color: "#2b2b2b" }}>
+                                <div style={{ width: "5px", height: "5px", borderRadius: "50%", background: "#2563eb", flexShrink: 0 }} /> {t}
                             </div>
                         ))}
                     </div>
-                    <div style={{ display: "inline-flex", alignItems: "center", gap: "8px", background: "rgba(245,158,11,0.15)", border: "1px solid rgba(245,158,11,0.4)", borderRadius: "10px", padding: "10px 20px", fontSize: "14px", fontWeight: "700", color: "#fbbf24" }}>
+                    <div style={{ display: "inline-flex", alignItems: "center", gap: "8px", background: "#fff", border: "1px solid #e8e8e4", borderRadius: "10px", padding: "10px 20px", fontSize: "14px", fontWeight: "700", color: "#2b2b2b" }}>
                         Open Advanced Mode <ChevronRight size={15} />
                     </div>
                 </button>
             </div>
 
-            <p style={{ marginTop: "40px", color: "#737373", fontSize: "12px", textAlign: "center" }}>
+            <p style={{ marginTop: "40px", color: "#2b2b2b", fontSize: "12px", textAlign: "center" }}>
                 Powered by GPT-4o · Typeset with ReportLab · Output: PDF · DOCX · EPUB
             </p>
         </div>
@@ -867,24 +868,24 @@ export default function LayoutDesignerPage() {
 
     // ─────────────────────────────────────────────────────────────────────────
     return (
-        <div style={{ minHeight: "100vh", background: "#0c0f1a", fontFamily: "'DM Sans', sans-serif", color: "#555555" }}>
+        <div style={{ minHeight: "100vh", background: "#f7f2e4", fontFamily: "'DM Sans', sans-serif", color: "#2b2b2b" }}>
 
             {/* ── Nav ── */}
-            <nav style={{ borderBottom: "1px solid rgba(0,0,0,0.08)", padding: "0 40px", height: "60px", display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, background: "rgba(12,15,26,0.95)", backdropFilter: "blur(12px)", zIndex: 50 }}>
+            <nav style={{ borderBottom: "1px solid #efefcf", padding: "0 40px", height: "60px", display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, background: "#fff", zIndex: 50 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                    <div style={{ width: "32px", height: "32px", background: "linear-gradient(135deg,#f59e0b,#d97706)", borderRadius: "8px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <div style={{ width: "32px", height: "32px", background: "#1a1a1a", borderRadius: "8px", display: "flex", alignItems: "center", justifyContent: "center" }}>
                         <LayoutTemplate size={16} color="white" />
                     </div>
-                    <span style={{ fontWeight: "700", fontSize: "15px", letterSpacing: "-0.01em" }}>Publixo AI</span>
-                    <div style={{ marginLeft: "8px", background: isAdvanced ? "rgba(245,158,11,0.15)" : "rgba(99,102,241,0.15)", border: `1px solid ${isAdvanced ? "rgba(245,158,11,0.4)" : "rgba(99,102,241,0.4)"}`, borderRadius: "6px", padding: "2px 10px", fontSize: "10px", fontWeight: "700", letterSpacing: "0.06em", color: isAdvanced ? "#fbbf24" : "#a5b4fc" }}>
+                    <span style={{ fontWeight: "700", fontSize: "15px", letterSpacing: "-0.01em", color: "#2b2b2b" }}>Publixo AI</span>
+                    <div style={{ marginLeft: "8px", background: "#fff", border: "1px solid #e8e8e4", borderRadius: "6px", padding: "2px 10px", fontSize: "10px", fontWeight: "700", letterSpacing: "0.06em", color: "#2563eb" }}>
                         {isAdvanced ? "⚙️ ADVANCED" : "👤 AUTHOR"}
                     </div>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                    <button onClick={() => { reset(); setAppMode("home"); }} style={{ display: "flex", alignItems: "center", gap: "6px", background: "none", border: "1px solid rgba(0,0,0,0.08)", borderRadius: "8px", padding: "6px 14px", color: "#555555", fontSize: "12px", cursor: "pointer", transition: "color 0.2s" }} onMouseOver={(e) => { (e.currentTarget as HTMLButtonElement).style.color = "#555555"; }} onMouseOut={(e) => { (e.currentTarget as HTMLButtonElement).style.color = "#555555"; }}>
+                    <button onClick={() => { reset(); setAppMode("home"); }} style={{ display: "flex", alignItems: "center", gap: "6px", background: "#fff", border: "1px solid #e8e8e4", borderRadius: "8px", padding: "6px 14px", color: "#2b2b2b", fontSize: "12px", cursor: "pointer", transition: "background 0.2s" }} onMouseOver={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "#f7f2e4"; }} onMouseOut={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "#fff"; }}>
                         <Layers size={13} /> Switch Mode
                     </button>
-                    <button onClick={() => router.push("/dashboard")} style={{ display: "flex", alignItems: "center", gap: "6px", background: "none", border: "1px solid rgba(0,0,0,0.08)", borderRadius: "8px", padding: "6px 14px", color: "#555555", fontSize: "13px", cursor: "pointer" }} onMouseOver={(e) => { (e.currentTarget as HTMLButtonElement).style.color = "#555555"; }} onMouseOut={(e) => { (e.currentTarget as HTMLButtonElement).style.color = "#555555"; }}>
+                    <button onClick={() => router.push("/dashboard")} style={{ display: "flex", alignItems: "center", gap: "6px", background: "#fff", border: "1px solid #e8e8e4", borderRadius: "8px", padding: "6px 14px", color: "#2b2b2b", fontSize: "13px", cursor: "pointer", transition: "background 0.2s" }} onMouseOver={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "#f7f2e4"; }} onMouseOut={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "#fff"; }}>
                         <ArrowLeft size={14} /> Dashboard
                     </button>
                 </div>
@@ -894,23 +895,23 @@ export default function LayoutDesignerPage() {
 
                 {/* Page header */}
                 <div style={{ marginBottom: "40px" }}>
-                    <div style={{ display: "inline-flex", alignItems: "center", gap: "6px", background: "rgba(245,158,11,0.12)", border: "1px solid rgba(245,158,11,0.3)", borderRadius: "20px", padding: "4px 14px", fontSize: "11px", fontWeight: "700", letterSpacing: "0.08em", color: "#fbbf24", marginBottom: "18px" }}>
+                    <div style={{ display: "inline-flex", alignItems: "center", gap: "6px", background: "#fff", border: "1px solid #e8e8e4", borderRadius: "20px", padding: "4px 14px", fontSize: "11px", fontWeight: "700", letterSpacing: "0.08em", color: "#2563eb", marginBottom: "18px" }}>
                         <Wand2 size={11} /> {isAdvanced ? "ADVANCED PUBLISHING MODE" : "AI AUTHOR ASSISTANT"}
                     </div>
-                    <h1 style={{ fontSize: "38px", fontWeight: "800", letterSpacing: "-0.03em", fontFamily: "'Playfair Display', serif", lineHeight: "1.1", marginBottom: "10px" }}>
+                    <h1 style={{ fontSize: "38px", fontWeight: "800", letterSpacing: "-0.03em", fontFamily: "'Playfair Display', serif", lineHeight: "1.1", marginBottom: "10px", color: "#2b2b2b" }}>
                         {isAdvanced ? "Professional Book Layout" : "Design Your Book Layout"}
                     </h1>
-                    <p style={{ color: "#555555", fontSize: "15px", lineHeight: "1.6" }}>
+                    <p style={{ color: "#2b2b2b", fontSize: "15px", lineHeight: "1.6" }}>
                         {isAdvanced ? "Full publishing-grade control with AI-powered customisation and command." : "Upload your manuscript — AI handles everything else."}
                     </p>
                 </div>
 
                 {/* Error banner */}
                 {error && (
-                    <div style={{ display: "flex", alignItems: "flex-start", gap: "12px", background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: "12px", padding: "16px 20px", marginBottom: "28px" }}>
+                    <div style={{ display: "flex", alignItems: "flex-start", gap: "12px", background: "#fff0f0", border: "1px solid rgba(239,68,68,0.3)", borderRadius: "12px", padding: "16px 20px", marginBottom: "28px" }}>
                         <X size={16} color="#ef4444" style={{ marginTop: "1px", flexShrink: 0 }} />
-                        <div style={{ fontSize: "13px", color: "#fca5a5", lineHeight: "1.5" }}>{error}</div>
-                        <button onClick={() => setError(null)} style={{ marginLeft: "auto", background: "none", border: "none", color: "#555555", cursor: "pointer", flexShrink: 0 }}><X size={14} /></button>
+                        <div style={{ fontSize: "13px", color: "#b91c1c", lineHeight: "1.5" }}>{error}</div>
+                        <button onClick={() => setError(null)} style={{ marginLeft: "auto", background: "none", border: "none", color: "#2b2b2b", cursor: "pointer", flexShrink: 0 }}><X size={14} /></button>
                     </div>
                 )}
 
@@ -918,14 +919,14 @@ export default function LayoutDesignerPage() {
                 {result ? (
                     <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
                         {/* Success header */}
-                        <div style={{ background: "linear-gradient(135deg, rgba(16,185,129,0.08) 0%, rgba(245,158,11,0.05) 100%)", border: "1px solid rgba(16,185,129,0.25)", borderRadius: "20px", padding: "32px 36px" }}>
+                        <div style={{ background: "#fff", border: "1px solid #e8e8e4", borderRadius: "20px", padding: "32px 36px" }}>
                             <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "20px" }}>
-                                <div style={{ width: "44px", height: "44px", borderRadius: "12px", background: "rgba(16,185,129,0.15)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                                    <CheckCircle size={22} color="#10b981" />
+                                <div style={{ width: "44px", height: "44px", borderRadius: "12px", background: "#f7f2e4", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                                    <CheckCircle size={22} color="#2563eb" />
                                 </div>
                                 <div>
-                                    <div style={{ fontSize: "18px", fontWeight: "800", color: "#555555" }}>Layout Ready!</div>
-                                    <div style={{ fontSize: "12px", color: "#555555" }}>{result.chapter_count} chapter{result.chapter_count !== 1 ? "s" : ""} typeset · Style: {result.style_name}</div>
+                                    <div style={{ fontSize: "18px", fontWeight: "800", color: "#2b2b2b", fontFamily: "'Playfair Display', serif" }}>Layout Ready!</div>
+                                    <div style={{ fontSize: "12px", color: "#2b2b2b" }}>{result.chapter_count} chapter{result.chapter_count !== 1 ? "s" : ""} typeset · Style: {result.style_name}</div>
                                 </div>
                             </div>
 
@@ -942,11 +943,11 @@ export default function LayoutDesignerPage() {
                                         { label: "Drop Caps", value: result.concept.show_drop_cap ? "Yes" : "No", isColor: false },
                                         { label: "Page Numbers", value: result.concept.show_page_numbers ? "Yes" : "No", isColor: false },
                                     ].map((item, i) => (
-                                        <div key={i} style={{ background: "rgba(0,0,0,0.2)", borderRadius: "8px", padding: "10px 12px" }}>
-                                            <div style={{ fontSize: "9px", fontWeight: "700", color: "#475569", letterSpacing: "0.06em", marginBottom: "4px" }}>{item.label}</div>
+                                        <div key={i} style={{ background: "#f7f2e4", borderRadius: "8px", padding: "10px 12px", border: "1px solid #e8e8e4" }}>
+                                            <div style={{ fontSize: "9px", fontWeight: "700", color: "#0c43bb", letterSpacing: "0.06em", marginBottom: "4px", textTransform: "uppercase" }}>{item.label}</div>
                                             <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
                                                 {item.isColor && <div style={{ width: "12px", height: "12px", borderRadius: "3px", background: item.value, border: "1px solid rgba(0,0,0,0.12)", flexShrink: 0 }} />}
-                                                <span style={{ fontSize: "11px", fontWeight: "700", color: "#555555" }}>{item.value}</span>
+                                                <span style={{ fontSize: "11px", fontWeight: "700", color: "#2b2b2b" }}>{item.value}</span>
                                             </div>
                                         </div>
                                     ))}
@@ -954,46 +955,49 @@ export default function LayoutDesignerPage() {
                             )}
 
                             {/* Footer preview */}
-                            <div style={{ background: "rgba(245,158,11,0.07)", border: "1px solid rgba(245,158,11,0.2)", borderRadius: "10px", padding: "12px 16px", marginBottom: "24px" }}>
-                                <div style={{ fontSize: "10px", fontWeight: "700", color: "#f59e0b", letterSpacing: "0.06em", marginBottom: "8px" }}>📄 FOOTER (ALL PAGES)</div>
+                            <div style={{ background: "#f7f2e4", border: "1px solid #e8e8e4", borderRadius: "10px", padding: "12px 16px", marginBottom: "24px" }}>
+                                <div style={{ fontSize: "10px", fontWeight: "700", color: "#0c43bb", letterSpacing: "0.08em", marginBottom: "8px", textTransform: "uppercase" }}>📄 FOOTER (ALL PAGES)</div>
                                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                                    <span style={{ fontSize: "12px", color: "#555555" }}>⬅ {footerCustomLeft || (footerBookName ? result.title || "Book Title" : "—")}</span>
-                                    <span style={{ fontSize: "12px", color: "#555555" }}>{footerCustomMiddle || "·"}</span>
-                                    <span style={{ fontSize: "12px", color: "#555555" }}>{footerCustomRight || (footerPageNumber ? "Page 1" : "—")} ➡</span>
+                                    <span style={{ fontSize: "12px", color: "#2b2b2b" }}>⬅ {footerCustomLeft || (footerBookName ? result.title || "Book Title" : "—")}</span>
+                                    <span style={{ fontSize: "12px", color: "#2b2b2b" }}>{footerCustomMiddle || "·"}</span>
+                                    <span style={{ fontSize: "12px", color: "#2b2b2b" }}>{footerCustomRight || (footerPageNumber ? "Page 1" : "—")} ➡</span>
                                 </div>
                             </div>
 
                             {/* Chapter list */}
                             {result.chapter_titles && result.chapter_titles.length > 0 && (
                                 <div style={{ marginBottom: "24px" }}>
-                                    <div style={{ fontSize: "11px", fontWeight: "700", color: "#475569", letterSpacing: "0.06em", marginBottom: "10px" }}>CHAPTERS DETECTED</div>
+                                    <div style={{ fontSize: "11px", fontWeight: "700", color: "#0c43bb", letterSpacing: "0.08em", marginBottom: "10px", textTransform: "uppercase" }}>CHAPTERS DETECTED</div>
                                     <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
                                         {result.chapter_titles.slice(0, 12).map((t, i) => (
-                                            <div key={i} style={{ background: "rgba(0,0,0,0.03)", border: "1px solid rgba(0,0,0,0.08)", borderRadius: "6px", padding: "4px 10px", fontSize: "11px", color: "#555555" }}>{t}</div>
+                                            <div key={i} style={{ background: "#f7f2e4", border: "1px solid #e8e8e4", borderRadius: "6px", padding: "4px 10px", fontSize: "11px", color: "#2b2b2b", display: "flex", alignItems: "center", gap: "6px" }}>
+                                                <span style={{ background: "#1a1a1a", color: "#fff", borderRadius: "4px", fontSize: "9px", fontWeight: "800", padding: "1px 5px", minWidth: "16px", textAlign: "center" }}>{i + 1}</span>
+                                                {t}
+                                            </div>
                                         ))}
-                                        {result.chapter_titles.length > 12 && <div style={{ background: "rgba(0,0,0,0.03)", border: "1px solid rgba(0,0,0,0.08)", borderRadius: "6px", padding: "4px 10px", fontSize: "11px", color: "#555555" }}>+{result.chapter_titles.length - 12} more</div>}
+                                        {result.chapter_titles.length > 12 && <div style={{ background: "#f7f2e4", border: "1px solid #e8e8e4", borderRadius: "6px", padding: "4px 10px", fontSize: "11px", color: "#2b2b2b" }}>+{result.chapter_titles.length - 12} more</div>}
                                     </div>
                                 </div>
                             )}
 
                             {/* Download buttons */}
                             <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
-                                <a href={`${API_BASE}${result.pdf_url}`} download style={{ display: "inline-flex", alignItems: "center", gap: "8px", background: "linear-gradient(135deg,#f59e0b,#d97706)", color: "#0c0f1a", borderRadius: "12px", padding: "14px 24px", fontSize: "14px", fontWeight: "800", textDecoration: "none", transition: "opacity 0.2s" }} onMouseOver={(e) => { (e.currentTarget as HTMLAnchorElement).style.opacity = "0.88"; }} onMouseOut={(e) => { (e.currentTarget as HTMLAnchorElement).style.opacity = "1"; }}>
+                                <a href={`${API_BASE}${result.pdf_url}`} download style={{ display: "inline-flex", alignItems: "center", gap: "8px", background: "#1a1a1a", color: "#fff", borderRadius: "12px", padding: "14px 24px", fontSize: "14px", fontWeight: "800", textDecoration: "none", transition: "opacity 0.2s" }} onMouseOver={(e) => { (e.currentTarget as HTMLAnchorElement).style.opacity = "0.88"; }} onMouseOut={(e) => { (e.currentTarget as HTMLAnchorElement).style.opacity = "1"; }}>
                                     <Download size={16} /> Download PDF
                                 </a>
-                                <a href={`${API_BASE}${result.docx_url}`} download style={{ display: "inline-flex", alignItems: "center", gap: "8px", background: "rgba(99,102,241,0.15)", color: "#a5b4fc", border: "1px solid rgba(99,102,241,0.4)", borderRadius: "12px", padding: "14px 24px", fontSize: "14px", fontWeight: "800", textDecoration: "none", transition: "opacity 0.2s" }} onMouseOver={(e) => { (e.currentTarget as HTMLAnchorElement).style.opacity = "0.88"; }} onMouseOut={(e) => { (e.currentTarget as HTMLAnchorElement).style.opacity = "1"; }}>
+                                <a href={`${API_BASE}${result.docx_url}`} download style={{ display: "inline-flex", alignItems: "center", gap: "8px", background: "#fff", color: "#2b2b2b", border: "1px solid #e8e8e4", borderRadius: "12px", padding: "14px 24px", fontSize: "14px", fontWeight: "800", textDecoration: "none", transition: "opacity 0.2s" }} onMouseOver={(e) => { (e.currentTarget as HTMLAnchorElement).style.opacity = "0.88"; }} onMouseOut={(e) => { (e.currentTarget as HTMLAnchorElement).style.opacity = "1"; }}>
                                     <FileText size={16} /> Download DOCX
                                 </a>
-                                <div style={{ display: "inline-flex", alignItems: "center", gap: "8px", background: "rgba(0,0,0,0.03)", color: "#737373", border: "1px solid rgba(0,0,0,0.08)", borderRadius: "12px", padding: "14px 24px", fontSize: "14px", fontWeight: "700" }}>
-                                    📱 EPUB <span style={{ fontSize: "10px", color: "#475569", background: "rgba(0,0,0,0.04)", borderRadius: "4px", padding: "2px 6px" }}>soon</span>
+                                <div style={{ display: "inline-flex", alignItems: "center", gap: "8px", background: "#f7f2e4", color: "#2b2b2b", border: "1px solid #e8e8e4", borderRadius: "12px", padding: "14px 24px", fontSize: "14px", fontWeight: "700" }}>
+                                    📱 EPUB <span style={{ fontSize: "10px", color: "#2b2b2b", background: "#e8e8e4", borderRadius: "4px", padding: "2px 6px" }}>soon</span>
                                 </div>
                                 {isAdvanced && (
                                     <>
-                                        <div style={{ display: "inline-flex", alignItems: "center", gap: "8px", background: "rgba(0,0,0,0.03)", color: "#737373", border: "1px solid rgba(0,0,0,0.08)", borderRadius: "12px", padding: "14px 24px", fontSize: "14px", fontWeight: "700" }}>
-                                            📦 KDP Package <span style={{ fontSize: "10px", color: "#475569", background: "rgba(0,0,0,0.04)", borderRadius: "4px", padding: "2px 6px" }}>soon</span>
+                                        <div style={{ display: "inline-flex", alignItems: "center", gap: "8px", background: "#f7f2e4", color: "#2b2b2b", border: "1px solid #e8e8e4", borderRadius: "12px", padding: "14px 24px", fontSize: "14px", fontWeight: "700" }}>
+                                            📦 KDP Package <span style={{ fontSize: "10px", color: "#2b2b2b", background: "#e8e8e4", borderRadius: "4px", padding: "2px 6px" }}>soon</span>
                                         </div>
-                                        <div style={{ display: "inline-flex", alignItems: "center", gap: "8px", background: "rgba(0,0,0,0.03)", color: "#737373", border: "1px solid rgba(0,0,0,0.08)", borderRadius: "12px", padding: "14px 24px", fontSize: "14px", fontWeight: "700" }}>
-                                            🌐 IngramSpark <span style={{ fontSize: "10px", color: "#475569", background: "rgba(0,0,0,0.04)", borderRadius: "4px", padding: "2px 6px" }}>soon</span>
+                                        <div style={{ display: "inline-flex", alignItems: "center", gap: "8px", background: "#f7f2e4", color: "#2b2b2b", border: "1px solid #e8e8e4", borderRadius: "12px", padding: "14px 24px", fontSize: "14px", fontWeight: "700" }}>
+                                            🌐 IngramSpark <span style={{ fontSize: "10px", color: "#2b2b2b", background: "#e8e8e4", borderRadius: "4px", padding: "2px 6px" }}>soon</span>
                                         </div>
                                     </>
                                 )}
@@ -1002,28 +1006,28 @@ export default function LayoutDesignerPage() {
 
                         {/* Action buttons */}
                         <div style={{ display: "flex", gap: "12px" }}>
-                            <button onClick={reset} style={{ display: "flex", alignItems: "center", gap: "8px", background: "rgba(0,0,0,0.04)", border: "1px solid rgba(0,0,0,0.08)", borderRadius: "10px", padding: "12px 20px", color: "#555555", fontSize: "13px", fontWeight: "700", cursor: "pointer" }}>
+                            <button onClick={reset} style={{ display: "flex", alignItems: "center", gap: "8px", background: "#f7f2e4", border: "1px solid #e8e8e4", borderRadius: "10px", padding: "12px 20px", color: "#2b2b2b", fontSize: "13px", fontWeight: "700", cursor: "pointer", transition: "background 0.15s" }} onMouseOver={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "#efefcf"; }} onMouseOut={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "#f7f2e4"; }}>
                                 <RefreshCw size={14} /> Design Another Book
                             </button>
                         </div>
                     </div>
                 ) : loading ? (
                     /* ── PROGRESS SCREEN ── */
-                    <div style={{ background: "rgba(0,0,0,0.02)", border: "1px solid rgba(0,0,0,0.08)", borderRadius: "20px", padding: "48px 40px", textAlign: "center" }}>
-                        <div style={{ width: "56px", height: "56px", borderRadius: "16px", background: "rgba(245,158,11,0.1)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 20px" }}>
-                            <Wand2 size={24} color="#f59e0b" style={{ animation: "spin 2s linear infinite" }} />
+                    <div style={{ background: "#fff", border: "1px solid #e8e8e4", borderRadius: "20px", padding: "48px 40px", textAlign: "center" }}>
+                        <div style={{ width: "56px", height: "56px", borderRadius: "16px", background: "#f7f2e4", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 20px" }}>
+                            <Wand2 size={24} color="#2563eb" style={{ animation: "spin 2s linear infinite" }} />
                         </div>
-                        <div style={{ fontSize: "20px", fontWeight: "800", color: "#555555", marginBottom: "8px" }}>
+                        <div style={{ fontSize: "20px", fontWeight: "800", color: "#2b2b2b", marginBottom: "8px", fontFamily: "'Playfair Display', serif" }}>
                             {STAGE_LABELS[stage] || "Processing…"}
                         </div>
-                        <div style={{ fontSize: "13px", color: "#555555", marginBottom: "32px" }}>{statusMsg}</div>
-                        <div style={{ background: "rgba(0,0,0,0.3)", borderRadius: "8px", height: "6px", overflow: "hidden", marginBottom: "12px" }}>
-                            <div style={{ height: "100%", background: "linear-gradient(90deg,#f59e0b,#d97706)", width: `${pct}%`, transition: "width 0.5s ease", borderRadius: "8px" }} />
+                        <div style={{ fontSize: "13px", color: "#2b2b2b", marginBottom: "32px" }}>{statusMsg}</div>
+                        <div style={{ background: "#e8e8e4", borderRadius: "8px", height: "6px", overflow: "hidden", marginBottom: "12px" }}>
+                            <div style={{ height: "100%", background: "#1a1a1a", width: `${pct}%`, transition: "width 0.5s ease", borderRadius: "8px" }} />
                         </div>
-                        <div style={{ fontSize: "12px", color: "#475569" }}>{pct}% complete</div>
+                        <div style={{ fontSize: "12px", color: "#2b2b2b", fontFamily: "'Playfair Display', serif", fontWeight: "800" }}>{pct}%</div>
                         <div style={{ display: "flex", justifyContent: "center", gap: "8px", marginTop: "28px", flexWrap: "wrap" }}>
                             {Object.entries(STAGE_LABELS).filter(([k]) => k !== "error").map(([k, v]) => (
-                                <div key={k} style={{ fontSize: "10px", fontWeight: "700", padding: "4px 10px", borderRadius: "6px", background: stage === k ? "rgba(245,158,11,0.15)" : "rgba(0,0,0,0.03)", color: stage === k ? "#fbbf24" : "#737373", border: `1px solid ${stage === k ? "rgba(245,158,11,0.3)" : "rgba(0,0,0,0.04)"}` }}>{v}</div>
+                                <div key={k} style={{ fontSize: "10px", fontWeight: "700", padding: "4px 10px", borderRadius: "6px", background: stage === k ? "#1a1a1a" : "#f7f2e4", color: stage === k ? "#fff" : "#2b2b2b", border: `1px solid ${stage === k ? "#1a1a1a" : "#e8e8e4"}` }}>{v}</div>
                             ))}
                         </div>
                     </div>
@@ -1033,23 +1037,25 @@ export default function LayoutDesignerPage() {
 
                         {/* ── File Upload ── */}
                         <section>
-                            <div onDrop={onDrop} onDragOver={(e) => { e.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onClick={() => !file && fileInputRef.current?.click()} style={{ border: `2px dashed ${dragging ? "rgba(245,158,11,0.6)" : file ? "rgba(16,185,129,0.4)" : "rgba(0,0,0,0.08)"}`, borderRadius: "16px", padding: "40px 32px", textAlign: "center", cursor: file ? "default" : "pointer", transition: "all 0.2s", background: dragging ? "rgba(245,158,11,0.04)" : file ? "rgba(16,185,129,0.03)" : "rgba(0,0,0,0.01)" }}>
+                            <div onDrop={onDrop} onDragOver={(e) => { e.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onClick={() => !file && fileInputRef.current?.click()} style={{ border: `2px dashed ${dragging ? "#2563eb" : file ? "#2563eb" : "#d0d0cc"}`, borderRadius: "16px", padding: "40px 32px", textAlign: "center", cursor: file ? "default" : "pointer", transition: "all 0.2s", background: dragging ? "#f0f4ff" : file ? "#f0fff4" : "#fff" }}>
                                 {file ? (
                                     <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "14px" }}>
-                                        <div style={{ width: "44px", height: "44px", background: "rgba(16,185,129,0.1)", borderRadius: "12px", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                                            <FileText size={22} color="#10b981" />
+                                        <div style={{ width: "44px", height: "44px", background: "#f7f2e4", borderRadius: "12px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                                            <FileText size={22} color="#2563eb" />
                                         </div>
                                         <div style={{ textAlign: "left" }}>
-                                            <div style={{ fontSize: "14px", fontWeight: "700", color: "#555555" }}>{file.name}</div>
-                                            <div style={{ fontSize: "12px", color: "#555555" }}>{(file.size / 1024 / 1024).toFixed(2)} MB</div>
+                                            <div style={{ fontSize: "14px", fontWeight: "700", color: "#2b2b2b" }}>{file.name}</div>
+                                            <div style={{ fontSize: "12px", color: "#2b2b2b" }}>{(file.size / 1024 / 1024).toFixed(2)} MB</div>
                                         </div>
-                                        <button onClick={(e) => { e.stopPropagation(); setFile(null); }} style={{ marginLeft: "12px", background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: "8px", padding: "6px 10px", color: "#f87171", cursor: "pointer", fontSize: "12px" }}>Remove</button>
+                                        <button onClick={(e) => { e.stopPropagation(); setFile(null); }} style={{ marginLeft: "12px", background: "#fff0f0", border: "1px solid rgba(239,68,68,0.3)", borderRadius: "8px", padding: "6px 10px", color: "#ef4444", cursor: "pointer", fontSize: "12px" }}>Remove</button>
                                     </div>
                                 ) : (
                                     <>
-                                        <Upload size={28} color="#475569" style={{ marginBottom: "12px" }} />
-                                        <div style={{ fontSize: "15px", fontWeight: "700", color: "#555555", marginBottom: "6px" }}>Drop your manuscript here</div>
-                                        <div style={{ fontSize: "12px", color: "#475569" }}>PDF, DOCX, ZIP, TXT, MD or RTF · up to 150 MB</div>
+                                        <div style={{ width: "44px", height: "44px", background: "#f7f2e4", borderRadius: "12px", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 12px" }}>
+                                            <Upload size={22} color="#2563eb" />
+                                        </div>
+                                        <div style={{ fontSize: "15px", fontWeight: "700", color: "#2b2b2b", marginBottom: "6px" }}>Drop your manuscript here</div>
+                                        <div style={{ fontSize: "12px", color: "#2b2b2b" }}>PDF, DOCX, ZIP, TXT, MD or RTF · up to 150 MB</div>
                                     </>
                                 )}
                             </div>
@@ -1087,10 +1093,10 @@ export default function LayoutDesignerPage() {
                                                     if (pg >= 0) setPresetIndex(pg);
                                                 }
                                             }
-                                        }} style={{ padding: "12px 10px", background: sel ? bt.bg : "rgba(0,0,0,0.2)", border: `1px solid ${sel ? bt.border : "rgba(0,0,0,0.08)"}`, borderRadius: "10px", cursor: "pointer", textAlign: "left", transition: "all 0.15s" }}>
+                                        }} style={{ padding: "12px 10px", background: sel ? "#f7f2e4" : "#fff", border: `1px solid ${sel ? bt.accent : "#e8e8e4"}`, borderRadius: "10px", cursor: "pointer", textAlign: "left", transition: "all 0.15s" }}>
                                             <div style={{ fontSize: "18px", marginBottom: "4px" }}>{bt.icon}</div>
-                                            <div style={{ fontSize: "11px", fontWeight: "700", color: sel ? bt.accent : "#555555" }}>{bt.label}</div>
-                                            <div style={{ fontSize: "9px", color: "#475569", marginTop: "2px" }}>{bt.subtitle}</div>
+                                            <div style={{ fontSize: "11px", fontWeight: "700", color: sel ? bt.accent : "#2b2b2b" }}>{bt.label}</div>
+                                            <div style={{ fontSize: "9px", color: "#2b2b2b", marginTop: "2px" }}>{bt.subtitle}</div>
                                         </button>
                                     );
                                 })}
@@ -1105,7 +1111,7 @@ export default function LayoutDesignerPage() {
                             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" }}>
                                 <label style={{ ...labelStyle, marginBottom: 0 }}>BOOK SIZE</label>
                                 <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                                    <span style={{ fontSize: "10px", color: "#475569" }}>Units:</span>
+                                    <span style={{ fontSize: "10px", color: "#2b2b2b" }}>Units:</span>
                                     <UnitSelector value={dimUnit} onChange={setDimUnit} />
                                 </div>
                             </div>
@@ -1115,10 +1121,10 @@ export default function LayoutDesignerPage() {
                                         {SIZE_VISUAL.map((s) => {
                                             const sel = selectedSizeKey === s.key;
                                             return (
-                                                <button key={s.key} onClick={() => setSelectedSizeKey(s.key)} style={{ padding: "10px 16px", background: sel ? "rgba(245,158,11,0.12)" : "rgba(0,0,0,0.2)", border: `1px solid ${sel ? "rgba(245,158,11,0.5)" : "rgba(0,0,0,0.08)"}`, borderRadius: "10px", cursor: "pointer", textAlign: "center", minWidth: "80px" }}>
-                                                    <div style={{ fontSize: "13px", fontWeight: "800", color: sel ? "#fbbf24" : "#555555" }}>{s.label}</div>
-                                                    <div style={{ fontSize: "9px", color: "#555555", marginTop: "2px" }}>{s.desc}</div>
-                                                    {s.popular && <div style={{ fontSize: "8px", color: "#475569", marginTop: "3px" }}>{s.popular}</div>}
+                                                <button key={s.key} onClick={() => setSelectedSizeKey(s.key)} style={{ padding: "10px 16px", background: sel ? "#f7f2e4" : "#fff", border: `1px solid ${sel ? "#2563eb" : "#e8e8e4"}`, borderRadius: "10px", cursor: "pointer", textAlign: "center", minWidth: "80px" }}>
+                                                    <div style={{ fontSize: "13px", fontWeight: "800", color: sel ? "#2563eb" : "#2b2b2b" }}>{s.label}</div>
+                                                    <div style={{ fontSize: "9px", color: "#2b2b2b", marginTop: "2px" }}>{s.desc}</div>
+                                                    {s.popular && <div style={{ fontSize: "8px", color: "#2b2b2b", marginTop: "3px" }}>{s.popular}</div>}
                                                 </button>
                                             );
                                         })}
@@ -1158,7 +1164,7 @@ export default function LayoutDesignerPage() {
                                             </>
                                         )}
                                     </div>
-                                    <div style={{ marginTop: "8px", fontSize: "12px", color: "#475569" }}>
+                                    <div style={{ marginTop: "8px", fontSize: "12px", color: "#2b2b2b" }}>
                                         Final size: {fromMm(pageW, dimUnit)} × {fromMm(pageH, dimUnit)} {UNIT_LABELS[dimUnit]}
                                     </div>
                                 </>
@@ -1172,15 +1178,15 @@ export default function LayoutDesignerPage() {
                                 {VISUAL_TEMPLATES.map((t) => {
                                     const sel = templateKey === t.key;
                                     return (
-                                        <button key={t.key} onClick={() => setTemplateKey(sel ? null : t.key)} style={{ padding: "14px", background: sel ? "rgba(245,158,11,0.08)" : "rgba(0,0,0,0.2)", border: `1px solid ${sel ? "rgba(245,158,11,0.4)" : "rgba(0,0,0,0.08)"}`, borderRadius: "10px", cursor: "pointer", textAlign: "left", transition: "all 0.15s" }}>
+                                        <button key={t.key} onClick={() => setTemplateKey(sel ? null : t.key)} style={{ padding: "14px", background: sel ? "#f7f2e4" : "#fff", border: `1px solid ${sel ? "#2563eb" : "#e8e8e4"}`, borderRadius: "10px", cursor: "pointer", textAlign: "left", transition: "all 0.15s" }}>
                                             <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
                                                 <span style={{ fontSize: "18px" }}>{t.emoji}</span>
-                                                <span style={{ fontSize: "12px", fontWeight: "700", color: sel ? "#fbbf24" : "#555555" }}>{t.name}</span>
+                                                <span style={{ fontSize: "12px", fontWeight: "700", color: sel ? "#2563eb" : "#2b2b2b" }}>{t.name}</span>
                                             </div>
                                             <div style={{ display: "flex", gap: "3px", marginBottom: "6px" }}>
-                                                {t.colors.map((c, i) => <div key={i} style={{ width: "14px", height: "14px", borderRadius: "3px", background: c, border: "1px solid rgba(0,0,0,0.08)" }} />)}
+                                                {t.colors.map((c, i) => <div key={i} style={{ width: "14px", height: "14px", borderRadius: "3px", background: c, border: "1px solid #e8e8e4" }} />)}
                                             </div>
-                                            <div style={{ fontSize: "9px", color: "#475569" }}>{t.mood}</div>
+                                            <div style={{ fontSize: "9px", color: "#2b2b2b" }}>{t.mood}</div>
                                         </button>
                                     );
                                 })}
@@ -1197,18 +1203,18 @@ export default function LayoutDesignerPage() {
                                 {PRINT_PLATFORMS.map((p) => {
                                     const sel = printPlatform === p.key;
                                     return (
-                                        <button key={p.key} onClick={() => setPrintPlatform(p.key)} style={{ display: "flex", alignItems: "center", gap: "8px", padding: "10px 16px", background: sel ? "rgba(245,158,11,0.1)" : "rgba(0,0,0,0.2)", border: `1px solid ${sel ? "rgba(245,158,11,0.4)" : "rgba(0,0,0,0.08)"}`, borderRadius: "10px", cursor: "pointer", transition: "all 0.15s" }}>
+                                        <button key={p.key} onClick={() => setPrintPlatform(p.key)} style={{ display: "flex", alignItems: "center", gap: "8px", padding: "10px 16px", background: sel ? "#f7f2e4" : "#fff", border: `1px solid ${sel ? "#2563eb" : "#e8e8e4"}`, borderRadius: "10px", cursor: "pointer", transition: "all 0.15s" }}>
                                             <span style={{ fontSize: "16px" }}>{p.icon}</span>
                                             <div style={{ textAlign: "left" }}>
-                                                <div style={{ fontSize: "12px", fontWeight: "700", color: sel ? "#fbbf24" : "#555555" }}>{p.label}</div>
-                                                <div style={{ fontSize: "9px", color: "#475569" }}>{p.desc}</div>
+                                                <div style={{ fontSize: "12px", fontWeight: "700", color: sel ? "#2563eb" : "#2b2b2b" }}>{p.label}</div>
+                                                <div style={{ fontSize: "9px", color: "#2b2b2b" }}>{p.desc}</div>
                                             </div>
                                         </button>
                                     );
                                 })}
                             </div>
                             {printPlatform && (
-                                <div style={{ marginTop: "8px", fontSize: "11px", color: "#475569", display: "flex", alignItems: "center", gap: "6px" }}>
+                                <div style={{ marginTop: "8px", fontSize: "11px", color: "#2b2b2b", display: "flex", alignItems: "center", gap: "6px" }}>
                                     <Info size={11} /> {PRINT_PLATFORMS.find(p => p.key === printPlatform)?.hint}
                                 </div>
                             )}
@@ -1223,9 +1229,9 @@ export default function LayoutDesignerPage() {
                                         {FONT_PREFS.map((f) => {
                                             const sel = fontPrefKey === f.key;
                                             return (
-                                                <button key={f.key} onClick={() => setFontPrefKey(f.key)} style={{ padding: "10px 16px", background: sel ? "rgba(99,102,241,0.12)" : "rgba(0,0,0,0.2)", border: `1px solid ${sel ? "rgba(99,102,241,0.4)" : "rgba(0,0,0,0.08)"}`, borderRadius: "10px", cursor: "pointer" }}>
-                                                    <div style={{ fontSize: "12px", fontWeight: "700", color: sel ? "#a5b4fc" : "#555555" }}>{f.label}</div>
-                                                    <div style={{ fontSize: "9px", color: "#475569" }}>{f.desc}</div>
+                                                <button key={f.key} onClick={() => setFontPrefKey(f.key)} style={{ padding: "10px 16px", background: sel ? "#f7f2e4" : "#fff", border: `1px solid ${sel ? "#2563eb" : "#e8e8e4"}`, borderRadius: "10px", cursor: "pointer" }}>
+                                                    <div style={{ fontSize: "12px", fontWeight: "700", color: sel ? "#2563eb" : "#2b2b2b" }}>{f.label}</div>
+                                                    <div style={{ fontSize: "9px", color: "#2b2b2b" }}>{f.desc}</div>
                                                 </button>
                                             );
                                         })}
@@ -1240,10 +1246,10 @@ export default function LayoutDesignerPage() {
                                         {SPACING_OPTS.map((s) => {
                                             const sel = spacingKey === s.key;
                                             return (
-                                                <button key={s.key} onClick={() => setSpacingKey(s.key)} style={{ padding: "10px 16px", background: sel ? "rgba(99,102,241,0.12)" : "rgba(0,0,0,0.2)", border: `1px solid ${sel ? "rgba(99,102,241,0.4)" : "rgba(0,0,0,0.08)"}`, borderRadius: "10px", cursor: "pointer", position: "relative" }}>
-                                                    <div style={{ fontSize: "12px", fontWeight: "700", color: sel ? "#a5b4fc" : "#555555" }}>{s.label}</div>
-                                                    <div style={{ fontSize: "9px", color: "#475569" }}>{s.desc}</div>
-                                                    {s.popular && <div style={{ position: "absolute", top: "-6px", right: "-4px", background: "#6366f1", borderRadius: "4px", padding: "1px 5px", fontSize: "8px", color: "#2a2929", fontWeight: "800" }}>✓</div>}
+                                                <button key={s.key} onClick={() => setSpacingKey(s.key)} style={{ padding: "10px 16px", background: sel ? "#f7f2e4" : "#fff", border: `1px solid ${sel ? "#2563eb" : "#e8e8e4"}`, borderRadius: "10px", cursor: "pointer", position: "relative" }}>
+                                                    <div style={{ fontSize: "12px", fontWeight: "700", color: sel ? "#2563eb" : "#2b2b2b" }}>{s.label}</div>
+                                                    <div style={{ fontSize: "9px", color: "#2b2b2b" }}>{s.desc}</div>
+                                                    {s.popular && <div style={{ position: "absolute", top: "-6px", right: "-4px", background: "#2563eb", borderRadius: "4px", padding: "1px 5px", fontSize: "8px", color: "#fff", fontWeight: "800" }}>✓</div>}
                                                 </button>
                                             );
                                         })}
@@ -1256,13 +1262,13 @@ export default function LayoutDesignerPage() {
                         )}
 
                         {/* ── FOOTER SETTINGS (always visible for both modes) ── */}
-                        <section style={{ background: "rgba(245,158,11,0.04)", border: "1px solid rgba(245,158,11,0.15)", borderRadius: "14px", padding: "20px" }}>
+                        <section style={{ background: "#fff", border: "1px solid #e8e8e4", borderRadius: "14px", padding: "20px" }}>
                             <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "16px" }}>
-                                <BookMarked size={14} color="#f59e0b" />
-                                <span style={{ fontSize: "13px", fontWeight: "700", color: "#fbbf24" }}>Footer Settings</span>
-                                <span style={{ fontSize: "10px", color: "#475569", background: "rgba(245,158,11,0.1)", borderRadius: "4px", padding: "2px 7px" }}>All Pages</span>
+                                <BookMarked size={14} color="#2563eb" />
+                                <span style={{ fontSize: "13px", fontWeight: "700", color: "#2b2b2b" }}>Footer Settings</span>
+                                <span style={{ fontSize: "10px", color: "#2b2b2b", background: "#f7f2e4", border: "1px solid #e8e8e4", borderRadius: "4px", padding: "2px 7px" }}>All Pages</span>
                             </div>
-                            <p style={{ fontSize: "12px", color: "#555555", marginBottom: "14px" }}>
+                            <p style={{ fontSize: "12px", color: "#2b2b2b", marginBottom: "14px" }}>
                                 The footer appears on every page including chapter starts. Three slots: left (book name), centre (empty), right (page number).
                             </p>
                             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "14px" }}>
@@ -1271,12 +1277,12 @@ export default function LayoutDesignerPage() {
                                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" }}>
                                         <label style={{ ...labelStyle, marginBottom: 0 }}>LEFT (Book Name)</label>
                                         <label style={{ display: "flex", alignItems: "center", gap: "6px", cursor: "pointer" }}>
-                                            <input type="checkbox" checked={footerBookName} onChange={(e) => setFooterBookName(e.target.checked)} style={{ accentColor: "#f59e0b" }} />
-                                            <span style={{ fontSize: "11px", color: footerBookName ? "#fbbf24" : "#475569" }}>On</span>
+                                            <input type="checkbox" checked={footerBookName} onChange={(e) => setFooterBookName(e.target.checked)} style={{ accentColor: "#2563eb" }} />
+                                            <span style={{ fontSize: "11px", color: footerBookName ? "#2563eb" : "#2b2b2b" }}>On</span>
                                         </label>
                                     </div>
                                     <input value={footerCustomLeft} onChange={(e) => setFooterCustomLeft(e.target.value)} placeholder={footerBookName ? bookTitle || "Book title (auto)" : "Disabled"} disabled={!footerBookName} style={{ ...inputStyle, opacity: footerBookName ? 1 : 0.4 }} onFocus={focusBorder} onBlur={blurBorder} />
-                                    <div style={{ fontSize: "10px", color: "#737373", marginTop: "4px" }}>Leave blank to use book title</div>
+                                    <div style={{ fontSize: "10px", color: "#2b2b2b", marginTop: "4px" }}>Leave blank to use book title</div>
                                 </div>
                                 {/* MIDDLE */}
                                 <div>
@@ -1284,52 +1290,52 @@ export default function LayoutDesignerPage() {
                                         <label style={{ ...labelStyle, marginBottom: 0 }}>CENTRE (Optional)</label>
                                     </div>
                                     <input value={footerCustomMiddle} onChange={(e) => setFooterCustomMiddle(e.target.value)} placeholder="e.g. chapter name, empty" style={inputStyle} onFocus={focusBorder} onBlur={blurBorder} />
-                                    <div style={{ fontSize: "10px", color: "#737373", marginTop: "4px" }}>Default: empty</div>
+                                    <div style={{ fontSize: "10px", color: "#2b2b2b", marginTop: "4px" }}>Default: empty</div>
                                 </div>
                                 {/* RIGHT */}
                                 <div>
                                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" }}>
                                         <label style={{ ...labelStyle, marginBottom: 0 }}>RIGHT (Page №)</label>
                                         <label style={{ display: "flex", alignItems: "center", gap: "6px", cursor: "pointer" }}>
-                                            <input type="checkbox" checked={footerPageNumber} onChange={(e) => setFooterPageNumber(e.target.checked)} style={{ accentColor: "#f59e0b" }} />
-                                            <span style={{ fontSize: "11px", color: footerPageNumber ? "#fbbf24" : "#475569" }}>On</span>
+                                            <input type="checkbox" checked={footerPageNumber} onChange={(e) => setFooterPageNumber(e.target.checked)} style={{ accentColor: "#2563eb" }} />
+                                            <span style={{ fontSize: "11px", color: footerPageNumber ? "#2563eb" : "#2b2b2b" }}>On</span>
                                         </label>
                                     </div>
                                     <input value={footerCustomRight} onChange={(e) => setFooterCustomRight(e.target.value)} placeholder={footerPageNumber ? "Page number (auto)" : "Disabled"} disabled={!footerPageNumber} style={{ ...inputStyle, opacity: footerPageNumber ? 1 : 0.4 }} onFocus={focusBorder} onBlur={blurBorder} />
-                                    <div style={{ fontSize: "10px", color: "#737373", marginTop: "4px" }}>Leave blank for auto page №</div>
+                                    <div style={{ fontSize: "10px", color: "#2b2b2b", marginTop: "4px" }}>Leave blank for auto page №</div>
                                 </div>
                             </div>
                             {/* Live Preview */}
-                            <div style={{ marginTop: "14px", background: "rgba(0,0,0,0.2)", borderRadius: "8px", padding: "8px 14px", display: "flex", justifyContent: "space-between", alignItems: "center", border: "1px solid rgba(0,0,0,0.04)" }}>
-                                <span style={{ fontSize: "11px", color: "#555555", fontStyle: "italic" }}>{footerCustomLeft || (footerBookName ? (bookTitle || "Your Book Title") : "—")}</span>
-                                <span style={{ fontSize: "11px", color: "#555555", fontStyle: "italic" }}>{footerCustomMiddle || "·"}</span>
-                                <span style={{ fontSize: "11px", color: "#555555" }}>{footerCustomRight || (footerPageNumber ? "42" : "—")}</span>
+                            <div style={{ marginTop: "14px", background: "#f7f2e4", borderRadius: "8px", padding: "8px 14px", display: "flex", justifyContent: "space-between", alignItems: "center", border: "1px solid #e8e8e4" }}>
+                                <span style={{ fontSize: "11px", color: "#2b2b2b", fontStyle: "italic" }}>{footerCustomLeft || (footerBookName ? (bookTitle || "Your Book Title") : "—")}</span>
+                                <span style={{ fontSize: "11px", color: "#2b2b2b", fontStyle: "italic" }}>{footerCustomMiddle || "·"}</span>
+                                <span style={{ fontSize: "11px", color: "#2b2b2b" }}>{footerCustomRight || (footerPageNumber ? "42" : "—")}</span>
                             </div>
-                            <div style={{ fontSize: "10px", color: "#737373", textAlign: "center", marginTop: "4px" }}>↑ Footer preview</div>
+                            <div style={{ fontSize: "10px", color: "#2b2b2b", textAlign: "center", marginTop: "4px" }}>↑ Footer preview</div>
                         </section>
 
                         {/* ── ADVANCED OPTIONS ── */}
                         {isAdvanced && (
                             <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                                 <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "4px" }}>
-                                    <Settings2 size={14} color="#f59e0b" />
-                                    <span style={{ fontSize: "13px", fontWeight: "800", color: "#fbbf24", letterSpacing: "0.04em" }}>ADVANCED OPTIONS</span>
-                                    {activeOverrides > 0 && <div style={{ background: "rgba(245,158,11,0.15)", border: "1px solid rgba(245,158,11,0.3)", borderRadius: "10px", padding: "2px 8px", fontSize: "10px", color: "#fbbf24", fontWeight: "700" }}>{activeOverrides} active</div>}
+                                    <Settings2 size={14} color="#2563eb" />
+                                    <span style={{ fontSize: "13px", fontWeight: "800", color: "#2b2b2b", letterSpacing: "0.04em" }}>ADVANCED OPTIONS</span>
+                                    {activeOverrides > 0 && <div style={{ background: "#f7f2e4", border: "1px solid #e8e8e4", borderRadius: "10px", padding: "2px 8px", fontSize: "10px", color: "#2563eb", fontWeight: "700" }}>{activeOverrides} active</div>}
                                 </div>
 
                                 {/* AI Command Box */}
-                                <CollapsibleSection title="AI Command Box" icon={<MessageSquare size={14} color="#f59e0b" />} defaultOpen={true}>
-                                    <p style={{ fontSize: "12px", color: "#555555" }}>Give natural-language instructions. AI will interpret and apply formatting automatically.</p>
+                                <CollapsibleSection title="AI Command Box" icon={<MessageSquare size={14} color="#2563eb" />} defaultOpen={true}>
+                                    <p style={{ fontSize: "12px", color: "#2b2b2b" }}>Give natural-language instructions. AI will interpret and apply formatting automatically.</p>
                                     <textarea value={aiCommand} onChange={(e) => setAiCommand(e.target.value)} placeholder={`Examples:\n• "Create a premium fiction layout."\n• "Format as a university textbook."\n• "Use mirror margins and start each chapter on a right-hand page."\n• "Follow Chicago style formatting."`} rows={5} style={{ ...inputStyle, fontSize: "13px", resize: "vertical", lineHeight: "1.55", fontFamily: "inherit", padding: "12px 14px" }} onFocus={focusBorder} onBlur={blurBorder} />
                                     <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
                                         {AI_COMMAND_EXAMPLES.map((ex, i) => (
-                                            <button key={i} onClick={() => setAiCommand(ex)} style={{ fontSize: "10px", padding: "4px 10px", background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.2)", borderRadius: "6px", color: "#555555", cursor: "pointer" }}>{ex}</button>
+                                            <button key={i} onClick={() => setAiCommand(ex)} style={{ fontSize: "10px", padding: "4px 10px", background: "#f7f2e4", border: "1px solid #e8e8e4", borderRadius: "6px", color: "#2b2b2b", cursor: "pointer" }}>{ex}</button>
                                         ))}
                                     </div>
                                 </CollapsibleSection>
 
                                 {/* Advanced Layout Controls */}
-                                <CollapsibleSection title="Advanced Layout Controls" icon={<Ruler size={14} color="#f59e0b" />}>
+                                <CollapsibleSection title="Advanced Layout Controls" icon={<Ruler size={14} color="#2563eb" />}>
                                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
                                         <TriToggle label="Mirror Margins (Double-sided)" value={mirrorMargins} onChange={setMirrorMargins} />
                                         <TriToggle label="Section Breaks" value={sectionBreaks} onChange={setSectionBreaks} />
@@ -1374,7 +1380,7 @@ export default function LayoutDesignerPage() {
                                         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "10px" }}>
                                             <label style={{ ...labelStyle, marginBottom: 0 }}>MARGINS</label>
                                             <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                                                <span style={{ fontSize: "10px", color: "#475569" }}>Unit:</span>
+                                                <span style={{ fontSize: "10px", color: "#2b2b2b" }}>Unit:</span>
                                                 <UnitSelector value={dimUnit} onChange={setDimUnit} />
                                             </div>
                                         </div>
@@ -1395,7 +1401,7 @@ export default function LayoutDesignerPage() {
                                 </CollapsibleSection>
 
                                 {/* Typography Controls */}
-                                <CollapsibleSection title="Typography Controls" icon={<Type size={14} color="#f59e0b" />}>
+                                <CollapsibleSection title="Typography Controls" icon={<Type size={14} color="#2563eb" />}>
                                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
                                         <div>
                                             <label style={labelStyle}>BODY FONT</label>
@@ -1459,12 +1465,12 @@ export default function LayoutDesignerPage() {
                                 </CollapsibleSection>
 
                                 {/* Print Production Controls */}
-                                <CollapsibleSection title="Print Production Controls" icon={<Printer size={14} color="#f59e0b" />}>
+                                <CollapsibleSection title="Print Production Controls" icon={<Printer size={14} color="#2563eb" />}>
                                     <div>
                                         <label style={labelStyle}>COLOR MODE</label>
                                         <div style={{ display: "flex", gap: "8px" }}>
                                             {[{ key: "", label: "AI decides" }, { key: "bw", label: "⚫ Black & White" }, { key: "color", label: "🌈 Full Color" }].map(opt => (
-                                                <button key={opt.key} onClick={() => setColorMode(opt.key as "bw" | "color" | "")} style={{ flex: 1, padding: "10px", background: colorMode === opt.key ? "rgba(245,158,11,0.12)" : "rgba(0,0,0,0.2)", border: `1px solid ${colorMode === opt.key ? "rgba(245,158,11,0.4)" : "rgba(0,0,0,0.08)"}`, borderRadius: "8px", cursor: "pointer", fontSize: "12px", fontWeight: "700", color: colorMode === opt.key ? "#fbbf24" : "#555555" }}>
+                                                <button key={opt.key} onClick={() => setColorMode(opt.key as "bw" | "color" | "")} style={{ flex: 1, padding: "10px", background: colorMode === opt.key ? "#1a1a1a" : "#fff", border: `1px solid ${colorMode === opt.key ? "#1a1a1a" : "#e8e8e4"}`, borderRadius: "8px", cursor: "pointer", fontSize: "12px", fontWeight: "700", color: colorMode === opt.key ? "#fff" : "#2b2b2b" }}>
                                                     {opt.label}
                                                 </button>
                                             ))}
@@ -1481,53 +1487,53 @@ export default function LayoutDesignerPage() {
                                             { label: "Offset Printing Ready", color: "#10b981" },
                                             { label: "CMYK Color Profile", color: "#8b5cf6" },
                                         ].map((opt, i) => (
-                                            <div key={i} style={{ display: "flex", alignItems: "center", gap: "8px", padding: "10px 12px", background: "rgba(0,0,0,0.2)", border: "1px solid rgba(0,0,0,0.04)", borderRadius: "8px" }}>
+                                            <div key={i} style={{ display: "flex", alignItems: "center", gap: "8px", padding: "10px 12px", background: "#f7f2e4", border: "1px solid #e8e8e4", borderRadius: "8px" }}>
                                                 <div style={{ width: "8px", height: "8px", borderRadius: "50%", background: opt.color, flexShrink: 0 }} />
-                                                <span style={{ fontSize: "11px", color: "#555555" }}>{opt.label}</span>
-                                                <span style={{ marginLeft: "auto", fontSize: "9px", color: "#737373", background: "rgba(0,0,0,0.03)", padding: "1px 5px", borderRadius: "4px" }}>via instructions</span>
+                                                <span style={{ fontSize: "11px", color: "#2b2b2b" }}>{opt.label}</span>
+                                                <span style={{ marginLeft: "auto", fontSize: "9px", color: "#2b2b2b", background: "#e8e8e4", padding: "1px 5px", borderRadius: "4px" }}>via instructions</span>
                                             </div>
                                         ))}
                                     </div>
                                 </CollapsibleSection>
 
                                 {/* Front Matter Controls */}
-                                <CollapsibleSection title="Front Matter" icon={<BookCopy size={14} color="#f59e0b" />} defaultOpen={true}>
-                                    <p style={{ fontSize: "12px", color: "#555555" }}>Select pages to include at the beginning of your book. AI will generate content where needed.</p>
+                                <CollapsibleSection title="Front Matter" icon={<BookCopy size={14} color="#2563eb" />} defaultOpen={true}>
+                                    <p style={{ fontSize: "12px", color: "#2b2b2b" }}>Select pages to include at the beginning of your book. AI will generate content where needed.</p>
                                     <MatterCheckbox items={FRONT_MATTER_ITEMS} selected={frontMatter} onChange={setFrontMatter} />
                                 </CollapsibleSection>
 
                                 {/* Back Matter Controls */}
-                                <CollapsibleSection title="Back Matter" icon={<ListOrdered size={14} color="#f59e0b" />}>
-                                    <p style={{ fontSize: "12px", color: "#555555" }}>Select pages to include at the end of your book.</p>
+                                <CollapsibleSection title="Back Matter" icon={<ListOrdered size={14} color="#2563eb" />}>
+                                    <p style={{ fontSize: "12px", color: "#2b2b2b" }}>Select pages to include at the end of your book.</p>
                                     <MatterCheckbox items={BACK_MATTER_ITEMS} selected={backMatter} onChange={setBackMatter} />
                                 </CollapsibleSection>
 
                                 {/* Template Management */}
-                                <CollapsibleSection title="Template Management" icon={<Save size={14} color="#f59e0b" />}>
-                                    <p style={{ fontSize: "12px", color: "#555555" }}>Save your current settings as a reusable template.</p>
+                                <CollapsibleSection title="Template Management" icon={<Save size={14} color="#2563eb" />}>
+                                    <p style={{ fontSize: "12px", color: "#2b2b2b" }}>Save your current settings as a reusable template.</p>
                                     {!showSaveTemplate ? (
-                                        <button onClick={() => setShowSaveTemplate(true)} style={{ display: "flex", alignItems: "center", gap: "8px", background: "rgba(245,158,11,0.1)", border: "1px solid rgba(245,158,11,0.3)", borderRadius: "8px", padding: "10px 16px", color: "#fbbf24", fontSize: "13px", fontWeight: "700", cursor: "pointer" }}>
+                                        <button onClick={() => setShowSaveTemplate(true)} style={{ display: "flex", alignItems: "center", gap: "8px", background: "#f7f2e4", border: "1px solid #e8e8e4", borderRadius: "8px", padding: "10px 16px", color: "#2b2b2b", fontSize: "13px", fontWeight: "700", cursor: "pointer" }}>
                                             <Save size={13} /> Save Current Settings as Template
                                         </button>
                                     ) : (
                                         <div style={{ display: "flex", gap: "8px" }}>
                                             <input value={templateName} onChange={(e) => setTemplateName(e.target.value)} placeholder="Template name…" style={{ ...inputStyle, flex: 1 }} onFocus={focusBorder} onBlur={blurBorder} />
-                                            <button onClick={saveTemplate} style={{ background: "rgba(245,158,11,0.15)", border: "1px solid rgba(245,158,11,0.4)", borderRadius: "8px", padding: "10px 16px", color: "#fbbf24", fontSize: "12px", fontWeight: "700", cursor: "pointer" }}>Save</button>
-                                            <button onClick={() => setShowSaveTemplate(false)} style={{ background: "rgba(0,0,0,0.2)", border: "1px solid rgba(0,0,0,0.08)", borderRadius: "8px", padding: "10px 14px", color: "#555555", fontSize: "12px", cursor: "pointer" }}>Cancel</button>
+                                            <button onClick={saveTemplate} style={{ background: "#1a1a1a", border: "none", borderRadius: "8px", padding: "10px 16px", color: "#fff", fontSize: "12px", fontWeight: "700", cursor: "pointer" }}>Save</button>
+                                            <button onClick={() => setShowSaveTemplate(false)} style={{ background: "#f7f2e4", border: "1px solid #e8e8e4", borderRadius: "8px", padding: "10px 14px", color: "#2b2b2b", fontSize: "12px", cursor: "pointer" }}>Cancel</button>
                                         </div>
                                     )}
                                     {savedTemplates.length > 0 && (
                                         <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                                             <label style={labelStyle}>SAVED TEMPLATES</label>
                                             {savedTemplates.map((tmpl) => (
-                                                <div key={tmpl.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", background: "rgba(0,0,0,0.2)", border: "1px solid rgba(0,0,0,0.08)", borderRadius: "8px" }}>
+                                                <div key={tmpl.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", background: "#f7f2e4", border: "1px solid #e8e8e4", borderRadius: "8px" }}>
                                                     <div>
-                                                        <div style={{ fontSize: "13px", fontWeight: "700", color: "#555555" }}>{tmpl.name}</div>
-                                                        <div style={{ fontSize: "10px", color: "#475569" }}>{tmpl.createdAt}</div>
+                                                        <div style={{ fontSize: "13px", fontWeight: "700", color: "#2b2b2b" }}>{tmpl.name}</div>
+                                                        <div style={{ fontSize: "10px", color: "#2b2b2b" }}>{tmpl.createdAt}</div>
                                                     </div>
                                                     <div style={{ display: "flex", gap: "6px" }}>
-                                                        <button onClick={() => loadTemplate(tmpl)} style={{ background: "rgba(99,102,241,0.1)", border: "1px solid rgba(99,102,241,0.3)", borderRadius: "6px", padding: "6px 12px", color: "#a5b4fc", fontSize: "11px", fontWeight: "700", cursor: "pointer" }}>Load</button>
-                                                        <button onClick={() => setSavedTemplates(savedTemplates.filter(t => t.id !== tmpl.id))} style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", borderRadius: "6px", padding: "6px 10px", color: "#f87171", fontSize: "11px", cursor: "pointer" }}>✕</button>
+                                                        <button onClick={() => loadTemplate(tmpl)} style={{ background: "#fff", border: "1px solid #e8e8e4", borderRadius: "6px", padding: "6px 12px", color: "#2563eb", fontSize: "11px", fontWeight: "700", cursor: "pointer" }}>Load</button>
+                                                        <button onClick={() => setSavedTemplates(savedTemplates.filter(t => t.id !== tmpl.id))} style={{ background: "#fff0f0", border: "1px solid rgba(239,68,68,0.2)", borderRadius: "6px", padding: "6px 10px", color: "#ef4444", fontSize: "11px", cursor: "pointer" }}>✕</button>
                                                     </div>
                                                 </div>
                                             ))}
@@ -1536,8 +1542,8 @@ export default function LayoutDesignerPage() {
                                 </CollapsibleSection>
 
                                 {/* Custom Design Instructions */}
-                                <CollapsibleSection title="Custom Design Instructions" icon={<PenTool size={14} color="#f59e0b" />}>
-                                    <p style={{ fontSize: "12px", color: "#555555" }}>Fine-tune with free-form instructions (used only if AI Command Box is empty).</p>
+                                <CollapsibleSection title="Custom Design Instructions" icon={<PenTool size={14} color="#2563eb" />}>
+                                    <p style={{ fontSize: "12px", color: "#2b2b2b" }}>Fine-tune with free-form instructions (used only if AI Command Box is empty).</p>
                                     <textarea value={designInstructions} onChange={(e) => setDesignInstructions(e.target.value)} placeholder="e.g. Classic cream pages with generous margins, drop caps, and subtle ornamental dividers…" rows={4} style={{ ...inputStyle, fontSize: "13px", resize: "vertical", lineHeight: "1.55", fontFamily: "inherit", padding: "12px 14px" }} onFocus={focusBorder} onBlur={blurBorder} />
                                 </CollapsibleSection>
                             </div>
@@ -1545,10 +1551,10 @@ export default function LayoutDesignerPage() {
 
                         {/* ── AI Smart Suggestion (Author mode) ── */}
                         {!isAdvanced && file && (
-                            <section style={{ background: "linear-gradient(135deg, rgba(245,158,11,0.07) 0%, rgba(99,102,241,0.04) 100%)", border: "1px solid rgba(245,158,11,0.2)", borderRadius: "14px", padding: "20px 24px" }}>
+                            <section style={{ background: "#f7f2e4", border: "1px solid #e8e8e4", borderRadius: "14px", padding: "20px 24px" }}>
                                 <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "12px" }}>
-                                    <Wand2 size={14} color="#f59e0b" />
-                                    <span style={{ fontSize: "12px", fontWeight: "700", color: "#fbbf24" }}>AI will automatically</span>
+                                    <Wand2 size={14} color="#2563eb" />
+                                    <span style={{ fontSize: "12px", fontWeight: "700", color: "#2b2b2b" }}>AI will automatically</span>
                                 </div>
                                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px" }}>
                                     {[
@@ -1561,8 +1567,8 @@ export default function LayoutDesignerPage() {
                                         `Footer: ${footerCustomLeft || (footerBookName ? (bookTitle || "book name") : "none")} (left)`,
                                         `Footer: ${footerCustomRight || (footerPageNumber ? "page number" : "none")} (right)`,
                                     ].map((item, i) => (
-                                        <div key={i} style={{ fontSize: "12px", color: "#555555", display: "flex", alignItems: "center", gap: "6px" }}>
-                                            <span style={{ color: "#f59e0b" }}>✓</span> {item}
+                                        <div key={i} style={{ fontSize: "12px", color: "#2b2b2b", display: "flex", alignItems: "center", gap: "6px" }}>
+                                            <span style={{ color: "#2563eb" }}>✓</span> {item}
                                         </div>
                                     ))}
                                 </div>
@@ -1570,7 +1576,7 @@ export default function LayoutDesignerPage() {
                         )}
 
                         {/* ── Main Submit Button ── */}
-                        <button onClick={handleSubmit} disabled={!file || loading} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "10px", background: (file && !loading) ? "linear-gradient(135deg, #f59e0b, #d97706)" : "rgba(245,158,11,0.2)", color: (file && !loading) ? "#0c0f1a" : "#555555", border: "none", borderRadius: "14px", padding: "18px 32px", fontSize: "17px", fontWeight: "800", cursor: (file && !loading) ? "pointer" : "not-allowed", transition: "opacity 0.2s", width: "100%", boxShadow: (file && !loading) ? "0 8px 32px rgba(245,158,11,0.3)" : "none" }}
+                        <button onClick={handleSubmit} disabled={!file || loading} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "10px", background: (file && !loading) ? "#1a1a1a" : "#e8e8e4", color: (file && !loading) ? "#fff" : "#2b2b2b", border: "none", borderRadius: "14px", padding: "18px 32px", fontSize: "17px", fontWeight: "800", cursor: (file && !loading) ? "pointer" : "not-allowed", transition: "opacity 0.2s", width: "100%", boxShadow: (file && !loading) ? "0 8px 32px rgba(0,0,0,0.15)" : "none" }}
                             onMouseOver={(e) => { if (file) (e.currentTarget as HTMLButtonElement).style.opacity = "0.88"; }}
                             onMouseOut={(e) => { (e.currentTarget as HTMLButtonElement).style.opacity = "1"; }}>
                             <Wand2 size={19} />
@@ -1587,18 +1593,18 @@ export default function LayoutDesignerPage() {
                                 { icon: "📱", label: "EPUB", ready: false },
                                 ...(isAdvanced ? [{ icon: "📦", label: "KDP Package", ready: false }, { icon: "🌐", label: "IngramSpark Package", ready: false }] : []),
                             ].map((fmt, i) => (
-                                <div key={i} style={{ display: "flex", alignItems: "center", gap: "5px", fontSize: "11px", color: fmt.ready ? "#555555" : "#737373" }}>
+                                <div key={i} style={{ display: "flex", alignItems: "center", gap: "5px", fontSize: "11px", color: fmt.ready ? "#2b2b2b" : "#2b2b2b" }}>
                                     <span style={{ fontSize: "13px" }}>{fmt.icon}</span>
                                     {fmt.label}
-                                    {!fmt.ready && <span style={{ fontSize: "9px", color: "#475569", background: "rgba(0,0,0,0.04)", borderRadius: "4px", padding: "1px 5px" }}>soon</span>}
+                                    {!fmt.ready && <span style={{ fontSize: "9px", color: "#2b2b2b", background: "#e8e8e4", borderRadius: "4px", padding: "1px 5px" }}>soon</span>}
                                 </div>
                             ))}
                         </div>
 
-                        <p style={{ textAlign: "center", fontSize: "12px", color: "#737373" }}>
+                        <p style={{ textAlign: "center", fontSize: "12px", color: "#2b2b2b" }}>
                             Powered by GPT-4o · Typeset with ReportLab · Footer: book name (left) · custom (centre) · page number (right) · all pages
                         </p>
-                        <p style={{ textAlign: "center", fontSize: "11px", color: "#737373", marginTop: "-8px" }}>Tip: Press <kbd style={{ background: "rgba(0,0,0,0.08)", border: "1px solid rgba(0,0,0,0.08)", borderRadius: "4px", padding: "1px 5px", fontFamily: "monospace", fontSize: "10px" }}>Ctrl+Enter</kbd> to submit</p>
+                        <p style={{ textAlign: "center", fontSize: "11px", color: "#2b2b2b", marginTop: "-8px" }}>Tip: Press <kbd style={{ background: "#f7f2e4", border: "1px solid #e8e8e4", borderRadius: "4px", padding: "1px 5px", fontFamily: "monospace", fontSize: "10px" }}>Ctrl+Enter</kbd> to submit</p>
                     </div>
                 )}
             </main>
@@ -1607,8 +1613,8 @@ export default function LayoutDesignerPage() {
         @keyframes spin { to { transform: rotate(360deg); } }
         @keyframes fadeInUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
         input[type=number]::-webkit-inner-spin-button { opacity: 0.3; }
-        select option { background: #737373; color: #555555; }
-        ::-webkit-scrollbar { width: 4px; } ::-webkit-scrollbar-thumb { background: #737373; border-radius: 4px; }
+        select option { background: #fff; color: #2b2b2b; }
+        ::-webkit-scrollbar { width: 4px; } ::-webkit-scrollbar-thumb { background: #e8e8e4; border-radius: 4px; }
       `}</style>
         </div>
     );

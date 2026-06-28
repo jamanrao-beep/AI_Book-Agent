@@ -39,8 +39,7 @@ export default function DashboardHome() {
       icon: ScanLine,
       label: "Handwritten Scanner",
       tag: "AI VISION",
-      tagColor: "#a78bfa",
-      tagBg: "rgba(124,58,237,0.12)",
+      tagColor: "#7c3aed",
       description:
         "Photograph up to 400 handwritten pages — in any language — and AI transcribes every word into a clean, structured book exported as PDF & DOCX.",
       features: [
@@ -51,8 +50,6 @@ export default function DashboardHome() {
       cta: "Scan Handwriting",
       href: "/dashboard/scan",
       accent: "#7c3aed",
-      bg: "linear-gradient(135deg, rgba(124,58,237,0.08) 0%, rgba(124,58,237,0.02) 100%)",
-      border: "rgba(124,58,237,0.25)",
       row: 1,
     },
     {
@@ -60,8 +57,7 @@ export default function DashboardHome() {
       icon: BookOpen,
       label: "Book Writing",
       tag: "AI AGENT",
-      tagColor: "#6366f1",
-      tagBg: "rgba(99,102,241,0.12)",
+      tagColor: "#2563eb",
       description:
         "Give us a title and vision. Our autonomous AI agent researches, structures, and writes your entire manuscript — exported as print-ready PDF & Word.",
       features: [
@@ -71,9 +67,7 @@ export default function DashboardHome() {
       ],
       cta: "Start Writing",
       href: "/dashboard/books",
-      accent: "#6366f1",
-      bg: "linear-gradient(135deg, rgba(99,102,241,0.08) 0%, rgba(99,102,241,0.02) 100%)",
-      border: "rgba(99,102,241,0.25)",
+      accent: "#2563eb",
       row: 1,
     },
     // ── Row 2 (3 cards) ───────────────────────────────────────────────────────
@@ -82,8 +76,7 @@ export default function DashboardHome() {
       icon: PencilLine,
       label: "Book Editor",
       tag: "EXPERT",
-      tagColor: "#f472b6",
-      tagBg: "rgba(244,114,182,0.12)",
+      tagColor: "#be185d",
       description:
         "Upload your book (PDF / DOCX / ZIP) and have a conversation to edit it — rewrite chapters, change the theme, adjust tone, add sections, and download each new version instantly.",
       features: [
@@ -93,9 +86,7 @@ export default function DashboardHome() {
       ],
       cta: "Edit a Book",
       href: "/dashboard/editor",
-      accent: "#f472b6",
-      bg: "linear-gradient(135deg, rgba(244,114,182,0.08) 0%, rgba(244,114,182,0.02) 100%)",
-      border: "rgba(244,114,182,0.25)",
+      accent: "#be185d",
       row: 2,
     },
     {
@@ -103,8 +94,7 @@ export default function DashboardHome() {
       icon: FileSearch,
       label: "Proofreading",
       tag: "POPULAR",
-      tagColor: "#10b981",
-      tagBg: "rgba(16,185,129,0.12)",
+      tagColor: "#047857",
       description:
         "Upload any document and get an AI-powered edit covering grammar, punctuation, style, and readability — with a clean corrected file to download.",
       features: [
@@ -114,9 +104,7 @@ export default function DashboardHome() {
       ],
       cta: "Proofread a Doc",
       href: "/dashboard/proofread",
-      accent: "#10b981",
-      bg: "linear-gradient(135deg, rgba(16,185,129,0.08) 0%, rgba(16,185,129,0.02) 100%)",
-      border: "rgba(16,185,129,0.25)",
+      accent: "#047857",
       row: 2,
     },
     {
@@ -124,8 +112,7 @@ export default function DashboardHome() {
       icon: Languages,
       label: "Book Translator",
       tag: "MULTILINGUAL",
-      tagColor: "#0ea5e9",
-      tagBg: "rgba(14,165,233,0.12)",
+      tagColor: "#0369a1",
       description:
         "Upload any PDF, DOCX, or ZIP book and translate it into 100+ languages. AI preserves chapter structure, tone, and formatting — exported as PDF & DOCX.",
       features: [
@@ -135,19 +122,16 @@ export default function DashboardHome() {
       ],
       cta: "Translate a Book",
       href: "/dashboard/translate",
-      accent: "#0ea5e9",
-      bg: "linear-gradient(135deg, rgba(14,165,233,0.08) 0%, rgba(14,165,233,0.02) 100%)",
-      border: "rgba(14,165,233,0.25)",
+      accent: "#0369a1",
       row: 2,
     },
-    // ── Row 3 (2 full-width feature card) ────────────────────────────────────
+    // ── Row 3 (2 cards) ───────────────────────────────────────────────────────
     {
       key: "cover",
       icon: Palette,
       label: "Cover Designer",
       tag: "AI ART",
-      tagColor: "#fb923c",
-      tagBg: "rgba(251,146,60,0.12)",
+      tagColor: "#c2410c",
       description:
         "Upload your manuscript (PDF or DOCX) and let AI design a stunning, print-ready cover page — professionally typeset and attached to your book.",
       features: [
@@ -157,9 +141,7 @@ export default function DashboardHome() {
       ],
       cta: "Design a Cover",
       href: "/dashboard/cover",
-      accent: "#fb923c",
-      bg: "linear-gradient(135deg, rgba(251,146,60,0.08) 0%, rgba(251,146,60,0.02) 100%)",
-      border: "rgba(251,146,60,0.25)",
+      accent: "#c2410c",
       row: 3,
     },
     {
@@ -167,8 +149,7 @@ export default function DashboardHome() {
       icon: LayoutTemplate,
       label: "Layout Designer",
       tag: "DESIGNER",
-      tagColor: "#f59e0b",
-      tagBg: "rgba(245,158,11,0.12)",
+      tagColor: "#92400e",
       description:
         "Upload your manuscript (PDF, DOCX, or ZIP), choose a paper size, and describe your vision. AI designs a fully typeset internal layout — custom page dimensions, fonts, colour palette, chapter ornaments, drop caps, and more — exported as a print-ready PDF & DOCX.",
       features: [
@@ -179,9 +160,7 @@ export default function DashboardHome() {
       ],
       cta: "Design Layout",
       href: "/dashboard/layout",
-      accent: "#f59e0b",
-      bg: "linear-gradient(135deg, rgba(245,158,11,0.08) 0%, rgba(245,158,11,0.02) 100%)",
-      border: "rgba(245,158,11,0.25)",
+      accent: "#92400e",
       row: 3,
     },
   ];
@@ -192,36 +171,35 @@ export default function DashboardHome() {
 
   const Card = ({
     tool,
-    wide = false,
   }: {
     tool: (typeof tools)[0];
-    wide?: boolean;
   }) => {
     const Icon = tool.icon;
     return (
       <div
         style={{
-          background: tool.bg,
-          border: `1px solid ${tool.border}`,
-          borderRadius: "16px",
-          padding: wide ? "32px 36px" : "28px",
+          background: "white",
+          border: "1px solid #e8e8e4",
+          borderRadius: "12px",
+          padding: "28px",
           cursor: "pointer",
           transition: "transform 0.2s, box-shadow 0.2s",
           position: "relative",
           overflow: "hidden",
           display: "flex",
-          flexDirection: wide ? "row" : "column",
-          gap: wide ? "32px" : undefined,
-          alignItems: wide ? "flex-start" : undefined,
+          flexDirection: "column",
         }}
         onMouseOver={(e) => {
           (e.currentTarget as HTMLDivElement).style.transform =
-            "translateY(-3px)";
-          (e.currentTarget as HTMLDivElement).style.boxShadow = `0 20px 60px ${tool.accent}22`;
+            "translateY(-2px)";
+          (e.currentTarget as HTMLDivElement).style.boxShadow =
+            "0 12px 40px rgba(0,0,0,0.10)";
+          (e.currentTarget as HTMLDivElement).style.borderColor = "#d0d0cc";
         }}
         onMouseOut={(e) => {
           (e.currentTarget as HTMLDivElement).style.transform = "translateY(0)";
           (e.currentTarget as HTMLDivElement).style.boxShadow = "none";
+          (e.currentTarget as HTMLDivElement).style.borderColor = "#e8e8e4";
         }}
         onClick={() => router.push(tool.href)}
       >
@@ -231,13 +209,13 @@ export default function DashboardHome() {
             position: "absolute",
             top: "18px",
             right: "18px",
-            background: tool.tagBg,
-            border: `1px solid ${tool.accent}33`,
-            borderRadius: "6px",
+            background: "#f7f2e4",
+            border: `1px solid #e8e8e4`,
+            borderRadius: "5px",
             padding: "2px 8px",
-            fontSize: "10px",
+            fontSize: "9px",
             fontWeight: "700",
-            letterSpacing: "0.08em",
+            letterSpacing: "0.1em",
             color: tool.tagColor,
           }}
         >
@@ -247,29 +225,30 @@ export default function DashboardHome() {
         {/* Icon */}
         <div
           style={{
-            width: "48px",
-            height: "48px",
-            background: `${tool.accent}18`,
-            border: `1px solid ${tool.accent}33`,
-            borderRadius: "12px",
+            width: "44px",
+            height: "44px",
+            background: "#f7f2e4",
+            border: "1px solid #e8e8e4",
+            borderRadius: "10px",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            marginBottom: wide ? 0 : "18px",
+            marginBottom: "18px",
             flexShrink: 0,
           }}
         >
-          <Icon size={22} color={tool.accent} />
+          <Icon size={20} color={tool.accent} />
         </div>
 
         {/* Content */}
         <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
           <h2
             style={{
-              fontSize: "19px",
-              fontWeight: "700",
-              letterSpacing: "-0.01em",
+              fontSize: "18px",
+              fontWeight: "800",
+              letterSpacing: "-0.02em",
               marginBottom: "8px",
+              color: "#2b2b2b",
               fontFamily: "'Playfair Display', serif",
             }}
           >
@@ -277,12 +256,11 @@ export default function DashboardHome() {
           </h2>
           <p
             style={{
-              color: "#555555",
+              color: "#666",
               fontSize: "13px",
-              lineHeight: "1.6",
+              lineHeight: "1.65",
               marginBottom: "20px",
-              flex: wide ? undefined : 1,
-              maxWidth: wide ? "520px" : undefined,
+              flex: 1,
             }}
           >
             {tool.description}
@@ -294,9 +272,6 @@ export default function DashboardHome() {
               listStyle: "none",
               padding: 0,
               marginBottom: "24px",
-              display: wide ? "grid" : "block",
-              gridTemplateColumns: wide ? "repeat(2, 1fr)" : undefined,
-              gap: wide ? "4px 24px" : undefined,
             }}
           >
             {tool.features.map((f) => (
@@ -307,15 +282,16 @@ export default function DashboardHome() {
                   alignItems: "flex-start",
                   gap: "8px",
                   fontSize: "12px",
-                  color: "#cbd5e1",
-                  marginBottom: wide ? 0 : "5px",
+                  color: "#555",
+                  marginBottom: "5px",
                 }}
               >
                 <span
                   style={{
                     color: tool.accent,
-                    fontSize: "14px",
-                    lineHeight: "1.3",
+                    fontSize: "13px",
+                    lineHeight: "1.4",
+                    flexShrink: 0,
                   }}
                 >
                   ✓
@@ -331,13 +307,14 @@ export default function DashboardHome() {
               display: "inline-flex",
               alignItems: "center",
               gap: "8px",
-              background: tool.accent,
-              color: "#0c0f1a",
-              borderRadius: "10px",
+              background: "#1a1a1a",
+              color: "white",
+              borderRadius: "8px",
               padding: "9px 18px",
-              fontSize: "13px",
+              fontSize: "12px",
               fontWeight: "700",
               alignSelf: "flex-start",
+              letterSpacing: "0.01em",
             }}
           >
             {tool.cta} <ArrowRight size={13} />
@@ -351,53 +328,54 @@ export default function DashboardHome() {
     <div
       style={{
         minHeight: "100vh",
-        background: "#0c0f1a",
+        background: "#f7f2e4",
         fontFamily: "'DM Sans', sans-serif",
-        color: "#555555",
+        color: "#2b2b2b",
       }}
     >
       {/* Nav */}
       <nav
         style={{
-          borderBottom: "1px solid rgba(0,0,0,0.08)",
+          borderBottom: "1px solid #efefcf",
           padding: "0 40px",
-          height: "60px",
+          height: "56px",
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
           position: "sticky",
           top: 0,
-          background: "rgba(12,15,26,0.95)",
-          backdropFilter: "blur(12px)",
+          background: "white",
           zIndex: 50,
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
           <div
             style={{
-              width: "32px",
-              height: "32px",
-              background: "linear-gradient(135deg, #6366f1, #8b5cf6)",
-              borderRadius: "8px",
+              width: "28px",
+              height: "28px",
+              background: "#1a1a1a",
+              borderRadius: "6px",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
             }}
           >
-            <FileText size={16} color="white" />
+            <FileText size={14} color="white" />
           </div>
           <span
             style={{
               fontWeight: "700",
               fontSize: "15px",
+              color: "#2a2929",
               letterSpacing: "-0.01em",
             }}
           >
             Publixo AI
           </span>
         </div>
+
         <div style={{ display: "flex", alignItems: "center", gap: "20px" }}>
-          <span style={{ fontSize: "13px", color: "#555555" }}>
+          <span style={{ fontSize: "13px", color: "#888" }}>
             {user?.email}
           </span>
           <button
@@ -407,23 +385,26 @@ export default function DashboardHome() {
               alignItems: "center",
               gap: "6px",
               background: "none",
-              border: "1px solid rgba(0,0,0,0.08)",
-              borderRadius: "8px",
+              border: "1px solid #e8e8e4",
+              borderRadius: "7px",
               padding: "6px 14px",
-              color: "#555555",
+              color: "#555",
               fontSize: "13px",
               cursor: "pointer",
-              transition: "all 0.2s",
+              fontFamily: "'DM Sans', sans-serif",
+              fontWeight: "500",
+              transition: "all 0.15s",
             }}
             onMouseOver={(e) => {
-              (e.currentTarget as HTMLButtonElement).style.color = "#555555";
+              (e.currentTarget as HTMLButtonElement).style.background =
+                "#f7f2e4";
               (e.currentTarget as HTMLButtonElement).style.borderColor =
-                "rgba(0,0,0,0.15)";
+                "#d0d0cc";
             }}
             onMouseOut={(e) => {
-              (e.currentTarget as HTMLButtonElement).style.color = "#555555";
+              (e.currentTarget as HTMLButtonElement).style.background = "none";
               (e.currentTarget as HTMLButtonElement).style.borderColor =
-                "rgba(0,0,0,0.08)";
+                "#e8e8e4";
             }}
           >
             <LogOut size={14} /> Sign out
@@ -432,7 +413,7 @@ export default function DashboardHome() {
       </nav>
 
       <main
-        style={{ maxWidth: "1060px", margin: "0 auto", padding: "64px 40px" }}
+        style={{ maxWidth: "1060px", margin: "0 auto", padding: "60px 40px" }}
       >
         {/* Header */}
         <div style={{ marginBottom: "52px" }}>
@@ -441,14 +422,14 @@ export default function DashboardHome() {
               display: "inline-flex",
               alignItems: "center",
               gap: "6px",
-              background: "rgba(99,102,241,0.12)",
-              border: "1px solid rgba(99,102,241,0.25)",
+              background: "white",
+              border: "1px solid #e8e8e4",
               borderRadius: "20px",
               padding: "4px 14px",
-              fontSize: "11px",
+              fontSize: "10px",
               fontWeight: "700",
-              letterSpacing: "0.08em",
-              color: "#818cf8",
+              letterSpacing: "0.1em",
+              color: "#2563eb",
               marginBottom: "20px",
             }}
           >
@@ -456,17 +437,18 @@ export default function DashboardHome() {
           </div>
           <h1
             style={{
-              fontSize: "42px",
+              fontSize: "44px",
               fontWeight: "800",
               letterSpacing: "-0.03em",
               fontFamily: "'Playfair Display', serif",
               lineHeight: "1.1",
               marginBottom: "12px",
+              color: "#2d2c2c",
             }}
           >
             Welcome back, {firstName}.
           </h1>
-          <p style={{ color: "#555555", fontSize: "16px", lineHeight: "1.6" }}>
+          <p style={{ color: "#666", fontSize: "16px", lineHeight: "1.6" }}>
             What would you like to work on today?
           </p>
         </div>
@@ -476,8 +458,8 @@ export default function DashboardHome() {
           style={{
             display: "grid",
             gridTemplateColumns: "repeat(2, 1fr)",
-            gap: "20px",
-            marginBottom: "20px",
+            gap: "16px",
+            marginBottom: "16px",
           }}
         >
           {row1.map((tool) => (
@@ -490,8 +472,8 @@ export default function DashboardHome() {
           style={{
             display: "grid",
             gridTemplateColumns: "repeat(3, 1fr)",
-            gap: "20px",
-            marginBottom: "20px",
+            gap: "16px",
+            marginBottom: "16px",
           }}
         >
           {row2.map((tool) => (
@@ -499,13 +481,13 @@ export default function DashboardHome() {
           ))}
         </div>
 
-        {/* Row 3 — 2 equal columns, matches row 1 */}
+        {/* Row 3 — 2 equal columns */}
         <div
           style={{
             display: "grid",
             gridTemplateColumns: "repeat(2, 1fr)",
-            gap: "20px",
-            marginBottom: "20px",
+            gap: "16px",
+            marginBottom: "16px",
           }}
         >
           {row3.map((tool) => (
@@ -516,19 +498,19 @@ export default function DashboardHome() {
         {/* Footer strip */}
         <div
           style={{
-            marginTop: "20px",
-            padding: "18px 24px",
-            background: "rgba(0,0,0,0.03)",
-            border: "1px solid rgba(0,0,0,0.06)",
-            borderRadius: "12px",
+            marginTop: "16px",
+            padding: "16px 24px",
+            background: "white",
+            border: "1px solid #e8e8e4",
+            borderRadius: "10px",
             display: "flex",
             gap: "40px",
             alignItems: "center",
           }}
         >
-          <div style={{ fontSize: "12px", color: "#475569" }}>
+          <div style={{ fontSize: "12px", color: "#888" }}>
             Signed in as{" "}
-            <span style={{ color: "#555555", fontWeight: "600" }}>
+            <span style={{ color: "#2b2b2b", fontWeight: "600" }}>
               {user?.email}
             </span>
           </div>
@@ -538,7 +520,7 @@ export default function DashboardHome() {
               alignItems: "center",
               gap: "6px",
               fontSize: "12px",
-              color: "#10b981",
+              color: "#047857",
               marginLeft: "auto",
             }}
           >
@@ -547,7 +529,7 @@ export default function DashboardHome() {
                 width: "7px",
                 height: "7px",
                 borderRadius: "50%",
-                background: "#10b981",
+                background: "#22c55e",
                 display: "inline-block",
               }}
             />

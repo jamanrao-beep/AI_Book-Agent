@@ -44,15 +44,15 @@ interface ProgressState {
     message: string;
 }
 
-const STAGE_META: Record<string, { label: string; color: string; icon: string }> = {
-    idle: { label: "Ready", color: "#555555", icon: "⊙" },
-    collecting: { label: "Extracting", color: "#a78bfa", icon: "◈" },
-    transcribing: { label: "Transcribing", color: "#60a5fa", icon: "✍" },
-    healing: { label: "Healing", color: "#f472b6", icon: "🩹" },
-    structuring: { label: "Structuring", color: "#f59e0b", icon: "⚙" },
-    assembling: { label: "Assembling", color: "#fb923c", icon: "📐" },
-    done: { label: "Complete", color: "#34d399", icon: "✓" },
-    error: { label: "Error", color: "#f87171", icon: "✕" },
+const STAGE_META: Record<string, { label: string; icon: string }> = {
+    idle: { label: "Ready", icon: "⊙" },
+    collecting: { label: "Extracting", icon: "◈" },
+    transcribing: { label: "Transcribing", icon: "✍" },
+    healing: { label: "Healing", icon: "🩹" },
+    structuring: { label: "Structuring", icon: "⚙" },
+    assembling: { label: "Assembling", icon: "📐" },
+    done: { label: "Complete", icon: "✓" },
+    error: { label: "Error", icon: "✕" },
 };
 
 export default function ScanPage() {
@@ -81,7 +81,6 @@ export default function ScanPage() {
         }
         setFiles(prev => {
             const combined = [...prev, ...valid];
-            // Deduplicate by name+size
             const seen = new Set<string>();
             return combined.filter(f => {
                 const key = `${f.name}-${f.size}`;
@@ -108,7 +107,6 @@ export default function ScanPage() {
         setResult(null);
         setProgress({ stage: "collecting", pct: 2, message: "Uploading files…" });
 
-        // AbortController for the upload itself (5 min timeout)
         const controller = new AbortController();
         const uploadTimeout = setTimeout(() => controller.abort(), 5 * 60 * 1000);
 
@@ -161,7 +159,6 @@ export default function ScanPage() {
     const stageMeta = STAGE_META[progress.stage] || STAGE_META.idle;
     const isLoading = ["collecting", "transcribing", "healing", "structuring", "assembling"].includes(progress.stage);
 
-    // ── Cleanup on unmount — prevent WS/interval leaks if user navigates away ──
     useEffect(() => {
         return () => {
             if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
@@ -169,9 +166,7 @@ export default function ScanPage() {
         };
     }, []);
 
-    // ── Real-time progress via WebSocket with polling fallback ──
     const startProgressTracking = (jobId: string) => {
-        // Try WebSocket first
         let ws: WebSocket | null = null;
         let wsConnected = false;
         let pollInterval: NodeJS.Timeout | null = null;
@@ -200,7 +195,6 @@ export default function ScanPage() {
             }
         };
 
-        // Polling fallback (used if WS unavailable or as safety net)
         const startPolling = () => {
             if (pollInterval) return;
             pollInterval = setInterval(async () => {
@@ -209,17 +203,13 @@ export default function ScanPage() {
                     if (!r.ok) return;
                     const data = await r.json();
                     applyUpdate({ stage: data.stage, pct: data.pct, message: data.message, result: data.result, error: data.error });
-                } catch (_) { /* network blip — keep polling */ }
+                } catch (_) { }
             }, 3000);
-            // M5 FIX: assign ref immediately after creation so stopAll() can always clear it,
-            // even if WS "complete" fires synchronously before the outer function returns.
             pollRef.current = pollInterval;
         };
 
         try {
             const wsUrl = API_BASE.replace(/^http/, "ws") + `/ws/status/${jobId}`;
-            // L2 FIX: assign wsRef.current atomically with ws creation so a fast
-            // unmount between new WebSocket() and wsRef.current = ws can't miss it.
             wsRef.current = ws = new WebSocket(wsUrl);
 
             ws.onopen = () => { wsConnected = true; };
@@ -227,8 +217,6 @@ export default function ScanPage() {
                 try {
                     const msg = JSON.parse(e.data);
                     if (msg.type === "progress") applyUpdate({ stage: msg.stage, pct: msg.progress, message: msg.message });
-                    // H6 FIX: msg.result is already the correct shape {job_id, title, ...}
-                    // The old msg.result?.result ?? msg.result double-unwrap was accidental.
                     else if (msg.type === "complete") applyUpdate({ stage: "done", pct: 100, result: msg.result });
                     else if (msg.type === "error") applyUpdate({ stage: "error", error: msg.message });
                 } catch (_) { }
@@ -236,7 +224,6 @@ export default function ScanPage() {
             ws.onerror = () => { if (!wsConnected) startPolling(); };
             ws.onclose = () => { if (!wsConnected) startPolling(); };
 
-            // Always run polling alongside WS as a safety net for missed messages
             startPolling();
         } catch (_) {
             startPolling();
@@ -244,29 +231,29 @@ export default function ScanPage() {
     };
 
     return (
-        <div style={{ minHeight: "100vh", background: "#0a0c18", fontFamily: "'DM Sans', sans-serif", color: "#555555" }}>
+        <div style={{ minHeight: "100vh", background: "#f7f2e4", fontFamily: "'DM Sans', sans-serif", color: "#2b2b2b" }}>
 
             {/* ── Nav ── */}
             <nav style={{
-                borderBottom: "1px solid rgba(0,0,0,0.06)",
+                borderBottom: "1px solid #efefcf",
                 padding: "0 40px", height: "60px",
                 display: "flex", alignItems: "center", gap: "16px",
                 position: "sticky", top: 0,
-                background: "rgba(10,12,24,0.95)", backdropFilter: "blur(14px)", zIndex: 50,
+                background: "#ffffff", zIndex: 50,
             }}>
                 <button onClick={() => router.push("/dashboard")}
-                    style={{ display: "flex", alignItems: "center", gap: "6px", background: "none", border: "none", color: "#555555", fontSize: "13px", cursor: "pointer", transition: "color 0.2s" }}
-                    onMouseOver={e => (e.currentTarget.style.color = "#555555")}
-                    onMouseOut={e => (e.currentTarget.style.color = "#555555")}>
+                    style={{ display: "flex", alignItems: "center", gap: "6px", background: "none", border: "none", color: "#2b2b2b", fontSize: "13px", fontWeight: "500", cursor: "pointer", transition: "opacity 0.2s" }}
+                    onMouseOver={e => (e.currentTarget.style.opacity = "0.6")}
+                    onMouseOut={e => (e.currentTarget.style.opacity = "1")}>
                     <ArrowLeft size={14} /> Back to Dashboard
                 </button>
-                <span style={{ color: "rgba(0,0,0,0.08)" }}>|</span>
+                <span style={{ color: "#e8e8e4" }}>|</span>
                 <div style={{ display: "flex", alignItems: "center", gap: "9px" }}>
-                    <div style={{ width: "30px", height: "30px", background: "rgba(124,58,237,0.18)", border: "1px solid rgba(124,58,237,0.35)", borderRadius: "8px", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                        <ScanLine size={14} color="#a78bfa" />
+                    <div style={{ width: "30px", height: "30px", background: "#1a1a1a", borderRadius: "8px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                        <ScanLine size={14} color="#ffffff" />
                     </div>
-                    <span style={{ fontWeight: "600", fontSize: "14px" }}>Handwritten Scanner</span>
-                    <span style={{ fontSize: "10px", fontWeight: "700", letterSpacing: "0.08em", color: "#7c3aed", background: "rgba(124,58,237,0.12)", border: "1px solid rgba(124,58,237,0.25)", borderRadius: "5px", padding: "2px 8px" }}>NEW</span>
+                    <span style={{ fontWeight: "600", fontSize: "14px", color: "#2b2b2b" }}>Handwritten Scanner</span>
+                    <span style={{ fontSize: "10px", fontWeight: "700", letterSpacing: "0.08em", color: "#2563eb", background: "#ffffff", border: "1px solid #2563eb", borderRadius: "5px", padding: "2px 8px" }}>NEW</span>
                 </div>
             </nav>
 
@@ -274,13 +261,13 @@ export default function ScanPage() {
 
                 {/* ── Header ── */}
                 <div style={{ marginBottom: "44px" }}>
-                    <div style={{ display: "inline-flex", alignItems: "center", gap: "6px", background: "rgba(124,58,237,0.1)", border: "1px solid rgba(124,58,237,0.2)", borderRadius: "20px", padding: "3px 12px", fontSize: "10px", fontWeight: "700", letterSpacing: "0.1em", color: "#a78bfa", marginBottom: "16px" }}>
+                    <div style={{ display: "inline-flex", alignItems: "center", gap: "6px", background: "#ffffff", border: "1px solid #2563eb", borderRadius: "20px", padding: "3px 12px", fontSize: "10px", fontWeight: "700", letterSpacing: "0.1em", color: "#2563eb", marginBottom: "16px" }}>
                         <Sparkles size={10} /> AI HANDWRITING RECOGNITION
                     </div>
-                    <h1 style={{ fontSize: "36px", fontWeight: "800", letterSpacing: "-0.03em", fontFamily: "'Playfair Display', serif", marginBottom: "10px", background: "linear-gradient(135deg, #2a2929 0%, #555555 100%)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
+                    <h1 style={{ fontSize: "36px", fontWeight: "800", letterSpacing: "-0.03em", fontFamily: "'Playfair Display', serif", marginBottom: "10px", color: "#2b2b2b" }}>
                         Handwritten Book Scanner
                     </h1>
-                    <p style={{ color: "#555555", fontSize: "15px", lineHeight: "1.6", maxWidth: "580px" }}>
+                    <p style={{ color: "#2b2b2b", fontSize: "15px", lineHeight: "1.6", maxWidth: "580px", opacity: 0.7 }}>
                         Upload photos of handwritten pages, a PDF scan, or a ZIP of images — in any language.
                         AI reads, transcribes, and exports a clean, formatted book.
                     </p>
@@ -294,7 +281,7 @@ export default function ScanPage() {
                             { icon: "📚", text: "Auto chapter detection" },
                             { icon: "⬇️", text: "PDF + DOCX export" },
                         ].map(c => (
-                            <span key={c.text} style={{ display: "inline-flex", alignItems: "center", gap: "5px", fontSize: "12px", color: "#555555", background: "rgba(0,0,0,0.03)", border: "1px solid rgba(0,0,0,0.08)", borderRadius: "20px", padding: "4px 12px" }}>
+                            <span key={c.text} style={{ display: "inline-flex", alignItems: "center", gap: "5px", fontSize: "12px", color: "#2b2b2b", background: "#ffffff", border: "1px solid #e8e8e4", borderRadius: "20px", padding: "4px 12px", fontWeight: "500" }}>
                                 {c.icon} {c.text}
                             </span>
                         ))}
@@ -313,11 +300,11 @@ export default function ScanPage() {
                                 onDrop={handleDrop}
                                 onClick={() => files.length === 0 && fileInputRef.current?.click()}
                                 style={{
-                                    border: `2px dashed ${dragging ? "#7c3aed" : files.length > 0 ? "rgba(124,58,237,0.45)" : "rgba(0,0,0,0.08)"}`,
+                                    border: `2px dashed ${dragging ? "#2563eb" : files.length > 0 ? "#2563eb80" : "#d0d0cc"}`,
                                     borderRadius: "16px", padding: "36px 24px",
                                     textAlign: "center",
                                     cursor: files.length > 0 ? "default" : "pointer",
-                                    background: dragging ? "rgba(124,58,237,0.07)" : files.length > 0 ? "rgba(124,58,237,0.04)" : "rgba(0,0,0,0.02)",
+                                    background: dragging ? "#f0f4ff" : files.length > 0 ? "#f7f9ff" : "#ffffff",
                                     transition: "all 0.2s", marginBottom: "14px",
                                 }}
                             >
@@ -329,29 +316,29 @@ export default function ScanPage() {
                                 />
                                 {files.length === 0 ? (
                                     <>
-                                        <div style={{ width: "52px", height: "52px", background: "rgba(124,58,237,0.1)", border: "1px solid rgba(124,58,237,0.25)", borderRadius: "12px", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 14px" }}>
-                                            <Upload size={22} color="#a78bfa" />
+                                        <div style={{ width: "52px", height: "52px", background: "#f7f2e4", borderRadius: "12px", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 14px" }}>
+                                            <Upload size={22} color="#2563eb" />
                                         </div>
-                                        <p style={{ fontWeight: "600", fontSize: "14px", marginBottom: "6px" }}>Drop handwritten pages here</p>
-                                        <p style={{ color: "#475569", fontSize: "12px", lineHeight: "1.6" }}>
+                                        <p style={{ fontWeight: "600", fontSize: "14px", marginBottom: "6px", color: "#2b2b2b" }}>Drop handwritten pages here</p>
+                                        <p style={{ color: "#2b2b2b", fontSize: "12px", lineHeight: "1.6", opacity: 0.6 }}>
                                             Images (JPG, PNG, WEBP…) · PDF scan · DOCX with images · ZIP archive
                                             <br />Up to 400 pages · Any language
                                         </p>
                                     </>
                                 ) : (
                                     <>
-                                        <div style={{ width: "48px", height: "48px", background: "rgba(124,58,237,0.12)", border: "1px solid rgba(124,58,237,0.3)", borderRadius: "12px", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 10px" }}>
-                                            {isImageOnly ? <Layers size={20} color="#a78bfa" /> : <Archive size={20} color="#a78bfa" />}
+                                        <div style={{ width: "48px", height: "48px", background: "#f7f2e4", borderRadius: "12px", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 10px" }}>
+                                            {isImageOnly ? <Layers size={20} color="#2563eb" /> : <Archive size={20} color="#2563eb" />}
                                         </div>
-                                        <p style={{ fontWeight: "600", fontSize: "14px" }}>
+                                        <p style={{ fontWeight: "600", fontSize: "14px", color: "#2b2b2b" }}>
                                             {fileCount} file{fileCount !== 1 ? "s" : ""} selected
                                         </p>
-                                        <p style={{ color: "#555555", fontSize: "12px", marginTop: "4px" }}>
+                                        <p style={{ color: "#2b2b2b", fontSize: "12px", marginTop: "4px", opacity: 0.6 }}>
                                             {isImageOnly ? `${fileCount} page image${fileCount !== 1 ? "s" : ""}` : "Mixed document input"}
                                         </p>
                                         <button
                                             onClick={e => { e.stopPropagation(); fileInputRef.current?.click(); }}
-                                            style={{ marginTop: "10px", background: "rgba(124,58,237,0.12)", border: "1px solid rgba(124,58,237,0.25)", borderRadius: "7px", padding: "6px 14px", color: "#a78bfa", fontSize: "12px", cursor: "pointer", transition: "all 0.15s" }}
+                                            style={{ marginTop: "10px", background: "#f7f2e4", border: "1px solid #e8e8e4", borderRadius: "7px", padding: "6px 14px", color: "#2563eb", fontSize: "12px", fontWeight: "600", cursor: "pointer", transition: "all 0.15s" }}
                                         >
                                             + Add more pages
                                         </button>
@@ -366,13 +353,16 @@ export default function ScanPage() {
                                         const ext = f.name.split(".").pop()?.toUpperCase() || "?";
                                         const isImg = ["JPG", "JPEG", "PNG", "WEBP", "BMP", "TIFF", "TIF", "GIF"].includes(ext);
                                         return (
-                                            <div key={idx} style={{ display: "flex", alignItems: "center", gap: "10px", background: "rgba(0,0,0,0.03)", border: "1px solid rgba(0,0,0,0.06)", borderRadius: "8px", padding: "8px 10px" }}>
-                                                <div style={{ width: "28px", height: "28px", background: isImg ? "rgba(124,58,237,0.12)" : "rgba(0,0,0,0.04)", border: `1px solid ${isImg ? "rgba(124,58,237,0.25)" : "rgba(0,0,0,0.08)"}`, borderRadius: "6px", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                                                    {isImg ? <ImageIcon size={12} color="#a78bfa" /> : <FileText size={12} color="#555555" />}
+                                            <div key={idx} style={{ display: "flex", alignItems: "center", gap: "10px", background: "#ffffff", border: "1px solid #e8e8e4", borderRadius: "8px", padding: "8px 10px" }}>
+                                                <div style={{ width: "28px", height: "28px", background: "#f7f2e4", border: "1px solid #e8e8e4", borderRadius: "6px", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                                                    {isImg ? <ImageIcon size={12} color="#2563eb" /> : <FileText size={12} color="#2b2b2b" />}
                                                 </div>
-                                                <span style={{ flex: 1, fontSize: "12px", color: "#555555", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name}</span>
-                                                <span style={{ fontSize: "10px", color: "#737373", flexShrink: 0 }}>{(f.size / 1024).toFixed(0)}KB</span>
-                                                <button onClick={() => removeFile(idx)} style={{ background: "none", border: "none", color: "#737373", cursor: "pointer", display: "flex", padding: "2px" }}>
+                                                <span style={{ flex: 1, fontSize: "12px", color: "#2b2b2b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name}</span>
+                                                <span style={{ fontSize: "10px", color: "#2b2b2b", opacity: 0.5, flexShrink: 0 }}>{(f.size / 1024).toFixed(0)}KB</span>
+                                                <button onClick={() => removeFile(idx)}
+                                                    style={{ background: "#fff0f0", border: "none", color: "#dc2626", cursor: "pointer", display: "flex", padding: "3px", borderRadius: "4px", transition: "background 0.15s" }}
+                                                    onMouseOver={e => (e.currentTarget.style.background = "#fecaca")}
+                                                    onMouseOut={e => (e.currentTarget.style.background = "#fff0f0")}>
                                                     <X size={12} />
                                                 </button>
                                             </div>
@@ -382,7 +372,7 @@ export default function ScanPage() {
                             )}
 
                             {error && (
-                                <div style={{ background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.2)", borderRadius: "9px", padding: "10px 14px", color: "#f87171", fontSize: "13px", marginBottom: "14px" }}>
+                                <div style={{ background: "#fff0f0", border: "1px solid #fecaca", borderRadius: "9px", padding: "10px 14px", color: "#dc2626", fontSize: "13px", marginBottom: "14px" }}>
                                     {error}
                                 </div>
                             )}
@@ -392,50 +382,50 @@ export default function ScanPage() {
                         <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
                             {/* Book title */}
                             <div>
-                                <label style={{ fontSize: "11px", fontWeight: "700", letterSpacing: "0.08em", textTransform: "uppercase", color: "#475569", display: "block", marginBottom: "8px" }}>
-                                    Book Title <span style={{ color: "#737373", fontWeight: "400", textTransform: "none", fontSize: "10px" }}>(optional — AI will infer)</span>
+                                <label style={{ fontSize: "11px", fontWeight: "700", letterSpacing: "0.08em", textTransform: "uppercase", color: "#0c43bb", display: "block", marginBottom: "8px" }}>
+                                    Book Title <span style={{ color: "#2b2b2b", fontWeight: "400", textTransform: "none", fontSize: "10px", opacity: 0.5 }}>(optional — AI will infer)</span>
                                 </label>
                                 <input type="text" value={bookTitle} onChange={e => setBookTitle(e.target.value)}
                                     placeholder="e.g. My Grandfather's Diary"
-                                    style={{ width: "100%", background: "rgba(0,0,0,0.04)", border: "1px solid rgba(0,0,0,0.08)", borderRadius: "10px", padding: "12px 14px", fontSize: "14px", color: "#555555", outline: "none", transition: "border-color 0.2s", boxSizing: "border-box" }}
-                                    onFocus={e => e.target.style.borderColor = "#7c3aed"}
-                                    onBlur={e => e.target.style.borderColor = "rgba(0,0,0,0.08)"}
+                                    style={{ width: "100%", background: "#f7f2e4", border: "1px solid #e8e8e4", borderRadius: "10px", padding: "12px 14px", fontSize: "14px", color: "#2b2b2b", outline: "none", transition: "border-color 0.2s", boxSizing: "border-box" }}
+                                    onFocus={e => e.target.style.borderColor = "#2563eb"}
+                                    onBlur={e => e.target.style.borderColor = "#e8e8e4"}
                                 />
                             </div>
 
                             {/* Info card */}
-                            <div style={{ background: "rgba(124,58,237,0.05)", border: "1px solid rgba(124,58,237,0.15)", borderRadius: "12px", padding: "16px" }}>
-                                <p style={{ fontSize: "12px", color: "#555555", lineHeight: "1.7", margin: 0 }}>
-                                    <span style={{ color: "#a78bfa", fontWeight: "600" }}>How it works:</span> Each page photo is fed to GPT-4o vision which reads the handwriting verbatim. The AI then structures the text into chapters and exports a clean, professionally-formatted book in PDF and DOCX.
+                            <div style={{ background: "#ffffff", border: "1px solid #e8e8e4", borderRadius: "12px", padding: "16px" }}>
+                                <p style={{ fontSize: "12px", color: "#2b2b2b", lineHeight: "1.7", margin: 0, opacity: 0.8 }}>
+                                    <span style={{ color: "#2563eb", fontWeight: "600" }}>How it works:</span> Each page photo is fed to GPT-4o vision which reads the handwriting verbatim. The AI then structures the text into chapters and exports a clean, professionally-formatted book in PDF and DOCX.
                                 </p>
                             </div>
 
                             {/* Tips */}
-                            <div style={{ background: "rgba(0,0,0,0.02)", border: "1px solid rgba(0,0,0,0.06)", borderRadius: "12px", padding: "16px" }}>
-                                <p style={{ fontSize: "11px", fontWeight: "700", letterSpacing: "0.08em", textTransform: "uppercase", color: "#737373", marginBottom: "10px" }}>Tips for best results</p>
+                            <div style={{ background: "#ffffff", border: "1px solid #e8e8e4", borderRadius: "12px", padding: "16px" }}>
+                                <p style={{ fontSize: "11px", fontWeight: "700", letterSpacing: "0.08em", textTransform: "uppercase", color: "#0c43bb", marginBottom: "10px" }}>Tips for best results</p>
                                 {["Good lighting, minimal shadows", "Keep pages flat — avoid curled edges", "Higher image resolution = better accuracy", "Include one page per image for multi-page books", "Any language works — including mixed-language text"].map(tip => (
                                     <div key={tip} style={{ display: "flex", alignItems: "flex-start", gap: "8px", marginBottom: "7px" }}>
-                                        <span style={{ color: "#7c3aed", fontSize: "12px", lineHeight: "1.4", flexShrink: 0 }}>✓</span>
-                                        <span style={{ fontSize: "12px", color: "#475569", lineHeight: "1.4" }}>{tip}</span>
+                                        <span style={{ color: "#2563eb", fontSize: "12px", lineHeight: "1.4", flexShrink: 0 }}>✓</span>
+                                        <span style={{ fontSize: "12px", color: "#2b2b2b", lineHeight: "1.4", opacity: 0.75 }}>{tip}</span>
                                     </div>
                                 ))}
                             </div>
 
-                            {/* Progress bar (visible when loading) */}
+                            {/* Progress panel */}
                             {isLoading && (
-                                <div style={{ background: "rgba(124,58,237,0.06)", border: `1px solid rgba(124,58,237,0.2)`, borderRadius: "12px", padding: "16px", animation: "fadeInUp 0.3s ease" }}>
+                                <div style={{ background: "#ffffff", border: "1px solid #e8e8e4", borderRadius: "12px", padding: "16px", animation: "fadeInUp 0.3s ease" }}>
                                     <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "12px" }}>
-                                        <Loader size={15} style={{ color: stageMeta.color, animation: "spin 1.2s linear infinite", flexShrink: 0 }} />
+                                        <Loader size={15} style={{ color: "#2563eb", animation: "spin 1.2s linear infinite", flexShrink: 0 }} />
                                         <div style={{ flex: 1 }}>
-                                            <p style={{ fontSize: "13px", fontWeight: "600", color: stageMeta.color }}>{stageMeta.label}</p>
-                                            <p style={{ fontSize: "11px", color: "#737373", marginTop: "2px" }}>{progress.message}</p>
+                                            <p style={{ fontSize: "13px", fontWeight: "600", color: "#2b2b2b" }}>{stageMeta.label}</p>
+                                            <p style={{ fontSize: "11px", color: "#2b2b2b", marginTop: "2px", opacity: 0.55 }}>{progress.message}</p>
                                         </div>
-                                        <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "20px", fontWeight: "700", color: stageMeta.color }}>{progress.pct}%</span>
+                                        <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "20px", fontWeight: "800", color: "#2b2b2b", letterSpacing: "-0.02em" }}>{progress.pct}%</span>
                                     </div>
-                                    <div style={{ height: "3px", background: "rgba(0,0,0,0.06)", borderRadius: "3px", overflow: "hidden" }}>
-                                        <div style={{ height: "100%", width: `${progress.pct}%`, background: `linear-gradient(90deg, #7c3aed, ${stageMeta.color})`, borderRadius: "3px", transition: "width 0.8s ease", boxShadow: `0 0 8px ${stageMeta.color}66` }} />
+                                    <div style={{ height: "3px", background: "#e8e8e4", borderRadius: "3px", overflow: "hidden" }}>
+                                        <div style={{ height: "100%", width: `${progress.pct}%`, background: "#1a1a1a", borderRadius: "3px", transition: "width 0.8s ease" }} />
                                     </div>
-                                    <p style={{ fontSize: "11px", color: "#737373", marginTop: "10px" }}>
+                                    <p style={{ fontSize: "11px", color: "#2b2b2b", marginTop: "10px", opacity: 0.5 }}>
                                         Large batches can take several minutes — please keep this tab open.
                                     </p>
                                 </div>
@@ -444,14 +434,18 @@ export default function ScanPage() {
                             {/* Submit button */}
                             <button onClick={handleSubmit} disabled={files.length === 0 || isLoading}
                                 style={{
-                                    background: files.length === 0 || isLoading ? "rgba(124,58,237,0.3)" : "linear-gradient(135deg, #7c3aed, #a855f7)",
+                                    background: files.length === 0 || isLoading ? "#e8e8e4" : "#1a1a1a",
                                     border: "none", borderRadius: "12px", padding: "14px 24px",
-                                    color: "#2a2929", fontSize: "14px", fontWeight: "700",
+                                    color: files.length === 0 || isLoading ? "#2b2b2b" : "#ffffff",
+                                    fontSize: "14px", fontWeight: "700",
                                     cursor: files.length === 0 || isLoading ? "not-allowed" : "pointer",
                                     display: "flex", alignItems: "center", justifyContent: "center", gap: "10px",
-                                    boxShadow: files.length > 0 && !isLoading ? "0 4px 20px rgba(124,58,237,0.4)" : "none",
+                                    boxShadow: files.length > 0 && !isLoading ? "0 4px 20px rgba(0,0,0,0.12)" : "none",
                                     transition: "all 0.2s", letterSpacing: "0.01em",
+                                    opacity: files.length === 0 || isLoading ? 0.6 : 1,
                                 }}
+                                onMouseOver={e => { if (files.length > 0 && !isLoading) e.currentTarget.style.boxShadow = "0 6px 24px rgba(0,0,0,0.18)"; }}
+                                onMouseOut={e => { e.currentTarget.style.boxShadow = files.length > 0 && !isLoading ? "0 4px 20px rgba(0,0,0,0.12)" : "none"; }}
                             >
                                 {isLoading ? (
                                     <><Loader size={16} style={{ animation: "spin 1s linear infinite" }} /> Processing…</>
@@ -466,27 +460,27 @@ export default function ScanPage() {
                     /* ── Results ── */
                     <div style={{ animation: "fadeInUp 0.4s ease" }}>
                         {/* Success banner */}
-                        <div style={{ display: "flex", alignItems: "center", gap: "14px", background: "rgba(124,58,237,0.1)", border: "1px solid rgba(124,58,237,0.3)", borderRadius: "14px", padding: "18px 22px", marginBottom: "28px" }}>
-                            <div style={{ width: "44px", height: "44px", background: "rgba(124,58,237,0.15)", border: "1px solid rgba(124,58,237,0.3)", borderRadius: "11px", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                                <CheckCircle size={22} color="#a78bfa" />
+                        <div style={{ display: "flex", alignItems: "center", gap: "14px", background: "#ffffff", border: "1px solid #e8e8e4", borderRadius: "14px", padding: "18px 22px", marginBottom: "28px" }}>
+                            <div style={{ width: "44px", height: "44px", background: "#f7f2e4", borderRadius: "11px", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                                <CheckCircle size={22} color="#2563eb" />
                             </div>
                             <div style={{ flex: 1 }}>
-                                <p style={{ fontWeight: "700", fontSize: "16px", letterSpacing: "-0.01em" }}>{result.title}</p>
-                                <p style={{ color: "#555555", fontSize: "12px", marginTop: "3px" }}>
+                                <p style={{ fontWeight: "700", fontSize: "16px", letterSpacing: "-0.01em", color: "#2b2b2b", fontFamily: "'Playfair Display', serif" }}>{result.title}</p>
+                                <p style={{ color: "#2b2b2b", fontSize: "12px", marginTop: "3px", opacity: 0.6 }}>
                                     Transcription complete · {result.content_pages} of {result.total_pages} pages contain text
                                 </p>
                             </div>
                             <div style={{ display: "flex", gap: "8px", flexShrink: 0 }}>
                                 <a href={`${API_BASE}/scan-handwritten/${result.job_id}/download/pdf`} target="_blank" rel="noopener noreferrer"
-                                    style={{ display: "flex", alignItems: "center", gap: "6px", background: "rgba(248,113,113,0.12)", border: "1px solid rgba(248,113,113,0.25)", borderRadius: "9px", padding: "9px 16px", color: "#f87171", fontSize: "13px", fontWeight: "600", textDecoration: "none", transition: "all 0.15s" }}
-                                    onMouseOver={e => { e.currentTarget.style.background = "rgba(248,113,113,0.2)"; }}
-                                    onMouseOut={e => { e.currentTarget.style.background = "rgba(248,113,113,0.12)"; }}>
+                                    style={{ display: "flex", alignItems: "center", gap: "6px", background: "#1a1a1a", border: "1px solid #1a1a1a", borderRadius: "9px", padding: "9px 16px", color: "#ffffff", fontSize: "13px", fontWeight: "600", textDecoration: "none", transition: "all 0.15s" }}
+                                    onMouseOver={e => { e.currentTarget.style.background = "#2d2d2d"; }}
+                                    onMouseOut={e => { e.currentTarget.style.background = "#1a1a1a"; }}>
                                     <Download size={13} /> PDF
                                 </a>
                                 <a href={`${API_BASE}/scan-handwritten/${result.job_id}/download/docx`} target="_blank" rel="noopener noreferrer"
-                                    style={{ display: "flex", alignItems: "center", gap: "6px", background: "rgba(96,165,250,0.12)", border: "1px solid rgba(96,165,250,0.25)", borderRadius: "9px", padding: "9px 16px", color: "#60a5fa", fontSize: "13px", fontWeight: "600", textDecoration: "none", transition: "all 0.15s" }}
-                                    onMouseOver={e => { e.currentTarget.style.background = "rgba(96,165,250,0.2)"; }}
-                                    onMouseOut={e => { e.currentTarget.style.background = "rgba(96,165,250,0.12)"; }}>
+                                    style={{ display: "flex", alignItems: "center", gap: "6px", background: "#ffffff", border: "1px solid #2b2b2b", borderRadius: "9px", padding: "9px 16px", color: "#2b2b2b", fontSize: "13px", fontWeight: "600", textDecoration: "none", transition: "all 0.15s" }}
+                                    onMouseOver={e => { e.currentTarget.style.background = "#f7f2e4"; }}
+                                    onMouseOut={e => { e.currentTarget.style.background = "#ffffff"; }}>
                                     <Download size={13} /> DOCX
                                 </a>
                             </div>
@@ -495,17 +489,17 @@ export default function ScanPage() {
                         {/* Stats grid */}
                         <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "12px", marginBottom: "28px" }}>
                             {[
-                                { icon: <Languages size={16} color="#a78bfa" />, label: "Language", value: result.language, color: "#a78bfa", bg: "rgba(124,58,237,0.08)" },
-                                { icon: <Hash size={16} color="#60a5fa" />, label: "Pages Scanned", value: `${result.content_pages}/${result.total_pages}`, color: "#60a5fa", bg: "rgba(96,165,250,0.08)" },
-                                { icon: <AlignLeft size={16} color="#34d399" />, label: "Words", value: result.total_words.toLocaleString(), color: "#34d399", bg: "rgba(52,211,153,0.08)" },
-                                { icon: <BookOpen size={16} color="#f59e0b" />, label: "Chapters", value: result.chapters.toString(), color: "#f59e0b", bg: "rgba(245,158,11,0.08)" },
+                                { icon: <Languages size={16} color="#2563eb" />, label: "Language", value: result.language },
+                                { icon: <Hash size={16} color="#2563eb" />, label: "Pages Scanned", value: `${result.content_pages}/${result.total_pages}` },
+                                { icon: <AlignLeft size={16} color="#2563eb" />, label: "Words", value: result.total_words.toLocaleString() },
+                                { icon: <BookOpen size={16} color="#2563eb" />, label: "Chapters", value: result.chapters.toString() },
                             ].map(s => (
-                                <div key={s.label} style={{ background: s.bg, border: `1px solid ${s.color}25`, borderRadius: "12px", padding: "16px" }}>
+                                <div key={s.label} style={{ background: "#ffffff", border: "1px solid #e8e8e4", borderRadius: "12px", padding: "16px" }}>
                                     <div style={{ display: "flex", alignItems: "center", gap: "7px", marginBottom: "8px" }}>
                                         {s.icon}
-                                        <span style={{ fontSize: "10px", fontWeight: "700", letterSpacing: "0.07em", textTransform: "uppercase", color: "#737373" }}>{s.label}</span>
+                                        <span style={{ fontSize: "10px", fontWeight: "700", letterSpacing: "0.07em", textTransform: "uppercase", color: "#0c43bb" }}>{s.label}</span>
                                     </div>
-                                    <div style={{ fontSize: "18px", fontWeight: "700", color: s.color, letterSpacing: "-0.01em", fontFamily: "'Playfair Display', serif" }}>
+                                    <div style={{ fontSize: "18px", fontWeight: "800", color: "#2b2b2b", letterSpacing: "-0.02em", fontFamily: "'Playfair Display', serif" }}>
                                         {s.value}
                                     </div>
                                 </div>
@@ -514,18 +508,18 @@ export default function ScanPage() {
 
                         {/* Chapter list */}
                         {result.chapter_titles.length > 0 && (
-                            <div style={{ background: "rgba(0,0,0,0.02)", border: "1px solid rgba(0,0,0,0.06)", borderRadius: "14px", padding: "20px", marginBottom: "24px" }}>
-                                <p style={{ fontSize: "11px", fontWeight: "700", letterSpacing: "0.08em", textTransform: "uppercase", color: "#737373", marginBottom: "14px" }}>
+                            <div style={{ background: "#ffffff", border: "1px solid #e8e8e4", borderRadius: "14px", padding: "20px", marginBottom: "24px" }}>
+                                <p style={{ fontSize: "11px", fontWeight: "700", letterSpacing: "0.08em", textTransform: "uppercase", color: "#0c43bb", marginBottom: "14px" }}>
                                     Detected Chapters ({result.chapters})
                                 </p>
                                 <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                                     {result.chapter_titles.map((title, i) => (
-                                        <div key={i} style={{ display: "flex", alignItems: "center", gap: "10px", padding: "8px 12px", background: "rgba(0,0,0,0.03)", border: "1px solid rgba(0,0,0,0.04)", borderRadius: "8px" }}>
-                                            <span style={{ width: "24px", height: "24px", borderRadius: "6px", background: "rgba(124,58,237,0.12)", border: "1px solid rgba(124,58,237,0.2)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "11px", fontWeight: "700", color: "#a78bfa", flexShrink: 0 }}>
+                                        <div key={i} style={{ display: "flex", alignItems: "center", gap: "10px", padding: "8px 12px", background: "#f7f2e4", border: "1px solid #e8e8e4", borderRadius: "8px" }}>
+                                            <span style={{ width: "24px", height: "24px", borderRadius: "6px", background: "#1a1a1a", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "11px", fontWeight: "700", color: "#ffffff", flexShrink: 0 }}>
                                                 {i + 1}
                                             </span>
-                                            <span style={{ fontSize: "13px", color: "#555555", flex: 1 }}>{title}</span>
-                                            <ChevronRight size={13} color="#737373" />
+                                            <span style={{ fontSize: "13px", color: "#2b2b2b", flex: 1 }}>{title}</span>
+                                            <ChevronRight size={13} color="#2b2b2b" style={{ opacity: 0.4 }} />
                                         </div>
                                     ))}
                                 </div>
@@ -534,9 +528,9 @@ export default function ScanPage() {
 
                         {/* New scan button */}
                         <button onClick={() => { setResult(null); setFiles([]); setBookTitle(""); setError(""); setProgress({ stage: "idle", pct: 0, message: "" }); }}
-                            style={{ background: "none", border: "1px solid rgba(0,0,0,0.08)", borderRadius: "10px", padding: "10px 20px", color: "#555555", fontSize: "13px", cursor: "pointer", transition: "all 0.2s" }}
-                            onMouseOver={e => (e.currentTarget.style.color = "#555555")}
-                            onMouseOut={e => (e.currentTarget.style.color = "#555555")}>
+                            style={{ background: "#ffffff", border: "1px solid #e8e8e4", borderRadius: "10px", padding: "10px 20px", color: "#2b2b2b", fontSize: "13px", fontWeight: "500", cursor: "pointer", transition: "all 0.2s" }}
+                            onMouseOver={e => { e.currentTarget.style.background = "#f7f2e4"; }}
+                            onMouseOut={e => { e.currentTarget.style.background = "#ffffff"; }}>
                             ← Scan another book
                         </button>
                     </div>
@@ -546,9 +540,9 @@ export default function ScanPage() {
             <style>{`
                 @keyframes spin { to { transform: rotate(360deg); } }
                 @keyframes fadeInUp { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:translateY(0); } }
-                input::placeholder { color: #737373; }
+                input::placeholder { color: #2b2b2b; opacity: 0.4; }
                 ::-webkit-scrollbar { width:3px; }
-                ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.08); border-radius:2px; }
+                ::-webkit-scrollbar-thumb { background: #e8e8e4; border-radius:2px; }
             `}</style>
         </div>
     );
