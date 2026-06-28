@@ -32,7 +32,7 @@ import hashlib
 import urllib.request
 from collections import Counter
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # pyrefly: ignore [missing-import]
