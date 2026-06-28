@@ -1,6 +1,7 @@
 "use client";
 import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
+import { parseFriendlyError } from "@/lib/api";
 import {
     ArrowLeft,
     Upload,

@@ -1,6 +1,7 @@
 "use client";
 import { useState, useRef, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { parseFriendlyError } from "@/lib/api";
 import {
     ArrowLeft, Upload, CheckCircle, Download, Sparkles, LayoutTemplate, X,
     FileText, Archive, BookMarked, ChevronDown, ChevronUp, Ruler, Paintbrush,

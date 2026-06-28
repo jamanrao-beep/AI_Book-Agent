@@ -39,7 +39,7 @@ export default function LibraryPage() {
             if (!u) { router.push("/login"); return; }
             setUser(u);
             try {
-                const res = await listBooks();
+                const res = await listBooks(u.uid);
                 setBooks(res.data);
             } catch { /* ignore */ }
             finally { setLoading(false); }

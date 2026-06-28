@@ -13,7 +13,7 @@ import {
   ChevronDown,
   ChevronUp,
 } from "lucide-react";
-import { proofreadDocument, downloadProofreadDoc } from "@/lib/api";
+import { proofreadDocument, downloadProofreadDoc, parseFriendlyError } from "@/lib/api";
 
 interface ErrorDetail {
   original: string;
