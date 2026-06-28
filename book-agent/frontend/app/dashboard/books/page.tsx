@@ -8,6 +8,7 @@ import {
   listBooks,
   getBookStatus,
   getProgress,
+  cancelBookGeneration,
   downloadPDF,
   downloadDOCX,
   BookStatus,
@@ -703,9 +704,32 @@ export default function BooksPage() {
                 })}
               </div>
 
-              <p style={{ fontSize: "11px", color: "var(--text-tertiary)", marginTop: "12px" }}>
-                {activeJob.segments} sections compiled of ~{totalSegments} total
-              </p>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "12px" }}>
+                <p style={{ fontSize: "11px", color: "var(--text-tertiary)" }}>
+                  {activeJob.segments} sections compiled of ~{totalSegments} total
+                </p>
+                <button
+                  onClick={async () => {
+                    try {
+                      await cancelBookGeneration(activeJob.book_id);
+                      loadBooks(); // refresh list
+                    } catch (e: any) {
+                      alert(e.message || "Failed to cancel");
+                    }
+                  }}
+                  style={{
+                    display: "flex", alignItems: "center", gap: "6px",
+                    background: "rgba(239, 68, 68, 0.1)", color: "var(--crimson)",
+                    border: "1px solid rgba(239, 68, 68, 0.2)", padding: "6px 12px", borderRadius: "6px",
+                    fontSize: "12px", fontWeight: "600", cursor: "pointer",
+                    transition: "all 0.2s"
+                  }}
+                  onMouseOver={(e) => e.currentTarget.style.background = "rgba(239, 68, 68, 0.2)"}
+                  onMouseOut={(e) => e.currentTarget.style.background = "rgba(239, 68, 68, 0.1)"}
+                >
+                  <XCircle size={14} /> Cancel Generation
+                </button>
+              </div>
             </div>
           );
         })()}

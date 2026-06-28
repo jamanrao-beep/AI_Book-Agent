@@ -58,6 +58,15 @@ from cover_designer import design_cover
 
 Base.metadata.create_all(bind=engine)
 
+# Auto-migrate missing column for existing SQLite databases
+try:
+    from sqlalchemy import text
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE books ADD COLUMN total_sections INTEGER"))
+except Exception:
+    pass
+
+
 app = FastAPI(
     title="Publixo AI — Book Writing + Proofreading + Cover Design",
     description="Generate full books, proofread documents, and design covers using Google Gemini (Nano Banana)",
@@ -555,6 +564,26 @@ def get_progress(book_id: int):
         # until this is non-null rather than guessing from pages/words_per_page.
         "total_segments": book.total_sections,
     }
+
+
+@app.post("/book/{book_id}/cancel")
+def cancel_book(book_id: int):
+    db = SessionLocal()
+    book = db.query(Book).filter(Book.id == book_id).first()
+    if not book:
+        db.close()
+        raise HTTPException(404, "Book not found")
+        
+    if book.status in ("done", "error", "cancelled"):
+        db.close()
+        raise HTTPException(400, "Book generation is already complete or cancelled.")
+        
+    book.is_cancelled = True
+    book.status = "error"
+    book.error_message = "Generation cancelled by user."
+    db.commit()
+    db.close()
+    return {"message": "Cancelled"}
 
 
 @app.get("/book/{book_id}/download/pdf")

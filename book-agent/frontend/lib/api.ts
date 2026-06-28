@@ -223,6 +223,9 @@ export const getBookStatus = (id: number) =>
 export const getProgress = (id: number) =>
   API.get<BookProgress>(`/book/${id}/progress`);
 
+export const cancelBookGeneration = (id: number) =>
+  API.post(`/book/${id}/cancel`);
+
 export const listBooks = (user_id: string) => API.get<BookStatus[]>(`/books?user_id=${user_id}`);
 
 export const downloadPDF = (id: number) =>

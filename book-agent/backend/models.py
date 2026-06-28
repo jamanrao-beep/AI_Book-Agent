@@ -13,6 +13,7 @@ class Book(Base):
     num_pages      = Column(Integer)
     words_per_page = Column(Integer)
     status         = Column(String(50), default="pending")
+    total_sections = Column(Integer, nullable=True)
     outline        = Column(Text, nullable=True)
     pdf_url        = Column(String(1000), nullable=True)
     docx_url       = Column(String(1000), nullable=True)
