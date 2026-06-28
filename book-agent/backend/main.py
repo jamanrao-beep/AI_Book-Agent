@@ -546,7 +546,15 @@ def get_progress(book_id: int):
     db.close()
     if not book:
         raise HTTPException(404, "Book not found")
-    return {"book_id": book_id, "status": book.status, "completed_segments": done}
+    return {
+        "book_id": book_id,
+        "status": book.status,
+        "completed_segments": done,
+        # Real total from the outline (set once outlining finishes). None while
+        # still outlining — the frontend should show an indeterminate state
+        # until this is non-null rather than guessing from pages/words_per_page.
+        "total_segments": book.total_sections,
+    }
 
 
 @app.get("/book/{book_id}/download/pdf")
@@ -613,6 +621,43 @@ def cancel_book(book_id: int):
         return {"book_id": book_id, "status": "cancel_requested", "message": "Cancellation signal sent. Job will stop after the current section."}
     finally:
         db.close()
+
+
+@app.post("/book/{book_id}/resume")
+def resume_book(book_id: int, bg: BackgroundTasks):
+    """
+    Re-runs the agent for a book that previously failed or was cancelled.
+    agent.py's run_book_agent is resume-safe: it reuses the saved outline and
+    skips any section already marked is_complete, so this only generates
+    whatever didn't finish last time — it does NOT start the book over.
+    """
+    db = SessionLocal()
+    try:
+        book = db.query(Book).filter(Book.id == book_id).first()
+        if not book:
+            raise HTTPException(404, f"Book {book_id} not found")
+        if book.status not in ("failed", "cancelled"):
+            return {
+                "book_id": book_id,
+                "status": book.status,
+                "message": "Job isn't in a failed/cancelled state — nothing to resume.",
+            }
+
+        book.status        = "outlining" if not book.outline else "generating"
+        book.error_message = None
+        book.is_cancelled   = False
+        db.commit()
+    finally:
+        db.close()
+
+    bg.add_task(run_book_agent, book_id)
+
+    return {
+        "book_id": book_id,
+        "status": "resumed",
+        "message": "Resuming generation from where it left off.",
+        "check_status": f"/book/{book_id}/status",
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────────────

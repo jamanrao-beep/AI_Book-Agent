@@ -3,6 +3,7 @@ import time
 import sys
 import os
 import traceback
+import concurrent.futures
 from datetime import datetime
 from typing import Dict, Any
 
@@ -19,7 +20,16 @@ from dotenv import load_dotenv
 
 load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-MODEL = "gpt-4o"
+MODEL      = "gpt-4o"        # used for Writer + Revisor — needs real prose quality
+FAST_MODEL = "gpt-4o-mini"   # used for Critic + EKG updates — structured JSON, no prose needed
+
+# ── Speed tuning ──────────────────────────────────────────────────────────────
+# How many sections within the SAME chapter generate concurrently. All sections
+# in a chapter share the same Entity Knowledge Graph snapshot (taken at the
+# start of the chapter) and the EKG is updated once per chapter (not per
+# section) — see the chapter loop below. Raise this if your OpenAI rate limit
+# tier can handle more concurrent requests; lower it if you start seeing 429s.
+CHAPTER_PARALLEL_WORKERS = 4
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ADVANCED MULTI-AGENT SWARM PROMPTS (UPGRADED: MEMGPT-STYLE ENTITY GRAPH)
@@ -73,8 +83,17 @@ Do NOT output any conversational text, only the final revised book content.
 STORY_BIBLE_PROMPT = """You are an elite Continuity Manager and Knowledge Graph Architect for a large book generation system.
 You will be given the current 'Entity Knowledge Graph' (a JSON database of established facts, characters, plot points, and world-building) and a newly written section.
 
-Your job: Extract any NEW permanent facts, character developments, or world-building rules from the new section and seamlessly merge them into the Entity Knowledge Graph.
+Your job: Extract any NEW permanent facts, character developments, or world-building rules from the new content and seamlessly merge them into the Entity Knowledge Graph.
 Update existing characters' statuses, add new locations, and append to the timeline.
+
+IMPORTANT — keep the graph bounded as the book grows:
+- Keep every Character/Location description to 1-2 concise sentences. Edit existing
+  descriptions in place rather than appending more sentences to them over time.
+- If "Timeline" already has more than 25 entries, COMPRESS the oldest ones into a single
+  short summary entry (e.g. "Earlier: <one-line recap>") before appending new events, so the
+  list never grows without bound.
+- Do not repeat information that's already captured elsewhere in the graph.
+- The output must comfortably fit in a few thousand tokens no matter how long the book is.
 
 You MUST output ONLY a valid JSON object matching this exact structure:
 {
@@ -124,7 +143,7 @@ def update_story_bible(current_bible: str, new_content: str, book_title: str) ->
     print("    🧠 Updating Continuity Entity Knowledge Graph...")
     try:
         response = client.chat.completions.create(
-            model=MODEL,
+            model=FAST_MODEL,
             response_format={"type": "json_object"},
             messages=[
                 {"role": "system", "content": STORY_BIBLE_PROMPT},
@@ -134,7 +153,7 @@ def update_story_bible(current_bible: str, new_content: str, book_title: str) ->
                     f"NEW SECTION CONTENT:\n{new_content}"
                 )}
             ],
-            max_tokens=2500,
+            max_tokens=4096,
             temperature=0.2
         )
         updated_bible = response.choices[0].message.content.strip()
@@ -166,7 +185,7 @@ def critique_and_revise(draft: str, story_bible: str, style: str, target_words: 
         # ── AGENT 1: THE CRITIC ───────────────────────────────────────────────
         try:
             critique_response = client.chat.completions.create(
-                model=MODEL,
+                model=FAST_MODEL,
                 messages=[
                     {"role": "system", "content": CRITIC_SYSTEM_PROMPT},
                     {"role": "user", "content": (
@@ -237,6 +256,37 @@ def critique_and_revise(draft: str, story_bible: str, style: str, target_words: 
     return current_draft
 
 
+def _generate_one_section(
+    book_title: str,
+    chapter_title: str,
+    subheading: str,
+    story_bible: str,
+    safe_style: str,
+    words_per_section: int,
+) -> str:
+    """
+    Runs the Writer → Critic/Revisor pipeline for ONE section. Pure function —
+    touches no database session — so it's safe to call from multiple threads
+    at once when several sections of the same chapter are drafted in parallel.
+    The caller is responsible for persisting the returned content.
+    """
+    raw_draft = generate_section(
+        book_title       = book_title,
+        chapter_title    = chapter_title,
+        subheading       = subheading,
+        previous_summary = "",
+        word_count       = words_per_section,
+        writing_style    = safe_style,
+        story_bible      = story_bible,
+    )
+    return critique_and_revise(
+        draft        = raw_draft,
+        story_bible  = story_bible,
+        style        = safe_style,
+        target_words = words_per_section,
+    )
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # MAIN EXECUTION ENGINE
 # ─────────────────────────────────────────────────────────────────────────────
@@ -250,6 +300,13 @@ def run_book_agent(book_id: int):
         db.close()
         return
 
+    # RESUME FIX: this function also runs when /book/{id}/resume retries a
+    # failed/cancelled job. Clear stale failure state from the last attempt
+    # before doing anything else.
+    book.is_cancelled  = False
+    book.error_message = None
+    db.commit()
+
     print(f"\n=======================================================")
     print(f"📖 STARTING VELIONYX-GRADE BOOK ENGINE: '{book.title}'")
     print(f"   Pages Target: {book.num_pages} | Words/page: {book.words_per_page}")
@@ -257,23 +314,40 @@ def run_book_agent(book_id: int):
     print(f"=======================================================\n")
 
     try:
-        # ── STEP 1: Generate Master Outline ───────────────────────────────────
-        book.status = "outlining"
-        db.commit()
-
-        num_chapters = calculate_chapters(book.num_pages, book.words_per_page)
-        print(f"📋 Generating master outline architecture ({num_chapters} chapters)...")
-
         safe_style = book.writing_style or "Neutral, clear, and engaging."
 
-        outline = generate_outline(book.title, num_chapters, writing_style=safe_style)
-        book.outline = json.dumps(outline)
-        book.status  = "generating"
-        db.commit()
+        # ── STEP 1: Master Outline ────────────────────────────────────────────
+        # RESUME FIX: reuse a previously saved outline instead of generating a
+        # new one. Regenerating would almost never reproduce the exact same
+        # chapter titles/subheadings, which breaks the "skip already-done
+        # sections" matching below — you'd end up with the old segments AND a
+        # second, different set of new segments both saved under the same book.
+        if book.outline:
+            outline = json.loads(book.outline)
+            print("📋 Found a saved outline for this book — resuming with it instead of regenerating.")
+        else:
+            book.status = "outlining"
+            db.commit()
+            num_chapters = calculate_chapters(book.num_pages, book.words_per_page)
+            print(f"📋 Generating master outline architecture ({num_chapters} chapters)...")
+            outline = generate_outline(book.title, num_chapters, writing_style=safe_style)
+            book.outline = json.dumps(outline)
+            db.commit()
 
         total_sections = sum(len(ch["subheadings"]) for ch in outline["chapters"])
-        done_sections  = 0
-        print(f"✅ Master Outline established. Total logical blocks to generate: {total_sections}\n")
+
+        # Count what's already saved (non-zero on a resumed run) so progress
+        # reporting is correct immediately, not just after the next section lands.
+        done_sections = db.query(BookSegment).filter(
+            BookSegment.book_id     == book_id,
+            BookSegment.is_complete == True,
+        ).count()
+
+        book.status         = "generating"
+        book.total_sections = total_sections
+        db.commit()
+
+        print(f"✅ Master Outline established. Total logical blocks: {total_sections} (already done: {done_sections})\n")
 
         # ── STEP 2: Swarm Generation & Continuity Loop ───────────────────────
         # Initialize the Entity Knowledge Graph with Sensory_Details from the start
@@ -301,8 +375,11 @@ def run_book_agent(book_id: int):
             print(f"\n📂 INITIATING CHAPTER {chapter['chapter_number']}: {chapter['title']}")
             print(f"-------------------------------------------------------")
 
+            # Split this chapter's subheadings into "already saved" (resume)
+            # vs "still needs writing", up front.
+            pending_subheadings    = []
+            existing_chapter_tails = []
             for subheading in chapter["subheadings"]:
-                # Idempotency check: allows agent to resume if server crashed
                 existing = db.query(BookSegment).filter(
                     BookSegment.book_id        == book_id,
                     BookSegment.chapter_number == chapter["chapter_number"],
@@ -311,69 +388,110 @@ def run_book_agent(book_id: int):
                 ).first()
 
                 if existing:
-                    print(f"    ⏭️ Skipping (Resuming from DB): {subheading}")
-                    story_bible   = update_story_bible(story_bible, existing.content[-800:], book.title)
+                    print(f"    ⏭️ Skipping (already generated): {subheading}")
                     segment_order += 1
-                    done_sections += 1
+                    existing_chapter_tails.append(existing.content[-800:])
+                else:
+                    pending_subheadings.append(subheading)
+
+            if not pending_subheadings:
+                # Whole chapter already done from a previous run — still walk
+                # the EKG forward through it so later chapters stay consistent.
+                if existing_chapter_tails:
+                    story_bible = update_story_bible(
+                        story_bible, "\n\n".join(existing_chapter_tails), book.title
+                    )
+                continue
+
+            # ── PARALLEL WRITER + CRITIC/REVISOR PASS ────────────────────────
+            # Every pending section in this chapter shares the SAME story_bible
+            # snapshot, taken once right here before any of them run. That's
+            # safe because sections within one chapter don't invalidate each
+            # other's facts — the EKG only advances once, after the whole
+            # chapter lands (see below), instead of after every section.
+            chapter_bible_snapshot = story_bible
+            workers = min(CHAPTER_PARALLEL_WORKERS, len(pending_subheadings))
+            print(f"    🚀 Drafting {len(pending_subheadings)} section(s), up to {workers} in parallel...")
+
+            results: Dict[str, Any] = {}
+            with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+                future_to_subheading = {
+                    pool.submit(
+                        _generate_one_section,
+                        book.title,
+                        chapter["title"],
+                        subheading,
+                        chapter_bible_snapshot,
+                        safe_style,
+                        words_per_section,
+                    ): subheading
+                    for subheading in pending_subheadings
+                }
+                for future in concurrent.futures.as_completed(future_to_subheading):
+                    subheading = future_to_subheading[future]
+                    try:
+                        results[subheading] = future.result()
+                        print(f"    ✅ Draft + review done: {subheading}")
+                    except Exception as e:
+                        # One bad section shouldn't cost you the others you
+                        # already paid for — record the failure and keep going.
+                        print(f"    ❌ Section failed after retries: {subheading} — {e}")
+                        results[subheading] = None
+
+            # Persist in original subheading order so reading order / segment_order
+            # stay stable no matter which thread finished first.
+            chapter_new_content = []
+            any_failed           = False
+            for subheading in pending_subheadings:
+                content = results.get(subheading)
+                if content is None:
+                    any_failed = True
                     continue
 
-                print(f"    ✍️  Writer Agent drafting: {subheading} (~{words_per_section} words)")
-
-                # ── KEY FIX: pass story_bible directly to generate_section ──
-                # Previously story_bible was passed as `previous_summary` which
-                # framed it as optional backstory. Now it goes through the new
-                # `story_bible` parameter which injects it as an absolute constraint
-                # block with visual separators and explicit prohibition language.
-                raw_draft = generate_section(
-                    book_title       = book.title,
-                    chapter_title    = chapter["title"],
-                    subheading       = subheading,
-                    previous_summary = "",   # narrative "what happened before" now comes from EKG Timeline
-                    word_count       = words_per_section,
-                    writing_style    = safe_style,
-                    story_bible      = story_bible,   # ← hard constraint, not soft context
-                )
-
-                # Pass to Critic & Revisor Swarm (Revisor now also gets story_bible)
-                final_content = critique_and_revise(
-                    draft        = raw_draft,
-                    story_bible  = story_bible,
-                    style        = safe_style,
-                    target_words = words_per_section,
-                )
-
-                # Save to database
                 segment = BookSegment(
                     book_id        = book_id,
                     chapter_number = chapter["chapter_number"],
                     chapter_title  = chapter["title"],
                     subheading     = subheading,
-                    content        = final_content,
+                    content        = content,
                     segment_order  = segment_order,
                     is_complete    = True
                 )
                 db.add(segment)
-                book.last_heartbeat = datetime.utcnow()
-                db.commit()
-
-                # Check for cancellation signal after every section
-                db.refresh(book)
-                if book.is_cancelled:
-                    print(f"    🛑 Cancellation requested — stopping after section {done_sections}.")
-                    book.status = "cancelled"
-                    db.commit()
-                    return
-
-                # Update the rolling EKG for the next section
-                story_bible = update_story_bible(story_bible, final_content, book.title)
-
                 segment_order += 1
                 done_sections += 1
+                chapter_new_content.append(content)
 
-                pct = int((done_sections / total_sections) * 100)
-                print(f"    ✅ Section Finalized [{pct}%] ({done_sections}/{total_sections})")
+            book.last_heartbeat = datetime.utcnow()
+            db.commit()
 
-                time.sleep(1.5)
+            pct = int((done_sections / total_sections) * 100)
+            print(f"    📊 Chapter progress saved [{pct}%] ({done_sections}/{total_sections})")
+
+            # Check for cancellation once per chapter (still responsive — just
+            # no longer a DB round-trip after every single section).
+            db.refresh(book)
+            if book.is_cancelled:
+                print(f"    🛑 Cancellation requested — stopping after chapter {chapter['chapter_number']}.")
+                book.status = "cancelled"
+                db.commit()
+                return
+
+            # ── ONE EKG update for the whole chapter (was: one per section) ──
+            # Cuts EKG calls ~3-5x and removes the single biggest source of the
+            # "Unterminated string" truncation errors from earlier runs.
+            if chapter_new_content:
+                story_bible = update_story_bible(
+                    story_bible, "\n\n".join(chapter_new_content), book.title
+                )
+
+            if any_failed:
+                # Fail loudly AFTER saving the sections that did succeed, so a
+                # retry via /book/{id}/resume only has to redo what's missing.
+                raise Exception(
+                    f"One or more sections in chapter {chapter['chapter_number']} failed "
+                    f"after retries. Resume this book to pick up exactly where it left off."
+                )
 
         # ── STEP 3: Premium Assembly & Formatting ─────────────────────────────
         print(f"\n📦 Assembling Premium Output Files (PDF and DOCX)...")
@@ -424,7 +542,17 @@ def run_book_agent(book_id: int):
         # Detect OpenAI quota/billing errors and surface a friendly message
         # instead of a raw technical crash. The frontend reads book.status and
         # book.error_message to decide what to show the user.
-        if "insufficient_quota" in error_str or "exceeded your current quota" in error_str or "billing" in error_str:
+        # Deliberate partial-failure raised above when a chapter has one or
+        # more sections that failed after retries — progress IS saved, so
+        # point the user at Resume instead of a generic "something broke".
+        if "resume this book" in error_str:
+            book.status        = "failed"
+            book.error_message = (
+                "Most of your book generated successfully, but a few sections hit an error. "
+                "Your progress has been saved — click Resume to pick up exactly where it left off "
+                "instead of starting over."
+            )
+        elif "insufficient_quota" in error_str or "exceeded your current quota" in error_str or "billing" in error_str:
             book.status        = "failed"
             book.error_message = (
                 "We're sorry — the AI service has temporarily run out of available credits. "
