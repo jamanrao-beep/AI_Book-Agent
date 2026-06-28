@@ -81,8 +81,8 @@ export default function BooksPage() {
   const [error, setError] = useState("");
 
   const [title, setTitle] = useState("");
-  const [pages, setPages] = useState(10);
-  const [wpp, setWpp] = useState(200);
+  const [pages, setPages] = useState(50);
+  const [wpp, setWpp] = useState(250);
   const [writingStyle, setWritingStyle] = useState("");
   const [customWritingStyle, setCustomWritingStyle] = useState("");
 
@@ -214,7 +214,7 @@ export default function BooksPage() {
     : 0;
 
   const totalWords = pages * wpp;
-  const estimatedTime = pages < 20 ? "5–10" : pages < 100 ? "10–20" : "20–35";
+  const estimatedTime = pages < 20 ? "5–10" : pages < 100 ? "10–20" : pages < 350 ? "20–35" : "35–65";
 
   return (
     <div style={{
@@ -467,11 +467,11 @@ export default function BooksPage() {
                   
                   <div style={{ marginBottom: "14px" }}>
                     <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", marginBottom: "6px" }}>
-                      <span style={{ fontWeight: "600" }}>Total Chapters:</span>
-                      <span style={{ color: "var(--sapphire)", fontWeight: "700" }}>{pages} chapters</span>
+                      <span style={{ fontWeight: "600" }}>Total Pages:</span>
+                      <span style={{ color: "var(--sapphire)", fontWeight: "700" }}>{pages} pages</span>
                     </div>
                     <input
-                      type="range" min="3" max="25"
+                      type="range" min="5" max="1000" step="5"
                       value={pages} onChange={e => setPages(parseInt(e.target.value))}
                       style={{ width: "100%" }}
                     />
@@ -479,11 +479,11 @@ export default function BooksPage() {
 
                   <div>
                     <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", marginBottom: "6px" }}>
-                      <span style={{ fontWeight: "600" }}>Words Per Chapter:</span>
+                      <span style={{ fontWeight: "600" }}>Words Per Page:</span>
                       <span style={{ color: "var(--sapphire)", fontWeight: "700" }}>{wpp} words</span>
                     </div>
                     <input
-                      type="range" min="150" max="600" step="50"
+                      type="range" min="50" max="300" step="10"
                       value={wpp} onChange={e => setWpp(parseInt(e.target.value))}
                       style={{ width: "100%" }}
                     />

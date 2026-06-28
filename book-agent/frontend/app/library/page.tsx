@@ -319,7 +319,7 @@ export default function LibraryPage() {
                                     {[
                                         { label: "Manuscript ID", value: `#${selectedBook.book_id}` },
                                         { label: "Date Created", value: new Date(selectedBook.created_at).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" }) },
-                                        { label: "Target Size", value: `${selectedBook.pages} chapters / pages` },
+                                        { label: "Target Size", value: `${selectedBook.pages} pages` },
                                     ].map(info => (
                                         <div key={info.label} style={{ background: "var(--void)", border: "1px solid var(--border-mid)", padding: "12px 14px", borderRadius: "10px" }}>
                                             <span style={{ fontSize: "10px", fontWeight: "700", color: "var(--text-tertiary)", textTransform: "uppercase", letterSpacing: "0.04em" }}>{info.label}</span>

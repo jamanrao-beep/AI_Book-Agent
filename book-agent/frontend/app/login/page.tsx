@@ -27,19 +27,53 @@ function LoginContent() {
     return () => unsub();
   }, [router]);
 
+  const parseFirebaseError = (err: any): string => {
+    const code = err?.code || err?.message || "";
+    if (code.includes("auth/weak-password")) {
+      return "The password is too weak. It must be at least 6 characters long.";
+    }
+    if (code.includes("auth/email-already-in-use")) {
+      return "This email address is already in use by another account.";
+    }
+    if (code.includes("auth/invalid-email")) {
+      return "The email address is badly formatted.";
+    }
+    if (
+      code.includes("auth/user-not-found") ||
+      code.includes("auth/wrong-password") ||
+      code.includes("auth/invalid-credential")
+    ) {
+      return "Incorrect email or password. Please check your credentials or sign up if you don't have an account.";
+    }
+    if (code.includes("auth/operation-not-allowed")) {
+      return "Email/password authentication is not enabled. Please sign in with Google or contact support.";
+    }
+    if (code.includes("auth/too-many-requests")) {
+      return "Too many failed attempts. Access to this account has been temporarily disabled.";
+    }
+    return (err instanceof Error ? err.message : "Authentication failed")
+      .replace("Firebase: ", "")
+      .replace(/\(auth\/.*\)/, "")
+      .trim();
+  };
+
   const handleEmailAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true); setError("");
     try {
-      if (mode === "login") await loginWithEmail(email, password);
-      else await signupWithEmail(email, password);
+      if (mode === "login") {
+        await loginWithEmail(email, password);
+      } else {
+        if (!name.trim()) {
+          setError("Please enter your full name to register.");
+          setLoading(false);
+          return;
+        }
+        await signupWithEmail(email, password, name.trim());
+      }
       router.push("/dashboard");
     } catch (err: any) {
-      if (err.code === "auth/invalid-credential" || err.message?.includes("invalid-credential")) {
-        setError("Invalid email or password. If you don't have an account, please sign up first.");
-      } else {
-        setError((err instanceof Error ? err.message : "Authentication failed").replace("Firebase: ", "").replace(/\(auth\/.*\)/, "").trim());
-      }
+      setError(parseFirebaseError(err));
     } finally { setLoading(false); }
   };
 

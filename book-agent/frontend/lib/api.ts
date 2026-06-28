@@ -12,8 +12,8 @@ import axios from "axios";
 
 const API = axios.create({
   baseURL: process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000",
-  // Large books are split into many chunks; allow up to 1 hour total.
-  timeout: 3600000,
+  // Large books are split into many chunks; allow up to 3 hours total.
+  timeout: 10800000,
 });
 
 /**
@@ -258,7 +258,7 @@ export const proofreadDocument = (
     form,
     {
       // No Content-Type header — axios sets multipart/form-data + boundary automatically
-      timeout: 3600000,
+      timeout: 10800000,
       onUploadProgress: onUploadProgress
         ? (e) => {
           if (e.total) onUploadProgress(Math.round((e.loaded * 100) / e.total));
@@ -562,7 +562,7 @@ export const designLayout = (
     {
       // Generous, but this call returns fast in practice — it only covers
       // the upload itself, not the actual layout/render work.
-      timeout: 3600000,
+      timeout: 10800000,
       onUploadProgress: onUploadProgress
         ? (e) => { if (e.total) onUploadProgress(Math.round((e.loaded * 100) / e.total)); }
         : undefined,

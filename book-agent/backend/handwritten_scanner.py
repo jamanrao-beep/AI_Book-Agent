@@ -74,7 +74,7 @@ TRANSCRIPTION_WORKERS = 4
 _OPENAI_SEMAPHORE = threading.Semaphore(4)
 
 # Retries on transient API errors (429, 500, 502, 503).
-MAX_RETRIES = 3
+MAX_RETRIES = 8
 RETRY_BASE_DELAY = 2.0  
 
 # Structuring: max chars per chunk fed to GPT-4o.
@@ -650,7 +650,9 @@ def _api_call_with_retry(fn, *args, **kwargs):
                 print(f"  ❌  Non-retryable API error (attempt {attempt}/{MAX_RETRIES}): {e}")
             raise
             
-    raise last_exc
+    if last_exc is not None:
+        raise last_exc
+    raise RuntimeError("API call failed")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

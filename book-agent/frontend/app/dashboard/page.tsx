@@ -419,7 +419,7 @@ export default function DashboardHome() {
           </Link>
           <div style={{ width: "1px", height: "16px", background: "var(--border-mid)" }} />
           <span style={{ fontSize: "12px", color: "var(--text-tertiary)", fontWeight: "500" }}>
-            {user?.email}
+            {user?.displayName || user?.email?.split("@")[0] || "User"}
           </span>
           <button
             onClick={() => logout().then(() => router.push("/login"))}
