@@ -5434,6 +5434,7 @@ def design_layout(
     # ── Output format flags (Fix #18, #19) ──────────────────────────────────
     output_epub: bool = True,
     output_stylesheet: bool = True,
+    check_cancelled: Optional[Callable[[], bool]] = None
 ) -> dict:
     """
     Full pipeline — book-type aware:

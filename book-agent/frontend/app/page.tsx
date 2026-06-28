@@ -184,14 +184,14 @@ export default function Home() {
           >
             Sign In
           </Link>
-          <button
-            onClick={handleGoogle}
-            disabled={loading}
-            className="btn-dark"
-            style={{ padding: "8px 18px", fontSize: "13px", opacity: loading ? 0.7 : 1 }}
-          >
-            {loading ? "Connecting..." : "Start Writing Free"}
-          </button>
+          <Link href="/login?signup=true">
+            <button
+              className="btn-dark"
+              style={{ padding: "8px 18px", fontSize: "13px" }}
+            >
+              Start Writing Free
+            </button>
+          </Link>
         </div>
       </nav>
 
@@ -257,18 +257,14 @@ export default function Home() {
         </p>
 
         <div style={{ display: "flex", gap: "16px", justifyContent: "center", alignItems: "center" }}>
-          <button
-            onClick={handleGoogle}
-            disabled={loading}
-            className="btn-dark"
-            style={{
-              padding: "14px 28px",
-              fontSize: "14px",
-              opacity: loading ? 0.7 : 1,
-            }}
-          >
-            {loading ? "Connecting..." : <>Generate Your Book Free <ArrowRight size={16} /></>}
-          </button>
+          <Link href="/login?signup=true">
+            <button
+              className="btn-dark"
+              style={{ padding: "13px 28px", fontSize: "14px" }}
+            >
+              Generate Your Book Free <ArrowRight size={16} />
+            </button>
+          </Link>
           <Link href="/login">
             <button
               className="btn-outline"

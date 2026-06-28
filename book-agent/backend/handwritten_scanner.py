@@ -826,7 +826,7 @@ def _transcribe_single_batch(batch: list[str], batch_start: int) -> list[dict]:
     return [r for r in results if r]
 
 
-def transcribe_images(image_paths: list[str], book_title: str = "") -> list[dict]:
+def transcribe_images(image_paths: list[str], book_title: str = "", check_cancelled: Optional[Callable[[], bool]] = None) -> list[dict]:
     """Transcribe a list of images using GPT-4o vision in parallel with ThreadPoolExecutor."""
     total = len(image_paths)
     print(f"  🖊️  Transcribing {total} pages | batch_size={PAGES_PER_BATCH} | workers={TRANSCRIPTION_WORKERS}")
@@ -845,6 +845,9 @@ def transcribe_images(image_paths: list[str], book_title: str = "") -> list[dict
             for batch, batch_start in batches
         }
         for future in as_completed(future_to_start):
+            if check_cancelled and check_cancelled():
+                # Note: this leaves pending futures in the executor, but we raise to abort the job
+                raise RuntimeError("Cancelled by user")
             batch_start = future_to_start[future]
             try:
                 batch_result = future.result()
@@ -1521,6 +1524,7 @@ def scan_handwritten_book(
     output_dir: str,
     book_title: str = "",
     progress_callback=None,
+    check_cancelled: Optional[Callable[[], bool]] = None
 ) -> dict:
     """
     Maximized Enterprise Pipeline:
@@ -1548,7 +1552,7 @@ def scan_handwritten_book(
         if progress_callback: 
             progress_callback("transcribing", 5, f"Found {total_pages} pages. Enhancing and transcribing…")
 
-        transcribed = transcribe_images(images, book_title)
+        transcribed = transcribe_images(images, book_title, check_cancelled)
 
         if progress_callback: 
             progress_callback("healing", 60, "AI Healer stitching broken sentences and fixing illegible words…")

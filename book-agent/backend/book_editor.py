@@ -4590,6 +4590,7 @@ def process_editor_turn(
     version_history:      Optional[VersionHistory] = None,
     generate_toc_page:    bool = False,
     generate_diff:        bool = True,
+    check_cancelled:      Optional[Callable[[], bool]] = None,
 ) -> dict:
     """
     Master orchestrator for one editing turn.
@@ -4623,12 +4624,18 @@ def process_editor_turn(
       }
     """
     os.makedirs(output_dir, exist_ok=True)
+    
+    if check_cancelled and check_cancelled():
+        raise RuntimeError("Cancelled by user")
 
     # Step 1: Sanitise
     book_structure = _sanitise_book_metadata(book_structure)
 
     # Step 2: Theme detection
     detected_theme = detect_theme_from_instruction(user_message, theme)
+    
+    if check_cancelled and check_cancelled():
+        raise RuntimeError("Cancelled by user")
 
     # Step 3: Snapshot
     original_book = copy.deepcopy(book_structure)

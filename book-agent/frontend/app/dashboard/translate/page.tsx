@@ -193,6 +193,7 @@ export default function TranslatePage() {
     const [progress, setProgress] = useState<ProgressState>({ stage: "idle", pct: 0, message: "" });
     const [result, setResult] = useState<TranslationResult | null>(null);
     const [error, setError] = useState("");
+    const [activeJobId, setActiveJobId] = useState<string | null>(null);
 
     const ACCENT = "var(--sapphire)";
 
@@ -205,6 +206,7 @@ export default function TranslatePage() {
             return;
         }
         setError("");
+        setActiveJobId(null);
         setFile(f);
     };
 
@@ -253,6 +255,7 @@ export default function TranslatePage() {
     const handleSubmit = async () => {
         if (!file || !targetLang) return;
         setError("");
+        setActiveJobId(null);
         setResult(null);
         setProgress({ stage: "extracting", pct: 2, message: "Reading manuscript sections…" });
         setElapsedSecs(0);
@@ -273,6 +276,7 @@ export default function TranslatePage() {
                 throw new Error(errData.detail || "Translation request rejected.");
             }
             const data = await res.json();
+            setActiveJobId(data.job_id);
             poll(data.job_id);
         } catch (e: unknown) {
             setError(parseFriendlyError(e));
@@ -281,12 +285,23 @@ export default function TranslatePage() {
         }
     };
 
+    const handleCancel = async () => {
+        if (!activeJobId) return;
+        try {
+            await fetch(`${API_BASE}/translate/${activeJobId}/cancel`, { method: "POST" });
+            setProgress({ stage: "error", pct: 0, message: "Cancelled by user" });
+            setActiveJobId(null);
+            if (pollRef.current) clearInterval(pollRef.current);
+        } catch (err) {}
+    };
+
     const clearSession = () => {
         setResult(null);
         setFile(null);
         setSourceLang("");
         setTargetLang("");
         setError("");
+        setActiveJobId(null);
         setProgress({ stage: "idle", pct: 0, message: "" });
         if (pollRef.current) clearInterval(pollRef.current);
         if (elapsedRef.current) clearInterval(elapsedRef.current);
@@ -419,6 +434,9 @@ export default function TranslatePage() {
                                         <span>Elapsed: {formatTime(elapsedSecs)}</span>
                                         <span>Processing blocks...</span>
                                     </div>
+                                    <button onClick={handleCancel} className="btn-outline" style={{ width: "100%", padding: "8px", fontSize: "13px", color: "var(--crimson)", borderColor: "rgba(220,38,38,0.3)" }}>
+                                        Cancel Generation
+                                    </button>
                                 </div>
                             )}
 

@@ -751,7 +751,7 @@ def _call_openai_with_retry(
 # Main proofreading entry point (UPGRADED SWARM)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def proofread_text(text: str, progress_callback: Optional[Callable[[int, int], None]] = None) -> dict:
+def proofread_text(text: str, progress_callback: Optional[Callable[[int, int], None]] = None, check_cancelled: Optional[Callable[[], bool]] = None) -> dict:
     """
     Run AI proofreading on text. Handles long documents by chunking.
     
@@ -788,6 +788,8 @@ def proofread_text(text: str, progress_callback: Optional[Callable[[int, int], N
     rolling_memory = "Start of document."
 
     for i, chunk in enumerate(chunks):
+        if check_cancelled and check_cancelled():
+            raise RuntimeError("Cancelled by user")
         context = f"chunk {i+1}/{len(chunks)}"
         
         # ── 3 independent attempts; on total failure keep original text ──────

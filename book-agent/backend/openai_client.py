@@ -207,7 +207,7 @@ the descriptions below.
 """
 
     narrative_context = (
-        f"NARRATIVE CONTINUITY — what happened immediately before this section:\n{previous_summary}"
+        f"NARRATIVE CONTINUITY — the immediate preceding text:\n{previous_summary}\n\n[CRITICAL: DO NOT REPEAT THE PRECEDING TEXT. Continue the story seamlessly from the exact sentence where it left off.]"
         if previous_summary else "This is the very first section of the book."
     )
 

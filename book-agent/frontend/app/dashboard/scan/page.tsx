@@ -67,6 +67,7 @@ export default function ScanPage() {
     const [progress, setProgress] = useState<ProgressState>({ stage: "idle", pct: 0, message: "" });
     const [result, setResult] = useState<ScanResult | null>(null);
     const [error, setError] = useState("");
+    const [activeJobId, setActiveJobId] = useState<string | null>(null);
 
     const addFiles = (incoming: FileList | File[]) => {
         const arr = Array.from(incoming);
@@ -78,6 +79,7 @@ export default function ScanPage() {
             setError(`${arr.length - valid.length} unsupported file(s) were skipped. Accepted: images, PDF, DOCX, ZIP.`);
         } else {
             setError("");
+        setActiveJobId(null);
         }
         setFiles(prev => {
             const combined = [...prev, ...valid];
@@ -104,6 +106,7 @@ export default function ScanPage() {
     const handleSubmit = async () => {
         if (files.length === 0) return;
         setError("");
+        setActiveJobId(null);
         setResult(null);
         setProgress({ stage: "collecting", pct: 2, message: "Uploading files…" });
 
@@ -1142,6 +1145,7 @@ export default function ScanPage() {
                   setFiles([]);
                   setBookTitle("");
                   setError("");
+        setActiveJobId(null);
                   setProgress({ stage: "idle", pct: 0, message: "" });
                 }}
                 className="btn-outline"

@@ -60,6 +60,7 @@ Base.metadata.create_all(bind=engine)
 
 # Auto-migrate missing column for existing SQLite databases
 try:
+    # pyrefly: ignore [missing-import]
     from sqlalchemy import text
     with engine.begin() as conn:
         conn.execute(text("ALTER TABLE books ADD COLUMN total_sections INTEGER"))
@@ -732,7 +733,11 @@ def _run_proofread_job(job_id: str, tmp_path: str, filename: str, ext: str) -> N
                 "message": f"Proofreading chunk {done}/{total}…",
             })
 
-        result = proofread_text(original_text, progress_callback=_chunk_progress)
+        result = proofread_text(
+            original_text, 
+            progress_callback=_chunk_progress,
+            check_cancelled=lambda: _proofread_jobs.get(job_id, {}).get("is_cancelled")
+        )
 
         out_ext = ext if ext in {".docx", ".pdf"} else ".txt"
         corrected_filename = f"corrected_{job_id}{out_ext}"
@@ -831,6 +836,16 @@ async def proofread_upload(file: UploadFile = File(...)):
 
     return {"job_id": job_id, "status": "started"}
 
+
+@app.post("/proofread/{job_id}/cancel")
+async def proofread_cancel(job_id: str):
+    job = _proofread_jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, "Proofread job not found.")
+    if job.get("stage") in ("done", "error", "cancelled"):
+        raise HTTPException(400, "Job is already complete or cancelled.")
+    _proofread_jobs.update_job(job_id, {"is_cancelled": True, "stage": "error", "error": "Cancelled by user"})
+    return {"message": "Cancelled"}
 
 @app.get("/proofread/{job_id}/status")
 async def proofread_status(job_id: str):
@@ -1381,6 +1396,7 @@ def _run_scan_job(
                 output_dir=OUTPUT_DIR,
                 book_title=book_title,
                 progress_callback=progress,
+                check_cancelled=lambda: _scan_jobs.get(job_id, {}).get("is_cancelled")
             )
 
             payload = {
@@ -1507,6 +1523,16 @@ async def scan_handwritten(
 
     return {"job_id": job_id, "status": "started"}
 
+
+@app.post("/scan-handwritten/{job_id}/cancel")
+async def scan_cancel(job_id: str):
+    job = _scan_jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, "Scan job not found.")
+    if job.get("stage") in ("done", "error", "cancelled"):
+        raise HTTPException(400, "Job is already complete or cancelled.")
+    _scan_jobs.update_job(job_id, {"is_cancelled": True, "stage": "error", "error": "Cancelled by user"})
+    return {"message": "Cancelled"}
 
 @app.get("/scan-handwritten/{job_id}/status")
 async def scan_status(job_id: str):
@@ -1663,6 +1689,7 @@ async def editor_chat(
                 output_dir=OUTPUT_DIR,
                 theme=current_theme,
                 job_id=f"{session_id}_v{turn}",
+                check_cancelled=lambda: _editor_jobs.get(job_id, {}).get("is_cancelled")
             )
             session["book"]  = result["updated_book"]
             session["theme"] = result["theme"]
@@ -1706,6 +1733,18 @@ async def editor_chat(
     threading.Thread(target=_run, daemon=True).start()
     return {"job_id": job_id, "state": "processing"}
 
+
+@app.post("/editor/{session_id}/job/{job_id}/cancel")
+async def editor_cancel(session_id: str, job_id: str):
+    job = _editor_jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, "Editor job not found.")
+    if job.get("state") in ("done", "error", "cancelled"):
+        raise HTTPException(400, "Job is already complete or cancelled.")
+    job["is_cancelled"] = True
+    job["state"] = "error"
+    job["error"] = "Cancelled by user"
+    return {"message": "Cancelled"}
 
 @app.get("/editor/{session_id}/job/{job_id}/status")
 async def editor_job_status(session_id: str, job_id: str):
@@ -1817,6 +1856,7 @@ def _run_translation_job(job_id: str, file_path: str, filename: str,
                 target_language=target_language,
                 source_language=source_language,
                 progress_callback=progress,
+                check_cancelled=lambda: _translate_jobs.get(job_id, {}).get("is_cancelled")
             )
             
             payload = {
@@ -1887,6 +1927,16 @@ async def translate_book_endpoint(
 
     return {"job_id": job_id, "status": "started"}
 
+
+@app.post("/translate/{job_id}/cancel")
+async def translate_cancel(job_id: str):
+    job = _translate_jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, "Translate job not found.")
+    if job.get("stage") in ("done", "error", "cancelled"):
+        raise HTTPException(400, "Job is already complete or cancelled.")
+    _translate_jobs.update_job(job_id, {"is_cancelled": True, "stage": "error", "error": "Cancelled by user"})
+    return {"message": "Cancelled"}
 
 @app.get("/translate/{job_id}/status")
 async def translate_status(job_id: str):
@@ -2052,6 +2102,7 @@ def _run_layout_job(
                 section_breaks=section_breaks,
                 front_matter=front_matter,
                 back_matter=back_matter,
+                check_cancelled=lambda: _layout_jobs.get(job_id, {}).get("is_cancelled")
             )
 
             payload = {
@@ -2226,6 +2277,16 @@ async def design_layout_endpoint(
 
     return {"job_id": job_id, "status": "started"}
 
+
+@app.post("/layout/{job_id}/cancel")
+async def layout_cancel(job_id: str):
+    job = _layout_jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, "Layout job not found.")
+    if job.get("stage") in ("done", "error", "cancelled"):
+        raise HTTPException(400, "Job is already complete or cancelled.")
+    _layout_jobs.update_job(job_id, {"is_cancelled": True, "stage": "error", "error": "Cancelled by user"})
+    return {"message": "Cancelled"}
 
 @app.get("/layout/{job_id}/status")
 async def layout_status(job_id: str):

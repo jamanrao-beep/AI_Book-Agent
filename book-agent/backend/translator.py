@@ -585,7 +585,8 @@ def _translate_chapter(
     target_language: str, 
     source_language: str, 
     book_title: str, 
-    glossary_map: dict
+    glossary_map: dict,
+    check_cancelled: Optional[Callable[[], bool]] = None
 ) -> dict:
     translated_title = _translate_title(chapter["title"], target_language, source_language)
 
@@ -617,6 +618,8 @@ def _translate_chapter(
     previous_chunk_tail = "" # NEW: Holds the last ~200 words of the previous chunk
     
     for chunk in chunks:
+        if check_cancelled and check_cancelled():
+            raise RuntimeError("Cancelled by user")
         translated_text = _translate_chunk_swarm(
             text_chunk=chunk, 
             target_language=target_language, 
@@ -1052,7 +1055,8 @@ def translate_book(
     output_dir: str, 
     target_language: str, 
     source_language: str = "", 
-    progress_callback: Optional[Callable[[str, int, str], None]] = None
+    progress_callback: Optional[Callable[[str, int, str], None]] = None,
+    check_cancelled: Optional[Callable[[], bool]] = None
 ) -> dict:
     
     def _progress(stage: str, pct: int, msg: str) -> None:
@@ -1084,6 +1088,8 @@ def translate_book(
         translated_chapters = []
 
         for idx, chapter in enumerate(structure["chapters"]):
+            if check_cancelled and check_cancelled():
+                raise RuntimeError("Cancelled by user")
             pct = 30 + int((idx / max(n_chapters, 1)) * 55)  # TR-8: guard ZeroDivisionError
             _progress("translating", pct, f'Translating chapter {idx + 1}/{n_chapters}: "{chapter["title"][:60]}"…')
             translated_chapters.append(
@@ -1092,7 +1098,8 @@ def translate_book(
                     target_language, 
                     detected_src, 
                     structure["title"], 
-                    global_glossary
+                    global_glossary,
+                    check_cancelled
                 )
             )
 

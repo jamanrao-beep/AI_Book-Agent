@@ -129,7 +129,7 @@ def calculate_chapters(num_pages: int, words_per_page: int) -> int:
     # A standard chapter is ~4 sections
     words_per_chapter = 4 * words_per_section
     chapters = max(3, total_words // words_per_chapter)
-    return min(chapters, 100)  # Cap at 100 chapters to prevent runaway generation
+    return min(chapters, 40)  # Cap at 40 chapters to prevent outliner hallucination on mass scale
 
 
 def update_story_bible(current_bible: str, new_content: str, book_title: str) -> str:
@@ -270,21 +270,41 @@ def _generate_one_section(
     at once when several sections of the same chapter are drafted in parallel.
     The caller is responsible for persisting the returned content.
     """
-    raw_draft = generate_section(
-        book_title       = book_title,
-        chapter_title    = chapter_title,
-        subheading       = subheading,
-        previous_summary = "",
-        word_count       = words_per_section,
-        writing_style    = safe_style,
-        story_bible      = story_bible,
-    )
-    return critique_and_revise(
-        draft        = raw_draft,
-        story_bible  = story_bible,
-        style        = safe_style,
-        target_words = words_per_section,
-    )
+    accumulated_draft = ""
+    words_generated = 0
+    attempts = 0
+    max_attempts = max(1, words_per_section // 400) + 5
+    
+    while words_generated < words_per_section and attempts < max_attempts:
+        attempts += 1
+        # Truncate previous summary to last 3000 words to avoid token limit overflow
+        previous_summary = " ".join(accumulated_draft.split()[-3000:])
+        
+        raw_draft = generate_section(
+            book_title       = book_title,
+            chapter_title    = chapter_title,
+            subheading       = subheading,
+            previous_summary = previous_summary,
+            word_count       = max(400, words_per_section - words_generated),
+            writing_style    = safe_style,
+            story_bible      = story_bible,
+        )
+        
+        revised_chunk = critique_and_revise(
+            draft        = raw_draft,
+            story_bible  = story_bible,
+            style        = safe_style,
+            target_words = max(400, words_per_section - words_generated),
+        )
+        
+        accumulated_draft += "\n\n" + revised_chunk
+        words_generated = len(accumulated_draft.split())
+        
+        if "[END OF SECTION]" in revised_chunk or "THE END" in revised_chunk:
+            if words_generated >= (words_per_section * 0.8): # Only accept early stop if we are at least 80% there
+                break
+                
+    return accumulated_draft.strip()
 
 
 # ─────────────────────────────────────────────────────────────────────────────

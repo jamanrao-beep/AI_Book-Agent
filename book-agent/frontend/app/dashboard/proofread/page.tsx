@@ -51,6 +51,7 @@ export default function ProofreadPage() {
   const [chunkProgress, setChunkProgress] = useState<{ done: number; total: number } | null>(null);
   const [result, setResult] = useState<ProofResult | null>(null);
   const [error, setError] = useState("");
+    const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabType>("summary");
   const [expandedErrors, setExpandedErrors] = useState<Set<string>>(new Set());
 
@@ -104,6 +105,7 @@ export default function ProofreadPage() {
       return;
     }
     setError("");
+        setActiveJobId(null);
     setFile(f);
     setResult(null);
   };
@@ -121,6 +123,7 @@ export default function ProofreadPage() {
     setElapsedSeconds(0);
     setChunkProgress(null);
     setError("");
+        setActiveJobId(null);
     setApplyGrammar(true);
     setApplyPunctuation(true);
     setApplyStyle(true);
@@ -641,7 +644,8 @@ export default function ProofreadPage() {
             </div>
 
             {/* Clear button */}
-            <button onClick={() => { setResult(null); setFile(null); setError(""); }}
+            <button onClick={() => { setResult(null); setFile(null); setError("");
+        setActiveJobId(null); }}
               className="btn-outline" style={{ marginTop: "24px" }}>
               ← Proofread another file
             </button>
