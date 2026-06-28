@@ -17,7 +17,7 @@ import {
     BookOpen,
     ChevronDown,
     Globe,
-    ArrowRight,
+    ChevronRight,
 } from "lucide-react";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -61,13 +61,13 @@ interface ProgressState {
 }
 
 const STAGE_META: Record<string, { label: string; color: string; icon: string }> = {
-    idle: { label: "Ready", color: "#888", icon: "⊙" },
-    extracting: { label: "Extracting", color: "#0369a1", icon: "◈" },
-    translating: { label: "Translating", color: "#2563eb", icon: "✦" },
-    structuring: { label: "Structuring", color: "#92400e", icon: "⚙" },
-    assembling: { label: "Assembling", color: "#c2410c", icon: "📐" },
-    done: { label: "Complete", color: "#047857", icon: "✓" },
-    error: { label: "Error", color: "#b91c1c", icon: "✕" },
+    idle: { label: "Ready", color: "var(--mist)", icon: "⊙" },
+    extracting: { label: "Extracting Files", color: "var(--violet)", icon: "◈" },
+    translating: { label: "Translating Content", color: "var(--sapphire)", icon: "✦" },
+    structuring: { label: "Structuring Index", color: "var(--amber)", icon: "⚙" },
+    assembling: { label: "Assembling Book", color: "var(--emerald)", icon: "📐" },
+    done: { label: "Complete", color: "var(--emerald)", icon: "✓" },
+    error: { label: "Error", color: "var(--crimson)", icon: "✕" },
 };
 
 function LanguageSelect({
@@ -100,77 +100,75 @@ function LanguageSelect({
 
     return (
         <div ref={wrapRef} style={{ position: "relative" }}>
-            <p style={{
-                fontSize: "10px", fontWeight: "700", letterSpacing: "0.1em",
-                textTransform: "uppercase", color: "#0c43bb", marginBottom: "8px",
-            }}>
+            <label className="field-label" style={{ color: accent, marginBottom: "8px" }}>
                 {label}
-            </p>
+            </label>
             <button
+                type="button"
                 onClick={() => setOpen(o => !o)}
                 style={{
                     width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
-                    background: open ? "#f7f2e4" : "white",
-                    border: `1px solid ${open ? accent : "#e8e8e4"}`,
-                    borderRadius: "8px", padding: "11px 14px",
-                    color: value ? "#2b2b2b" : "#888",
+                    background: open ? "var(--void)" : "var(--onyx)",
+                    border: `1.5px solid ${open ? accent : "var(--border-mid)"}`,
+                    borderRadius: "10px", padding: "11px 16px",
+                    color: value ? "var(--text-primary)" : "var(--ash)",
                     fontSize: "13px", fontWeight: value ? "600" : "400",
-                    cursor: "pointer", transition: "all 0.15s",
-                    fontFamily: "'DM Sans', sans-serif",
-                    boxShadow: open ? `0 0 0 3px ${accent}18` : "none",
+                    cursor: "pointer", transition: "all 0.2s",
+                    fontFamily: "inherit",
+                    boxShadow: open ? `0 0 0 3px rgba(37,99,235,0.08)` : "none",
                 }}
             >
                 <span style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                    <Globe size={14} color={value ? accent : "#888"} />
+                    <Globe size={14} color={value ? accent : "var(--ash)"} />
                     {value || "Select language…"}
                 </span>
                 <ChevronDown
                     size={14}
-                    color="#888"
+                    color="var(--ash)"
                     style={{ transform: open ? "rotate(180deg)" : "none", transition: "transform 0.2s" }}
                 />
             </button>
 
             {open && (
-                <div style={{
+                <div className="card" style={{
                     position: "absolute", top: "calc(100% + 6px)", left: 0, right: 0, zIndex: 100,
-                    background: "white", border: "1px solid #e8e8e4",
-                    borderRadius: "10px", overflow: "hidden",
-                    boxShadow: "0 8px 32px rgba(0,0,0,0.12)",
+                    background: "var(--onyx)", border: "1.5px solid var(--border-mid)",
+                    borderRadius: "12px", overflow: "hidden",
+                    boxShadow: "0 10px 30px rgba(0,0,0,0.08)",
                 }}>
-                    <div style={{ padding: "10px 10px 6px" }}>
+                    <div style={{ padding: "8px 8px 4px" }}>
                         <input
                             autoFocus
                             placeholder="Search languages…"
                             value={search}
                             onChange={e => setSearch(e.target.value)}
+                            className="input-field"
                             style={{
-                                width: "100%", background: "#f7f2e4", border: "1px solid #e8e8e4",
-                                borderRadius: "7px", padding: "8px 12px", color: "#2b2b2b", fontSize: "12px",
-                                outline: "none", boxSizing: "border-box", fontFamily: "'DM Sans', sans-serif",
+                                padding: "8px 12px", fontSize: "12px", borderRadius: "8px"
                             }}
                         />
                     </div>
-                    <div style={{ maxHeight: "200px", overflowY: "auto" }}>
+                    <div style={{ maxHeight: "200px", overflowY: "auto", padding: "4px" }}>
                         {filtered.map(lang => (
                             <div
                                 key={lang}
                                 onClick={() => { onChange(lang); setOpen(false); setSearch(""); }}
                                 style={{
-                                    padding: "9px 14px", fontSize: "13px", cursor: "pointer",
-                                    color: lang === value ? accent : "#2b2b2b",
-                                    background: lang === value ? `${accent}12` : "transparent",
-                                    fontWeight: lang === value ? "600" : "400",
-                                    transition: "all 0.1s",
+                                    padding: "8px 12px", fontSize: "13px", cursor: "pointer",
+                                    color: lang === value ? accent : "var(--text-primary)",
+                                    background: lang === value ? "var(--sapphire-dim)" : "transparent",
+                                    fontWeight: lang === value ? "700" : "500",
+                                    borderRadius: "6px",
+                                    transition: "all 0.15s",
                                 }}
-                                onMouseOver={e => { if (lang !== value) (e.currentTarget as HTMLDivElement).style.background = "#f7f2e4"; }}
-                                onMouseOut={e => { if (lang !== value) (e.currentTarget as HTMLDivElement).style.background = "transparent"; }}
+                                onMouseOver={e => { if (lang !== value) e.currentTarget.style.background = "var(--surface-hover)"; }}
+                                onMouseOut={e => { if (lang !== value) e.currentTarget.style.background = "transparent"; }}
                             >
                                 {lang}
                             </div>
                         ))}
                         {filtered.length === 0 && (
-                            <div style={{ padding: "16px", textAlign: "center", color: "#888", fontSize: "12px" }}>
+                            <div style={{ padding: "16px", textAlign: "center", color: "var(--text-tertiary)", fontSize: "12px" }}>
                                 No languages match "{search}"
                             </div>
                         )}
@@ -196,7 +194,7 @@ export default function TranslatePage() {
     const [result, setResult] = useState<TranslationResult | null>(null);
     const [error, setError] = useState("");
 
-    const ACCENT = "#2563eb";
+    const ACCENT = "var(--sapphire)";
 
     const isLoading = ["extracting", "translating", "structuring", "assembling"].includes(progress.stage);
 
@@ -256,469 +254,250 @@ export default function TranslatePage() {
         if (!file || !targetLang) return;
         setError("");
         setResult(null);
-        setProgress({ stage: "extracting", pct: 5, message: "Uploading file…" });
+        setProgress({ stage: "extracting", pct: 2, message: "Reading manuscript sections…" });
+        setElapsedSecs(0);
 
-        const uploadCtrl = new AbortController();
-        const uploadTimer = setTimeout(() => uploadCtrl.abort(), 120_000);
+        elapsedRef.current = setInterval(() => {
+            setElapsedSecs(s => s + 1);
+        }, 1000);
+
         try {
-            const form = new FormData();
-            form.append("file", file);
-            form.append("target_language", targetLang);
-            if (sourceLang) form.append("source_language", sourceLang);
+            const fd = new FormData();
+            fd.append("file", file);
+            fd.append("target_language", targetLang);
+            if (sourceLang) fd.append("source_language", sourceLang);
 
-            const res = await fetch(`${API_BASE}/translate`, {
-                method: "POST",
-                body: form,
-                signal: uploadCtrl.signal,
-            });
-            clearTimeout(uploadTimer);
+            const res = await fetch(`${API_BASE}/translate`, { method: "POST", body: fd });
             if (!res.ok) {
-                const err = await res.json().catch(() => ({}));
-                throw new Error(err.detail || `Server error ${res.status}`);
+                const errData = await res.json();
+                throw new Error(errData.detail || "Translation request rejected.");
             }
             const data = await res.json();
-            setProgress({ stage: "extracting", pct: 5, message: "Translation pipeline started…" });
-            setElapsedSecs(0);
-            if (elapsedRef.current) clearInterval(elapsedRef.current);
-            elapsedRef.current = setInterval(() => setElapsedSecs(s => s + 1), 1000);
             poll(data.job_id);
         } catch (e: unknown) {
-            clearTimeout(uploadTimer);
-            const msg = parseFriendlyError(e);
-            setError(msg);
-            setProgress({ stage: "error", pct: 0, message: msg });
+            setError(parseFriendlyError(e));
+            setProgress({ stage: "error", pct: 0, message: "" });
+            if (elapsedRef.current) clearInterval(elapsedRef.current);
         }
     };
 
-    const reset = () => {
-        if (pollRef.current) clearInterval(pollRef.current);
-        if (elapsedRef.current) clearInterval(elapsedRef.current);
-        setElapsedSecs(0);
+    const clearSession = () => {
+        setResult(null);
         setFile(null);
         setSourceLang("");
         setTargetLang("");
-        setResult(null);
         setError("");
         setProgress({ stage: "idle", pct: 0, message: "" });
+        if (pollRef.current) clearInterval(pollRef.current);
+        if (elapsedRef.current) clearInterval(elapsedRef.current);
     };
 
+    useEffect(() => {
+        return () => {
+            if (pollRef.current) clearInterval(pollRef.current);
+            if (elapsedRef.current) clearInterval(elapsedRef.current);
+        };
+    }, []);
+
     const stageMeta = STAGE_META[progress.stage] || STAGE_META.idle;
+    const formatTime = (totalSeconds: number) => {
+        const m = Math.floor(totalSeconds / 60);
+        const s = totalSeconds % 60;
+        return m > 0 ? `${m}m ${s}s` : `${s}s`;
+    };
 
     return (
-        <div style={{
-            minHeight: "100vh",
-            background: "#f7f2e4",
-            fontFamily: "'DM Sans', sans-serif",
-            color: "#2b2b2b",
-        }}>
+        <div style={{ minHeight: "100vh", background: "var(--void)", fontFamily: "'DM Sans', sans-serif", color: "var(--text-primary)", position: "relative" }}>
+            <div className="grid-overlay" />
 
             {/* Nav */}
-            <nav style={{
-                borderBottom: "1px solid #efefcf",
-                padding: "0 40px", height: "56px",
-                display: "flex", alignItems: "center", justifyContent: "space-between",
-                position: "sticky", top: 0, background: "white", zIndex: 50,
+            <nav className="glass" style={{
+                borderBottom: "1.5px solid var(--border-mid)",
+                padding: "0 40px", height: "60px",
+                display: "flex", alignItems: "center", gap: "16px",
+                position: "sticky", top: 0, zIndex: 50,
             }}>
-                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                    <div style={{
-                        width: "28px", height: "28px", background: "#1a1a1a",
-                        borderRadius: "6px", display: "flex", alignItems: "center", justifyContent: "center",
-                    }}>
-                        <FileText size={14} color="white" />
-                    </div>
-                    <span style={{ fontWeight: "700", fontSize: "15px", color: "#2a2929", letterSpacing: "-0.01em" }}>
-                        Publixo AI
-                    </span>
-                </div>
-                <button
-                    onClick={() => router.push("/dashboard")}
-                    style={{
-                        display: "flex", alignItems: "center", gap: "6px",
-                        background: "none", border: "1px solid #e8e8e4",
-                        borderRadius: "7px", padding: "6px 14px",
-                        color: "#555", fontSize: "13px", cursor: "pointer",
-                        fontFamily: "'DM Sans', sans-serif", fontWeight: "500",
-                        transition: "all 0.15s",
-                    }}
-                    onMouseOver={e => {
-                        (e.currentTarget as HTMLButtonElement).style.background = "#f7f2e4";
-                        (e.currentTarget as HTMLButtonElement).style.borderColor = "#d0d0cc";
-                    }}
-                    onMouseOut={e => {
-                        (e.currentTarget as HTMLButtonElement).style.background = "none";
-                        (e.currentTarget as HTMLButtonElement).style.borderColor = "#e8e8e4";
-                    }}
-                >
-                    <ArrowLeft size={14} /> Dashboard
+                <button onClick={() => router.push("/dashboard")} className="btn-ghost" style={{
+                    display: "flex", alignItems: "center", gap: "6px",
+                    padding: "6px 12px", fontSize: "12px", borderRadius: "8px"
+                }}>
+                    <ArrowLeft size={13} /> Dashboard
                 </button>
+                <span style={{ color: "var(--border-mid)" }}>|</span>
+                <div style={{ display: "flex", alignItems: "center", gap: "9px" }}>
+                    <div style={{ width: "28px", height: "28px", background: "var(--text-primary)", borderRadius: "6px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                        <Languages size={14} color="var(--void)" />
+                    </div>
+                    <span style={{ fontWeight: "800", fontSize: "14px", color: "var(--text-primary)" }}>Book Translator</span>
+                </div>
             </nav>
 
-            <main style={{ maxWidth: "780px", margin: "0 auto", padding: "56px 40px" }}>
-
+            <main style={{ maxWidth: "880px", margin: "0 auto", padding: "64px 32px 96px", position: "relative", zIndex: 2 }}>
+                
                 {/* Header */}
-                <div style={{ marginBottom: "44px" }}>
-                    <div style={{
-                        display: "inline-flex", alignItems: "center", gap: "6px",
-                        background: "white", border: "1px solid #e8e8e4",
-                        borderRadius: "20px", padding: "4px 14px",
-                        fontSize: "10px", fontWeight: "700", letterSpacing: "0.1em",
-                        color: ACCENT, marginBottom: "18px",
-                    }}>
-                        <Sparkles size={11} /> AI TRANSLATOR
+                <div style={{ marginBottom: "40px" }}>
+                    <div style={{ display: "inline-flex", alignItems: "center", gap: "6px", background: "var(--onyx)", border: "1.5px solid var(--border-mid)", borderRadius: "20px", padding: "4px 14px", fontSize: "10px", fontWeight: "700", letterSpacing: "0.1em", color: "var(--sapphire)", marginBottom: "16px", boxShadow: "0 4px 10px rgba(0,0,0,0.02)" }}>
+                        <Sparkles size={10} /> MULTILINGUAL TRANSLATION AGENT
                     </div>
-                    <h1 style={{
-                        fontSize: "42px", fontWeight: "800", letterSpacing: "-0.03em",
-                        fontFamily: "'Playfair Display', serif", lineHeight: "1.1",
-                        marginBottom: "10px", color: "#2d2c2c",
-                    }}>
-                        Book Translator
+                    <h1 className="serif" style={{ fontSize: "40px", fontWeight: "400", letterSpacing: "-0.02em", marginBottom: "10px", color: "var(--text-primary)" }}>
+                        Translate Your Book
                     </h1>
-                    <p style={{ color: "#666", fontSize: "15px", lineHeight: "1.6" }}>
-                        Upload any book in PDF, DOCX, or ZIP — AI translates every chapter and delivers a clean, structured export in your target language.
+                    <p style={{ color: "var(--text-secondary)", fontSize: "15px", lineHeight: "1.6" }}>
+                        Preserve full document layouts, markdown styles, and chapter structures automatically. AI translates manuscripts into 100+ languages sequentially.
                     </p>
                 </div>
 
                 {!result ? (
-                    <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: "28px", alignItems: "start" }}>
+                        
+                        {/* Left panel: upload */}
+                        <div>
+                            <div
+                                onDragOver={e => { e.preventDefault(); setDragging(true); }}
+                                onDragLeave={() => setDragging(false)}
+                                onDrop={handleDrop}
+                                onClick={() => !file && fileInputRef.current?.click()}
+                                style={{
+                                    border: `2px dashed ${dragging ? "var(--sapphire)" : file ? "rgba(37,99,235,0.4)" : "var(--border-strong)"}`,
+                                    borderRadius: "20px", padding: "48px 32px",
+                                    background: dragging ? "rgba(37, 99, 235, 0.05)" : file ? "rgba(37, 99, 235, 0.02)" : "var(--onyx)",
+                                    cursor: file ? "default" : "pointer", textAlign: "center",
+                                    transition: "all 0.25s cubic-bezier(0.16, 1, 0.3, 1)", marginBottom: "20px",
+                                }}
+                            >
+                                <input ref={fileInputRef} type="file" accept=".pdf,.docx,.zip" style={{ display: "none" }}
+                                    onChange={e => e.target.files?.[0] && addFile(e.target.files[0])} />
 
-                        {/* Drop zone */}
-                        <div
-                            onDragOver={e => { e.preventDefault(); setDragging(true); }}
-                            onDragLeave={() => setDragging(false)}
-                            onDrop={handleDrop}
-                            onClick={() => !file && fileInputRef.current?.click()}
-                            style={{
-                                background: dragging ? `${ACCENT}08` : "white",
-                                border: `1.5px dashed ${dragging ? ACCENT : file ? ACCENT + "66" : "#d0d0cc"}`,
-                                borderRadius: "12px",
-                                padding: file ? "20px 24px" : "48px 24px",
-                                cursor: file ? "default" : "pointer",
-                                transition: "all 0.2s",
-                                boxShadow: dragging ? `0 0 0 4px ${ACCENT}14` : "none",
-                            }}
-                        >
-                            <input
-                                ref={fileInputRef}
-                                type="file"
-                                accept=".pdf,.docx,.zip"
-                                style={{ display: "none" }}
-                                onChange={e => { if (e.target.files?.[0]) addFile(e.target.files[0]); }}
-                            />
+                                {file ? (
+                                    <div>
+                                        <div style={{ width: "56px", height: "56px", margin: "0 auto 16px", background: "var(--void)", border: "1.5px solid var(--border-mid)", borderRadius: "14px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                                            <FileText size={22} color="var(--sapphire)" />
+                                        </div>
+                                        <p style={{ fontWeight: "700", fontSize: "15px", marginBottom: "4px", color: "var(--text-primary)" }}>{file.name}</p>
+                                        <p style={{ color: "var(--text-tertiary)", fontSize: "12px", marginBottom: "12px" }}>{(file.size / 1024 / 1024).toFixed(2)} MB</p>
+                                        <button onClick={e => { e.stopPropagation(); setFile(null); }} className="btn-ghost" style={{ padding: "6px 14px", fontSize: "12px", borderRadius: "8px", background: "rgba(239,68,68,0.05)", color: "var(--crimson)", border: "none" }}>
+                                            Remove file
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <div>
+                                        <div style={{ width: "56px", height: "56px", margin: "0 auto 16px", background: "var(--void)", border: "1.5px solid var(--border-mid)", borderRadius: "14px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                                            <Upload size={22} color="var(--sapphire)" />
+                                        </div>
+                                        <p style={{ fontWeight: "700", fontSize: "15px", marginBottom: "6px", color: "var(--text-primary)" }}>Drop book file here</p>
+                                        <p style={{ color: "var(--text-tertiary)", fontSize: "13px" }}>PDF, DOCX, ZIP · max 150 MB</p>
+                                    </div>
+                                )}
+                            </div>
 
-                            {!file ? (
-                                <div style={{ textAlign: "center" }}>
-                                    <div style={{
-                                        width: "48px", height: "48px",
-                                        background: "#f7f2e4", border: "1px solid #e8e8e4",
-                                        borderRadius: "12px", display: "flex", alignItems: "center",
-                                        justifyContent: "center", margin: "0 auto 16px",
-                                    }}>
-                                        <Upload size={20} color={ACCENT} />
-                                    </div>
-                                    <p style={{ fontSize: "14px", fontWeight: "600", marginBottom: "6px", color: "#2b2b2b" }}>
-                                        Drop your book here, or <span style={{ color: ACCENT }}>browse</span>
-                                    </p>
-                                    <p style={{ fontSize: "12px", color: "#888" }}>PDF · DOCX · ZIP — up to 150 MB</p>
-                                </div>
-                            ) : (
-                                <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
-                                    <div style={{
-                                        width: "44px", height: "44px", background: "#f7f2e4",
-                                        border: "1px solid #e8e8e4", borderRadius: "10px",
-                                        display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
-                                    }}>
-                                        <BookOpen size={20} color={ACCENT} />
-                                    </div>
-                                    <div style={{ flex: 1, minWidth: 0 }}>
-                                        <p style={{ fontWeight: "600", fontSize: "13px", marginBottom: "2px", color: "#2b2b2b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                                            {file.name}
-                                        </p>
-                                        <p style={{ fontSize: "11px", color: "#888" }}>
-                                            {(file.size / 1024 / 1024).toFixed(2)} MB
-                                        </p>
-                                    </div>
-                                    <button
-                                        onClick={e => { e.stopPropagation(); setFile(null); setError(""); }}
-                                        style={{
-                                            width: "28px", height: "28px", borderRadius: "7px",
-                                            background: "#fff0f0", border: "1px solid #fcd5d5",
-                                            display: "flex", alignItems: "center", justifyContent: "center",
-                                            cursor: "pointer", flexShrink: 0,
-                                        }}
-                                    >
-                                        <X size={13} color="#b91c1c" />
-                                    </button>
+                            {error && (
+                                <div style={{ background: "rgba(239,68,68,0.06)", border: "1px solid rgba(239,68,68,0.18)", borderRadius: "10px", padding: "12px 16px", color: "var(--crimson)", fontSize: "13px", marginBottom: "16px" }}>
+                                    {error}
                                 </div>
                             )}
                         </div>
 
-                        {/* Language selectors */}
-                        <div style={{
-                            background: "white", border: "1px solid #e8e8e4",
-                            borderRadius: "12px", padding: "24px",
-                        }}>
-                            <p style={{ fontSize: "10px", fontWeight: "700", letterSpacing: "0.1em", textTransform: "uppercase", color: "#0c43bb", marginBottom: "20px" }}>
-                                Translation Settings
-                            </p>
-                            <div style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr", gap: "16px", alignItems: "end" }}>
-                                <LanguageSelect value={sourceLang} onChange={setSourceLang} label="From (leave blank to auto-detect)" accent={ACCENT} />
-                                <div style={{ paddingBottom: "2px", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-end" }}>
-                                    <div style={{
-                                        width: "36px", height: "36px", borderRadius: "50%",
-                                        background: "#f7f2e4", border: "1px solid #e8e8e4",
-                                        display: "flex", alignItems: "center", justifyContent: "center",
-                                    }}>
-                                        <ArrowRight size={16} color={ACCENT} />
+                        {/* Right panel: options + progress */}
+                        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                            <LanguageSelect label="Source Language (Optional)" value={sourceLang} onChange={setSourceLang} accent={ACCENT} />
+                            <LanguageSelect label="Target Language" value={targetLang} onChange={setTargetLang} accent={ACCENT} />
+
+                            {isLoading && (
+                                <div className="card pulse-glow" style={{ background: "var(--onyx)", border: "1.5px solid rgba(37,99,235,0.25)", borderRadius: "14px", padding: "20px" }}>
+                                    <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "12px" }}>
+                                        <Loader size={16} style={{ color: "var(--sapphire)", animation: "spin 1.2s linear infinite" }} />
+                                        <div style={{ flex: 1 }}>
+                                            <span style={{ fontSize: "13px", fontWeight: "700", color: "var(--text-primary)" }}>{stageMeta.label}</span>
+                                            <p style={{ fontSize: "11px", color: "var(--text-tertiary)", marginTop: "2px" }}>{progress.message}</p>
+                                        </div>
+                                        <span className="serif" style={{ fontSize: "22px", color: "var(--text-primary)" }}>{progress.pct}%</span>
+                                    </div>
+                                    <div className="progress-bar">
+                                        <div className="progress-fill" style={{ width: `${progress.pct}%`, background: "var(--sapphire)" }} />
+                                    </div>
+                                    <div style={{ display: "flex", justifyContent: "space-between", marginTop: "10px", fontSize: "11px", color: "var(--text-tertiary)" }}>
+                                        <span>Elapsed: {formatTime(elapsedSecs)}</span>
+                                        <span>Processing blocks...</span>
                                     </div>
                                 </div>
-                                <LanguageSelect value={targetLang} onChange={setTargetLang} label="To (required)" accent={ACCENT} />
-                            </div>
+                            )}
 
-                            {sourceLang && targetLang && (
-                                <div style={{
-                                    marginTop: "16px", padding: "10px 14px",
-                                    background: `${ACCENT}08`, border: `1px solid ${ACCENT}25`,
-                                    borderRadius: "8px", fontSize: "12px", color: ACCENT,
-                                    display: "flex", alignItems: "center", gap: "8px",
-                                }}>
-                                    <Languages size={13} />
-                                    Translating <strong>{sourceLang}</strong> → <strong>{targetLang}</strong>
-                                </div>
-                            )}
-                            {!sourceLang && targetLang && (
-                                <div style={{
-                                    marginTop: "16px", padding: "10px 14px",
-                                    background: `${ACCENT}08`, border: `1px solid ${ACCENT}25`,
-                                    borderRadius: "8px", fontSize: "12px", color: ACCENT,
-                                    display: "flex", alignItems: "center", gap: "8px",
-                                }}>
-                                    <Sparkles size={13} />
-                                    Source language will be <strong>auto-detected</strong> → <strong>{targetLang}</strong>
-                                </div>
-                            )}
+                            <button onClick={handleSubmit} disabled={!file || !targetLang || isLoading} className="btn-dark" style={{
+                                justifyContent: "center", padding: "13px 24px", fontSize: "14px", borderRadius: "12px",
+                                background: !file || !targetLang || isLoading ? "rgba(0,0,0,0.04)" : "var(--text-primary)",
+                                color: !file || !targetLang || isLoading ? "var(--ash)" : "var(--void)", border: "none",
+                                opacity: !file || !targetLang || isLoading ? 0.6 : 1,
+                            }}>
+                                {isLoading ? (
+                                    <><Loader size={15} style={{ animation: "spin 1s linear infinite" }} /> Translating manuscript…</>
+                                ) : (
+                                    <><Languages size={16} /> Translate Document</>
+                                )}
+                            </button>
                         </div>
-
-                        {/* Error */}
-                        {error && (
-                            <div style={{
-                                background: "#fff0f0", border: "1px solid #fcd5d5",
-                                borderRadius: "10px", padding: "12px 16px",
-                                fontSize: "13px", color: "#b91c1c",
-                                display: "flex", alignItems: "flex-start", gap: "10px",
-                            }}>
-                                <X size={15} style={{ flexShrink: 0, marginTop: "1px" }} /> {error}
-                            </div>
-                        )}
-
-                        {/* Progress */}
-                        {isLoading && (
-                            <div style={{
-                                background: "white", border: "1px solid #e8e8e4",
-                                borderRadius: "12px", padding: "18px 20px",
-                            }}>
-                                <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "12px" }}>
-                                    <Loader size={15} style={{ color: stageMeta.color, animation: "spin 1.2s linear infinite", flexShrink: 0 }} />
-                                    <div style={{ flex: 1 }}>
-                                        <p style={{ fontSize: "13px", fontWeight: "600", color: stageMeta.color }}>{stageMeta.label}</p>
-                                        <p style={{ fontSize: "11px", color: "#888", marginTop: "2px" }}>{progress.message}</p>
-                                    </div>
-                                    <span style={{
-                                        fontFamily: "'Playfair Display', serif",
-                                        fontSize: "22px", fontWeight: "800",
-                                        color: "#2b2b2b", letterSpacing: "-0.02em",
-                                    }}>
-                                        {progress.pct}%
-                                    </span>
-                                </div>
-                                <div style={{ height: "3px", background: "#e8e8e4", borderRadius: "3px", overflow: "hidden" }}>
-                                    <div style={{
-                                        height: "100%", width: `${progress.pct}%`,
-                                        background: `linear-gradient(90deg, ${ACCENT}, ${stageMeta.color})`,
-                                        borderRadius: "3px", transition: "width 0.8s ease",
-                                    }} />
-                                </div>
-                                <p style={{ fontSize: "11px", color: "#888", marginTop: "10px" }}>
-                                    {elapsedSecs > 0
-                                        ? `${elapsedSecs >= 60 ? `${Math.floor(elapsedSecs / 60)}m ${elapsedSecs % 60}s` : `${elapsedSecs}s`} elapsed — large books take 10–40 min, please keep this tab open.`
-                                        : "Large books can take 10–40 min — please keep this tab open."}
-                                </p>
-                            </div>
-                        )}
-
-                        {/* Submit */}
-                        <button
-                            onClick={handleSubmit}
-                            disabled={!file || !targetLang || isLoading}
-                            style={{
-                                background: !file || !targetLang || isLoading ? "#e8e8e4" : "#1a1a1a",
-                                border: "none", borderRadius: "10px", padding: "14px 24px",
-                                color: !file || !targetLang || isLoading ? "#aaa" : "white",
-                                fontSize: "14px", fontWeight: "700",
-                                cursor: !file || !targetLang || isLoading ? "not-allowed" : "pointer",
-                                display: "flex", alignItems: "center", justifyContent: "center", gap: "10px",
-                                transition: "all 0.2s", letterSpacing: "0.01em",
-                                fontFamily: "'DM Sans', sans-serif",
-                            }}
-                        >
-                            {isLoading ? (
-                                <><Loader size={16} style={{ animation: "spin 1s linear infinite" }} /> Translating…</>
-                            ) : (
-                                <><Languages size={16} /> Translate Book</>
-                            )}
-                        </button>
                     </div>
-
                 ) : (
-                    /* Results */
+                    /* Results panel */
                     <div style={{ animation: "fadeInUp 0.4s ease" }}>
-
-                        {/* Success banner */}
-                        <div style={{
-                            display: "flex", alignItems: "center", gap: "14px",
-                            background: "white", border: "1px solid #e8e8e4",
-                            borderRadius: "12px", padding: "18px 22px", marginBottom: "16px",
-                        }}>
-                            <div style={{
-                                width: "44px", height: "44px", background: "#f7f2e4",
-                                border: "1px solid #e8e8e4", borderRadius: "10px",
-                                display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
-                            }}>
-                                <CheckCircle size={22} color="#047857" />
+                        <div className="card" style={{ display: "flex", alignItems: "center", gap: "16px", background: "var(--onyx)", border: "1.5px solid var(--border-mid)", borderRadius: "16px", padding: "20px 24px", marginBottom: "28px" }}>
+                            <div style={{ width: "44px", height: "44px", background: "rgba(16,185,129,0.06)", border: "1px solid rgba(16,185,129,0.15)", borderRadius: "11px", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                                <CheckCircle size={22} color="var(--emerald)" />
                             </div>
                             <div style={{ flex: 1 }}>
-                                <p style={{
-                                    fontWeight: "800", fontSize: "16px", letterSpacing: "-0.02em",
-                                    color: "#2b2b2b", fontFamily: "'Playfair Display', serif",
-                                }}>
-                                    {result.title}
-                                </p>
-                                <p style={{ color: "#888", fontSize: "12px", marginTop: "3px" }}>
-                                    Translation complete · {result.source_language} → {result.target_language}
+                                <h3 className="serif" style={{ fontSize: "20px", color: "var(--text-primary)" }}>{result.title}</h3>
+                                <p style={{ color: "var(--text-secondary)", fontSize: "12px", marginTop: "4px" }}>
+                                    Translated successfully from {result.source_language || "Detect"} into {result.target_language}
                                 </p>
                             </div>
                             <div style={{ display: "flex", gap: "8px", flexShrink: 0 }}>
-                                <a
-                                    href={`${API_BASE}/translate/${result.job_id}/download/pdf`}
-                                    target="_blank" rel="noopener noreferrer"
-                                    style={{
-                                        display: "flex", alignItems: "center", gap: "6px",
-                                        background: "#1a1a1a", border: "none",
-                                        borderRadius: "8px", padding: "9px 16px",
-                                        color: "white", fontSize: "13px", fontWeight: "600",
-                                        textDecoration: "none", transition: "all 0.15s",
-                                    }}
-                                    onMouseOver={e => { e.currentTarget.style.background = "#333"; }}
-                                    onMouseOut={e => { e.currentTarget.style.background = "#1a1a1a"; }}
-                                >
+                                <a href={`${API_BASE}/translate/${result.job_id}/download/pdf`} target="_blank" rel="noopener noreferrer" className="btn-dark" style={{ padding: "10px 18px", fontSize: "13px", borderRadius: "10px", textDecoration: "none" }}>
                                     <Download size={13} /> PDF
                                 </a>
-                                <a
-                                    href={`${API_BASE}/translate/${result.job_id}/download/docx`}
-                                    target="_blank" rel="noopener noreferrer"
-                                    style={{
-                                        display: "flex", alignItems: "center", gap: "6px",
-                                        background: "white", border: "1px solid #e8e8e4",
-                                        borderRadius: "8px", padding: "9px 16px",
-                                        color: "#2b2b2b", fontSize: "13px", fontWeight: "600",
-                                        textDecoration: "none", transition: "all 0.15s",
-                                    }}
-                                    onMouseOver={e => { e.currentTarget.style.background = "#f7f2e4"; e.currentTarget.style.borderColor = "#d0d0cc"; }}
-                                    onMouseOut={e => { e.currentTarget.style.background = "white"; e.currentTarget.style.borderColor = "#e8e8e4"; }}
-                                >
+                                <a href={`${API_BASE}/translate/${result.job_id}/download/docx`} target="_blank" rel="noopener noreferrer" className="btn-outline" style={{ padding: "9px 18px", fontSize: "13px", borderRadius: "10px", textDecoration: "none" }}>
                                     <Download size={13} /> DOCX
                                 </a>
                             </div>
                         </div>
 
-                        {/* Stats */}
-                        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "12px", marginBottom: "16px" }}>
+                        {/* Stats grid */}
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "16px", marginBottom: "32px" }}>
                             {[
-                                { icon: <Globe size={16} color={ACCENT} />, label: "SOURCE", value: result.source_language },
-                                { icon: <Languages size={16} color={ACCENT} />, label: "TARGET", value: result.target_language },
-                                { icon: <AlignLeft size={16} color={ACCENT} />, label: "WORDS", value: result.total_words.toLocaleString() },
-                                { icon: <BookOpen size={16} color={ACCENT} />, label: "CHAPTERS", value: result.chapters.toString() },
+                                { icon: <Languages size={16} color="var(--sapphire)" />, label: "Languages", value: `${result.source_language || "Detect"} → ${result.target_language}` },
+                                { icon: <AlignLeft size={16} color="var(--sapphire)" />, label: "Translated Words", value: result.total_words.toLocaleString() },
+                                { icon: <BookOpen size={16} color="var(--sapphire)" />, label: "Total Chapters", value: result.chapters.toString() },
                             ].map(s => (
-                                <div key={s.label} style={{
-                                    background: "white", border: "1px solid #e8e8e4",
-                                    borderRadius: "10px", padding: "16px",
-                                }}>
-                                    <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "8px" }}>
+                                <div key={s.label} className="card" style={{ background: "var(--onyx)", border: "1.5px solid var(--border-mid)", padding: "20px" }}>
+                                    <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "10px" }}>
                                         {s.icon}
-                                        <span style={{ fontSize: "9px", fontWeight: "700", letterSpacing: "0.1em", color: "#0c43bb" }}>{s.label}</span>
+                                        <span className="field-label" style={{ margin: 0 }}>{s.label}</span>
                                     </div>
-                                    <div style={{
-                                        fontSize: "15px", fontWeight: "800", color: "#2b2b2b",
-                                        letterSpacing: "-0.02em", fontFamily: "'Playfair Display', serif",
-                                    }}>
-                                        {s.value}
-                                    </div>
+                                    <div className="serif" style={{ fontSize: "22px", color: "var(--text-primary)" }}>{s.value}</div>
                                 </div>
                             ))}
                         </div>
 
-                        {/* Chapter list */}
+                        {/* Chapters list */}
                         {result.chapter_titles.length > 0 && (
-                            <div style={{
-                                background: "white", border: "1px solid #e8e8e4",
-                                borderRadius: "12px", padding: "20px", marginBottom: "20px",
-                            }}>
-                                <p style={{ fontSize: "10px", fontWeight: "700", letterSpacing: "0.1em", textTransform: "uppercase", color: "#0c43bb", marginBottom: "14px" }}>
-                                    Translated Chapters ({result.chapters})
-                                </p>
-                                <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                            <div className="card" style={{ background: "var(--onyx)", border: "1.5px solid var(--border-mid)", padding: "24px", marginBottom: "32px" }}>
+                                <p className="field-label" style={{ color: "var(--sapphire)", marginBottom: "16px" }}>Translated Chapters ({result.chapters})</p>
+                                <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                                     {result.chapter_titles.map((title, i) => (
-                                        <div key={i} style={{
-                                            display: "flex", alignItems: "center", gap: "10px",
-                                            padding: "8px 12px", background: "#f7f2e4",
-                                            border: "1px solid #e8e8e4", borderRadius: "8px",
-                                        }}>
-                                            <span style={{
-                                                width: "24px", height: "24px", borderRadius: "6px",
-                                                background: "#1a1a1a",
-                                                display: "flex", alignItems: "center", justifyContent: "center",
-                                                fontSize: "11px", fontWeight: "700", color: "white", flexShrink: 0,
-                                            }}>
-                                                {i + 1}
-                                            </span>
-                                            <span style={{ fontSize: "13px", color: "#2b2b2b", flex: 1 }}>{title}</span>
-                                            <Hash size={12} color="#888" />
+                                        <div key={i} style={{ display: "flex", alignItems: "center", gap: "12px", padding: "10px 16px", background: "var(--void)", border: "1px solid var(--border-mid)", borderRadius: "10px" }}>
+                                            <span style={{ width: "24px", height: "24px", borderRadius: "6px", background: "var(--text-primary)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "11px", fontWeight: "700", color: "var(--void)", flexShrink: 0 }}>{i + 1}</span>
+                                            <span style={{ fontSize: "13px", color: "var(--text-primary)", fontWeight: "600", flex: 1 }}>{title}</span>
+                                            <ChevronRight size={13} color="var(--text-tertiary)" style={{ opacity: 0.6 }} />
                                         </div>
                                     ))}
                                 </div>
                             </div>
                         )}
 
-                        <button
-                            onClick={reset}
-                            style={{
-                                background: "none", border: "1px solid #e8e8e4",
-                                borderRadius: "8px", padding: "10px 20px",
-                                color: "#555", fontSize: "13px", cursor: "pointer",
-                                fontFamily: "'DM Sans', sans-serif", fontWeight: "500",
-                                transition: "all 0.15s",
-                            }}
-                            onMouseOver={e => {
-                                (e.currentTarget as HTMLButtonElement).style.background = "#f7f2e4";
-                                (e.currentTarget as HTMLButtonElement).style.borderColor = "#d0d0cc";
-                            }}
-                            onMouseOut={e => {
-                                (e.currentTarget as HTMLButtonElement).style.background = "none";
-                                (e.currentTarget as HTMLButtonElement).style.borderColor = "#e8e8e4";
-                            }}
-                        >
+                        <button onClick={clearSession} className="btn-outline" style={{ padding: "10px 20px", fontSize: "13px" }}>
                             ← Translate another book
                         </button>
                     </div>
                 )}
             </main>
-
-            <style>{`
-                @keyframes spin { to { transform: rotate(360deg); } }
-                @keyframes fadeInUp { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:translateY(0); } }
-                input::placeholder { color: #888; }
-                ::-webkit-scrollbar { width: 3px; }
-                ::-webkit-scrollbar-thumb { background: #e8e8e4; border-radius: 2px; }
-            `}</style>
         </div>
     );
 }

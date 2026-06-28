@@ -1,5 +1,5 @@
 "use client";
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { parseFriendlyError } from "@/lib/api";
 import {
@@ -88,15 +88,7 @@ async function designCover(
             const err = await res.json().catch(() => ({ detail: "Unknown error" }));
             throw new Error(err.detail || `Server error ${res.status}`);
         }
-        return res.json();
-    } catch (err: unknown) {
-        if (err instanceof Error && err.name === "AbortError") {
-            throw new Error(
-                "Cover design timed out after 5 minutes. " +
-                "The Nano Banana image cluster may be busy — please try again."
-            );
-        }
-        throw err;
+        return res.ok ? res.json() : Promise.reject("Server error");
     } finally {
         clearTimeout(timer);
     }
@@ -105,75 +97,109 @@ async function designCover(
 function CoverPreview({ concept }: { concept: CoverConcept }) {
     const pal = concept.palette;
     const titleLines = concept.title.split("\n");
+    const coverRef = useRef<HTMLDivElement>(null);
+
+    const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+        if (!coverRef.current) return;
+        const cover = coverRef.current;
+        const rect = cover.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        const xc = rect.width / 2;
+        const yc = rect.height / 2;
+        const angleY = (x - xc) / 6; // Y rotation (tilt side to side)
+        const angleX = (yc - y) / 12; // X rotation (tilt up and down)
+        cover.style.transform = `perspective(1000px) rotateY(${angleY}deg) rotateX(${angleX}deg) scale(1.06)`;
+        cover.style.boxShadow = `${-angleY - 18}px 25px 45px rgba(0, 0, 0, 0.26)`;
+    };
+
+    const handleMouseLeave = () => {
+        if (!coverRef.current) return;
+        const cover = coverRef.current;
+        cover.style.transform = "perspective(1000px) rotateY(-12deg) rotateX(4deg) scale(1)";
+        cover.style.boxShadow = "-15px 20px 40px rgba(0,0,0,0.18)";
+    };
 
     return (
-        <div
-            style={{
-                width: "220px",
-                height: "310px",
-                borderRadius: "6px",
-                background: `linear-gradient(160deg, ${pal.bg_primary ?? pal.bg_top} 0%, ${pal.bg_secondary ?? pal.bg_bottom} 100%)`,
-                position: "relative",
-                overflow: "hidden",
-                flexShrink: 0,
-                boxShadow: "0 20px 60px rgba(0,0,0,0.18)",
-            }}
-        >
-            <div style={{ position: "absolute", left: 0, top: 0, width: "5px", height: "100%", background: pal.accent }} />
-            {concept.genre_label && (
-                <div
-                    style={{
-                        position: "absolute", top: "16px", left: "18px",
-                        fontSize: "7px", fontWeight: "800", letterSpacing: "0.12em",
-                        color: pal.accent, background: `${pal.accent}22`,
-                        border: `1px solid ${pal.accent}44`, borderRadius: "3px", padding: "2px 6px",
-                    }}
-                >
-                    {concept.genre_label}
-                </div>
-            )}
-            <div style={{ position: "absolute", right: "-10px", bottom: "60px", width: "100px", height: "100px", borderRadius: "50%", border: `1px solid ${pal.accent}33` }} />
-            <div style={{ position: "absolute", right: "10px", bottom: "40px", width: "60px", height: "60px", borderRadius: "50%", border: `1px solid ${pal.accent}44` }} />
-            <div style={{ position: "absolute", left: "18px", top: "80px", right: "12px" }}>
-                {titleLines.map((line, i) => (
-                    <div
-                        key={i}
-                        style={{
-                            fontSize: line.length > 18 ? "14px" : "18px",
-                            fontWeight: "800",
-                            color: pal.title_color,
-                            lineHeight: 1.2,
-                            fontFamily: "'Playfair Display', Georgia, serif",
-                        }}
-                    >
-                        {line.trim()}
-                    </div>
-                ))}
-                <div style={{ width: "32px", height: "2.5px", background: pal.accent, margin: "8px 0" }} />
-                {concept.subtitle && (
-                    <div style={{ fontSize: "8px", color: pal.subtitle_color, lineHeight: 1.4, marginBottom: "6px" }}>
-                        {concept.subtitle}
-                    </div>
-                )}
-                {concept.tagline && (
-                    <div style={{ fontSize: "7px", fontStyle: "italic", color: pal.tagline_color, lineHeight: 1.5 }}>
-                        {concept.tagline.length > 70 ? concept.tagline.slice(0, 70) + "…" : concept.tagline}
-                    </div>
-                )}
-            </div>
+        <div style={{ perspective: "1000px", padding: "10px 0" }}>
             <div
+                ref={coverRef}
+                onMouseMove={handleMouseMove}
+                onMouseLeave={handleMouseLeave}
                 style={{
-                    position: "absolute", bottom: 0, left: 0, right: 0, height: "36px",
-                    background: "rgba(0,0,0,0.35)", display: "flex", alignItems: "center",
-                    padding: "0 18px", justifyContent: "space-between",
+                    width: "220px",
+                    height: "310px",
+                    borderRadius: "4px 10px 10px 4px",
+                    background: `linear-gradient(160deg, ${pal.bg_primary ?? pal.bg_top} 0%, ${pal.bg_secondary ?? pal.bg_bottom} 100%)`,
+                    position: "relative",
+                    overflow: "hidden",
+                    flexShrink: 0,
+                    transform: "perspective(1000px) rotateY(-12deg) rotateX(4deg)",
+                    transformStyle: "preserve-3d",
+                    transition: "transform 0.15s ease-out, box-shadow 0.15s ease",
+                    boxShadow: "-15px 20px 40px rgba(0,0,0,0.18)",
+                    border: "1px solid rgba(0,0,0,0.06)",
+                    cursor: "pointer",
                 }}
             >
-                {concept.author_line && (
-                    <span style={{ fontSize: "7px", color: "rgba(255,255,255,0.7)" }}>{concept.author_line}</span>
+                {/* Spine Edge Shadow */}
+                <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: "10px", background: "linear-gradient(90deg, rgba(0,0,0,0.22) 0%, transparent 100%)", zIndex: 10 }} />
+                
+                {concept.genre_label && (
+                    <div
+                        style={{
+                            position: "absolute", top: "16px", left: "18px",
+                            fontSize: "7px", fontWeight: "800", letterSpacing: "0.12em",
+                            color: pal.accent, background: `${pal.accent}22`,
+                            border: `1px solid ${pal.accent}44`, borderRadius: "3px", padding: "2px 6px",
+                        }}
+                    >
+                        {concept.genre_label}
+                    </div>
                 )}
-                <span style={{ fontSize: "6px", fontWeight: "700", color: pal.accent, marginLeft: "auto", letterSpacing: "0.1em" }}>
-                    NANO BANANA AI 🍌
-                </span>
+                <div style={{ position: "absolute", right: "-10px", bottom: "60px", width: "100px", height: "100px", borderRadius: "50%", border: `1px solid ${pal.accent}33` }} />
+                <div style={{ position: "absolute", right: "10px", bottom: "40px", width: "60px", height: "60px", borderRadius: "50%", border: `1px solid ${pal.accent}44` }} />
+                <div style={{ position: "absolute", left: "18px", top: "80px", right: "12px" }}>
+                    {titleLines.map((line, i) => (
+                        <div
+                            key={i}
+                            style={{
+                                fontSize: line.length > 18 ? "14px" : "18px",
+                                fontWeight: "800",
+                                color: pal.title_color,
+                                lineHeight: 1.2,
+                                fontFamily: "'Playfair Display', Georgia, serif",
+                            }}
+                        >
+                            {line.trim()}
+                        </div>
+                    ))}
+                    <div style={{ width: "32px", height: "2.5px", background: pal.accent, margin: "8px 0" }} />
+                    {concept.subtitle && (
+                        <div style={{ fontSize: "8px", color: pal.subtitle_color, lineHeight: 1.4, marginBottom: "6px" }}>
+                            {concept.subtitle}
+                        </div>
+                    )}
+                    {concept.tagline && (
+                        <div style={{ fontSize: "7px", fontStyle: "italic", color: pal.tagline_color, lineHeight: 1.5 }}>
+                            {concept.tagline.length > 70 ? concept.tagline.slice(0, 70) + "…" : concept.tagline}
+                        </div>
+                    )}
+                </div>
+                <div
+                    style={{
+                        position: "absolute", bottom: 0, left: 0, right: 0, height: "36px",
+                        background: "rgba(0,0,0,0.35)", display: "flex", alignItems: "center",
+                        padding: "0 18px", justifyContent: "space-between",
+                    }}
+                >
+                    {concept.author_line && (
+                        <span style={{ fontSize: "7px", color: "rgba(255,255,255,0.7)" }}>{concept.author_line}</span>
+                    )}
+                    <span style={{ fontSize: "6px", fontWeight: "700", color: pal.accent, marginLeft: "auto", letterSpacing: "0.1em" }}>
+                        NANO BANANA AI 🍌
+                    </span>
+                </div>
             </div>
         </div>
     );
@@ -248,324 +274,164 @@ export default function CoverDesignerPage() {
         const a = document.createElement("a");
         a.href = url;
         if (result.mode === "zip_bundle") {
-            const base = result.original_filename.replace(/\.zip$/i, "");
-            a.download = `${base}_covers.zip`;
+            a.download = result.original_filename;
         } else {
-            const ext = result.original_filename.split(".").pop();
-            const base = result.original_filename.replace(/\.(pdf|docx)$/i, "");
-            a.download = `${base}_with_cover.${ext}`;
+            a.download = `cover_${result.original_filename}`;
         }
+        document.body.appendChild(a);
         a.click();
+        document.body.removeChild(a);
     };
 
-    const concept = result?.mode === "single" ? result?.concept : undefined;
     const isZipBundle = result?.mode === "zip_bundle";
-
-    // ─── Shared input style ───────────────────────────────────────────────
-    const inputStyle: React.CSSProperties = {
-        width: "100%",
-        background: "#ffffff",
-        border: "1px solid #e8e8e4",
-        borderRadius: "10px",
-        padding: "12px 14px",
-        fontSize: "14px",
-        color: "#2b2b2b",
-        outline: "none",
-        transition: "border-color 0.2s",
-        boxSizing: "border-box",
-    };
-
-    const labelStyle: React.CSSProperties = {
-        fontSize: "11px",
-        fontWeight: "700",
-        letterSpacing: "0.08em",
-        textTransform: "uppercase",
-        color: "#0c43bb",
-        display: "block",
-        marginBottom: "8px",
-    };
-
-    const panelStyle: React.CSSProperties = {
-        background: "#ffffff",
-        border: "1px solid #e8e8e4",
-        borderRadius: "12px",
-        padding: "18px 20px",
-        marginBottom: "24px",
-    };
+    const concept = result?.concept;
 
     return (
-        <div style={{ minHeight: "100vh", background: "#f7f2e4", fontFamily: "'DM Sans', sans-serif", color: "#2b2b2b" }}>
+        <div style={{ minHeight: "100vh", background: "var(--void)", fontFamily: "'DM Sans', sans-serif", color: "var(--text-primary)", position: "relative" }}>
+            <div className="grid-overlay" />
 
-            {/* ── Navbar ── */}
-            <nav
-                style={{
-                    borderBottom: "1px solid #efefcf",
-                    padding: "0 40px",
-                    height: "60px",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "16px",
-                    position: "sticky",
-                    top: 0,
-                    background: "#ffffff",
-                    zIndex: 50,
-                }}
-            >
-                <button
-                    onClick={() => router.push("/dashboard")}
-                    style={{
-                        display: "flex", alignItems: "center", gap: "6px",
-                        background: "none", border: "none", color: "#6b7280",
-                        fontSize: "13px", cursor: "pointer", padding: "6px 0", transition: "color 0.2s",
-                    }}
-                    onMouseOver={(e) => ((e.currentTarget as HTMLButtonElement).style.color = "#2b2b2b")}
-                    onMouseOut={(e) => ((e.currentTarget as HTMLButtonElement).style.color = "#6b7280")}
-                >
-                    <ArrowLeft size={14} /> Back to Dashboard
+            {/* Nav */}
+            <nav className="glass" style={{
+                borderBottom: "1.5px solid var(--border-mid)",
+                padding: "0 40px", height: "60px",
+                display: "flex", alignItems: "center", gap: "16px",
+                position: "sticky", top: 0, zIndex: 50,
+            }}>
+                <button onClick={() => router.push("/dashboard")} className="btn-ghost" style={{
+                    display: "flex", alignItems: "center", gap: "6px",
+                    padding: "6px 12px", fontSize: "12px", borderRadius: "8px"
+                }}>
+                    <ArrowLeft size={13} /> Dashboard
                 </button>
-                <span style={{ color: "#e8e8e4" }}>|</span>
+                <span style={{ color: "var(--border-mid)" }}>|</span>
                 <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                    <div
-                        style={{
-                            width: "28px", height: "28px", background: "#f7f2e4",
-                            border: "1px solid #e8e8e4", borderRadius: "8px",
-                            display: "flex", alignItems: "center", justifyContent: "center",
-                        }}
-                    >
-                        <Palette size={14} color="#2563eb" />
+                    <div style={{ width: "28px", height: "28px", background: "var(--text-primary)", borderRadius: "6px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                        <Palette size={14} color="var(--void)" />
                     </div>
-                    <span style={{ fontWeight: "600", fontSize: "14px", color: "#2b2b2b" }}>Cover Designer</span>
+                    <span style={{ fontWeight: "800", fontSize: "14px", color: "var(--text-primary)" }}>Cover Designer</span>
                 </div>
             </nav>
 
-            <main style={{ maxWidth: "860px", margin: "0 auto", padding: "52px 40px" }}>
-
-                {/* ── Page header ── */}
+            <main style={{ maxWidth: "920px", margin: "0 auto", padding: "64px 32px 96px", position: "relative", zIndex: 2 }}>
+                
+                {/* Page header */}
                 <div style={{ marginBottom: "40px" }}>
-                    <div
-                        style={{
-                            display: "inline-flex", alignItems: "center", gap: "6px",
-                            background: "#ffffff", border: "1px solid #e8e8e4",
-                            borderRadius: "999px", padding: "4px 14px",
-                            fontSize: "11px", fontWeight: "600", color: "#2563eb",
-                            letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: "18px",
-                        }}
-                    >
-                        <Sparkles size={11} color="#2563eb" />
+                    <div style={{ display: "inline-flex", alignItems: "center", gap: "6px", background: "var(--onyx)", border: "1.5px solid var(--border-mid)", borderRadius: "20px", padding: "4px 14px", fontSize: "10px", fontWeight: "700", letterSpacing: "0.1em", color: "var(--sapphire)", marginBottom: "16px", boxShadow: "0 4px 10px rgba(0,0,0,0.02)" }}>
+                        <Sparkles size={11} color="var(--sapphire)" />
                         Nano Banana AI · Cover Designer
                     </div>
-                    <h1
-                        style={{
-                            fontSize: "36px", fontWeight: "800", letterSpacing: "-0.03em",
-                            fontFamily: "'Playfair Display', serif", marginBottom: "10px",
-                            color: "#2b2b2b", lineHeight: 1.15,
-                        }}
-                    >
-                        AI Book Cover Designer — Nano Banana 🍌
+                    <h1 className="serif" style={{ fontSize: "40px", fontWeight: "400", letterSpacing: "-0.02em", marginBottom: "10px", color: "var(--text-primary)", lineHeight: 1.15 }}>
+                        AI Book Cover Designer
                     </h1>
-                    <p style={{ color: "#6b7280", fontSize: "15px", lineHeight: "1.6", maxWidth: "640px" }}>
-                        Upload your .pdf or .docx manuscript — or a .zip containing multiple files.
-                        Nano Banana (Gemini) generates a full-bleed cover page for each and attaches it — zero design skills needed.
+                    <p style={{ color: "var(--text-secondary)", fontSize: "15px", lineHeight: "1.6" }}>
+                        Upload your PDF or DOCX manuscript. The model generates a full-bleed cover page, sets matching typography, and attaches it as the first page of your book.
                     </p>
                 </div>
 
                 {!result ? (
                     <>
-                        {/* ── Drop zone ── */}
+                        {/* Drop zone */}
                         <div
                             onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
                             onDragLeave={() => setDragging(false)}
                             onDrop={handleDrop}
                             onClick={() => !file && fileInputRef.current?.click()}
                             style={{
-                                border: `2px dashed ${dragging ? "#2563eb" : file ? "#2563eb88" : "#d0d0cc"}`,
-                                borderRadius: "16px",
-                                padding: "40px 32px",
-                                textAlign: "center",
-                                cursor: file ? "default" : "pointer",
-                                background: dragging ? "rgba(37,99,235,0.04)" : file ? "rgba(37,99,235,0.02)" : "#ffffff",
-                                transition: "all 0.2s",
-                                marginBottom: "24px",
+                                border: `2px dashed ${dragging ? "var(--sapphire)" : file ? "rgba(37,99,235,0.4)" : "var(--border-strong)"}`,
+                                borderRadius: "20px", padding: "48px 32px",
+                                background: dragging ? "rgba(37,99,235,0.05)" : file ? "rgba(37,99,235,0.02)" : "var(--onyx)",
+                                cursor: file ? "default" : "pointer", textAlign: "center",
+                                transition: "all 0.25s cubic-bezier(0.16, 1, 0.3, 1)", marginBottom: "24px",
+                                boxShadow: "0 10px 30px -10px rgba(0, 0, 0, 0.02)",
                             }}
                         >
-                            <input
-                                ref={fileInputRef}
-                                type="file"
-                                accept=".pdf,.docx,.zip"
-                                style={{ display: "none" }}
-                                onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])}
-                            />
+                            <input ref={fileInputRef} type="file" accept=".pdf,.docx,.zip" style={{ display: "none" }}
+                                onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])} />
+
                             {file ? (
                                 <div>
-                                    <div
-                                        style={{
-                                            width: "52px", height: "52px", background: "#f7f2e4",
-                                            border: "1px solid #e8e8e4", borderRadius: "12px",
-                                            display: "flex", alignItems: "center", justifyContent: "center",
-                                            margin: "0 auto 12px",
-                                        }}
-                                    >
+                                    <div style={{ width: "56px", height: "56px", background: "var(--void)", border: "1.5px solid var(--border-mid)", borderRadius: "14px", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 12px" }}>
                                         {file.name.split(".").pop()?.toLowerCase() === "zip"
-                                            ? <Archive size={22} color="#2563eb" />
-                                            : <BookMarked size={22} color="#2563eb" />
+                                            ? <Archive size={22} color="var(--sapphire)" />
+                                            : <BookMarked size={22} color="var(--sapphire)" />
                                         }
                                     </div>
-                                    <p style={{ fontWeight: "600", fontSize: "14px", color: "#2b2b2b" }}>{file.name}</p>
-                                    <p style={{ color: "#6b7280", fontSize: "12px", marginTop: "4px" }}>
+                                    <p style={{ fontWeight: "700", fontSize: "15px", marginBottom: "4px", color: "var(--text-primary)" }}>{file.name}</p>
+                                    <p style={{ color: "var(--text-tertiary)", fontSize: "12px", marginBottom: "14px" }}>
                                         {(file.size / 1024).toFixed(1)} KB · {file.name.split(".").pop()?.toUpperCase()}
                                     </p>
-                                    <button
-                                        onClick={(e) => { e.stopPropagation(); setFile(null); setBookTitle(""); setError(""); }}
-                                        style={{
-                                            marginTop: "10px", background: "#fff0f0",
-                                            border: "1px solid #fecaca", borderRadius: "6px",
-                                            color: "#dc2626", cursor: "pointer", fontSize: "12px",
-                                            padding: "4px 10px", display: "inline-flex", alignItems: "center", gap: "4px",
-                                        }}
-                                    >
+                                    <button onClick={(e) => { e.stopPropagation(); setFile(null); setBookTitle(""); setError(""); }} className="btn-ghost" style={{ padding: "6px 14px", fontSize: "12px", borderRadius: "8px", background: "rgba(239, 68, 68, 0.05)", color: "var(--crimson)", border: "none" }}>
                                         <X size={12} /> Remove
                                     </button>
                                 </div>
                             ) : (
                                 <div>
-                                    <div
-                                        style={{
-                                            width: "52px", height: "52px", background: "#f7f2e4",
-                                            borderRadius: "12px", display: "flex", alignItems: "center",
-                                            justifyContent: "center", margin: "0 auto 14px",
-                                        }}
-                                    >
-                                        <Upload size={22} color="#6b7280" />
+                                    <div style={{ width: "56px", height: "56px", background: "var(--void)", border: "1.5px solid var(--border-mid)", borderRadius: "14px", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>
+                                        <Upload size={22} color="var(--sapphire)" />
                                     </div>
-                                    <p style={{ fontWeight: "500", fontSize: "14px", marginBottom: "6px", color: "#2b2b2b" }}>
-                                        Drop your manuscript here
-                                    </p>
-                                    <p style={{ color: "#6b7280", fontSize: "12px" }}>
-                                        .PDF or .DOCX · or .ZIP with multiple files · max 150 MB
-                                    </p>
+                                    <p style={{ fontWeight: "700", fontSize: "15px", marginBottom: "6px", color: "var(--text-primary)" }}>Drop book file here</p>
+                                    <p style={{ color: "var(--text-tertiary)", fontSize: "12px" }}>.PDF or .DOCX · or .ZIP containing multiple books · max 150 MB</p>
                                 </div>
                             )}
                         </div>
 
-                        {/* ── Title & description ── */}
+                        {/* Title & description */}
                         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginBottom: "24px" }}>
                             <div>
-                                <label style={labelStyle}>
-                                    Book Title{" "}
-                                    {file?.name.endsWith(".zip") && (
-                                        <span style={{ color: "#9ca3af", fontWeight: "400", textTransform: "none", fontSize: "10px" }}>
-                                            (optional for ZIP — inferred per file)
-                                        </span>
-                                    )}
+                                <label className="field-label">
+                                    Book Title {file?.name.endsWith(".zip") && <span style={{ color: "var(--text-tertiary)", fontWeight: "400", textTransform: "none", fontSize: "10px" }}>(optional for ZIP)</span>}
                                 </label>
-                                <input
-                                    type="text"
-                                    value={bookTitle}
-                                    onChange={(e) => setBookTitle(e.target.value)}
-                                    placeholder="e.g. The Art of Leadership"
-                                    style={inputStyle}
-                                    onFocus={(e) => (e.currentTarget.style.borderColor = "#2563eb")}
-                                    onBlur={(e) => (e.currentTarget.style.borderColor = "#e8e8e4")}
-                                />
+                                <input type="text" value={bookTitle} onChange={(e) => setBookTitle(e.target.value)} placeholder="e.g. Rise of the Astrals" className="input-field" />
                             </div>
                             <div>
-                                <label style={labelStyle}>
-                                    Brief Description{" "}
-                                    <span style={{ color: "#9ca3af", fontWeight: "400", textTransform: "none", fontSize: "10px" }}>
-                                        (optional — helps AI design better)
-                                    </span>
+                                <label className="field-label">
+                                    Brief Description <span style={{ color: "var(--text-tertiary)", fontWeight: "400", textTransform: "none", fontSize: "10px" }}>(optional — helps AI design)</span>
                                 </label>
-                                <input
-                                    type="text"
-                                    value={description}
-                                    onChange={(e) => setDescription(e.target.value)}
-                                    placeholder="e.g. A business guide for modern managers"
-                                    style={inputStyle}
-                                    onFocus={(e) => (e.currentTarget.style.borderColor = "#2563eb")}
-                                    onBlur={(e) => (e.currentTarget.style.borderColor = "#e8e8e4")}
-                                />
+                                <input type="text" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="e.g. A space opera with deep philosophical undertones" className="input-field" />
                             </div>
                         </div>
 
-                        {/* ── Custom cover image ── */}
-                        <div style={panelStyle}>
-                            <label style={labelStyle}>
-                                🖼️ Custom Cover Image{" "}
-                                <span style={{ color: "#9ca3af", fontWeight: "400", textTransform: "none", fontSize: "10px" }}>
-                                    (optional — skips Nano Banana image generation)
-                                </span>
+                        {/* Custom cover image */}
+                        <div className="card" style={{ background: "var(--onyx)", border: "1.5px solid var(--border-mid)", borderRadius: "14px", padding: "20px", marginBottom: "24px" }}>
+                            <label className="field-label" style={{ marginBottom: "10px" }}>
+                                🖼️ Custom Cover Background <span style={{ color: "var(--text-tertiary)", fontWeight: "400", textTransform: "none", fontSize: "10px" }}>(optional — skips AI text-to-image)</span>
                             </label>
-                            <input
-                                type="file"
-                                accept="image/png,image/jpeg,image/webp"
-                                onChange={(e) => setCoverImage(e.target.files?.[0] ?? null)}
-                                style={{ fontSize: "13px", color: "#6b7280", cursor: "pointer", width: "100%" }}
-                            />
+                            <input type="file" accept="image/png,image/jpeg,image/webp" onChange={(e) => setCoverImage(e.target.files?.[0] ?? null)} style={{ fontSize: "13px", color: "var(--text-secondary)", cursor: "pointer", width: "100%" }} />
                             {coverImage && (
                                 <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "8px", fontSize: "12px" }}>
-                                    <span style={{ color: "#16a34a", fontWeight: "500" }}>✅ {coverImage.name}</span>
-                                    <button
-                                        onClick={() => setCoverImage(null)}
-                                        style={{
-                                            background: "#fff0f0", border: "1px solid #fecaca",
-                                            borderRadius: "5px", color: "#dc2626", cursor: "pointer",
-                                            fontSize: "11px", padding: "2px 8px",
-                                        }}
-                                    >
-                                        ✕ remove
-                                    </button>
+                                    <span style={{ color: "var(--emerald)", fontWeight: "600" }}>✅ {coverImage.name}</span>
+                                    <button onClick={() => setCoverImage(null)} className="btn-ghost" style={{ padding: "3px 10px", fontSize: "11px", borderRadius: "6px", background: "rgba(239, 68, 68, 0.05)", color: "var(--crimson)", border: "none" }}>✕ remove</button>
                                 </div>
                             )}
                         </div>
 
-                        {/* ── Design style ── */}
-                        <div style={panelStyle}>
-                            <label style={labelStyle}>
-                                Design Style{" "}
-                                <span style={{ color: "#9ca3af", fontWeight: "400", textTransform: "none", fontSize: "10px" }}>
-                                    (default: Premium)
-                                </span>
-                            </label>
+                        {/* Design Style Selection */}
+                        <div className="card" style={{ background: "var(--onyx)", border: "1.5px solid var(--border-mid)", borderRadius: "14px", padding: "20px", marginBottom: "24px" }}>
+                            <label className="field-label" style={{ marginBottom: "12px" }}>Design Style Preset</label>
                             <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
                                 {[
                                     { value: "", label: "✦ Default", hint: "Premium" },
-                                    { value: "normal", label: "📄 Normal", hint: "Clean & balanced" },
                                     { value: "premium", label: "💎 Premium", hint: "Luxury & elegant" },
                                     { value: "scifi", label: "🚀 Sci-Fi", hint: "Futuristic & neon" },
                                     { value: "minimalist", label: "◻ Minimalist", hint: "Sparse & modern" },
                                     { value: "fantasy", label: "🔮 Fantasy", hint: "Mystical & rich" },
                                     { value: "thriller", label: "⚡ Thriller", hint: "Dark & high contrast" },
                                     { value: "romance", label: "🌸 Romance", hint: "Warm & soft" },
-                                    { value: "academic", label: "📚 Academic", hint: "Structured & muted" },
-                                    { value: "vibrant", label: "🎨 Vibrant", hint: "Bold & energetic" },
+                                    { value: "academic", label: "📚 Academic", hint: "Structured & formal" },
                                     { value: "retro", label: "📻 Retro", hint: "Vintage warmth" },
-                                    { value: "other", label: "✏️ Other", hint: "Describe your own style" },
+                                    { value: "other", label: "✍️ Other", hint: "Describe your own style" },
                                 ].map(({ value, label, hint }) => {
                                     const selected = designStyle === value;
                                     return (
                                         <button
-                                            key={value}
-                                            title={hint}
-                                            onClick={() => setDesignStyle(value)}
+                                            key={value} title={hint} type="button" onClick={() => setDesignStyle(value)}
                                             style={{
-                                                background: selected ? "#2563eb" : "#f7f2e4",
-                                                border: `1px solid ${selected ? "#2563eb" : "#e8e8e4"}`,
-                                                borderRadius: "8px", padding: "7px 14px",
+                                                background: selected ? "var(--sapphire)" : "var(--void)",
+                                                border: `1.5px solid ${selected ? "var(--sapphire)" : "var(--border-mid)"}`,
+                                                borderRadius: "8px", padding: "8px 16px",
                                                 fontSize: "12px", fontWeight: selected ? "700" : "500",
-                                                color: selected ? "#ffffff" : "#2b2b2b",
+                                                color: selected ? "var(--void)" : "var(--text-primary)",
                                                 cursor: "pointer", transition: "all 0.15s", whiteSpace: "nowrap",
-                                            }}
-                                            onMouseOver={(e) => {
-                                                if (!selected) {
-                                                    (e.currentTarget as HTMLButtonElement).style.borderColor = "#2563eb";
-                                                    (e.currentTarget as HTMLButtonElement).style.color = "#2563eb";
-                                                }
-                                            }}
-                                            onMouseOut={(e) => {
-                                                if (!selected) {
-                                                    (e.currentTarget as HTMLButtonElement).style.borderColor = "#e8e8e4";
-                                                    (e.currentTarget as HTMLButtonElement).style.color = "#2b2b2b";
-                                                }
                                             }}
                                         >
                                             {label}
@@ -573,187 +439,76 @@ export default function CoverDesignerPage() {
                                     );
                                 })}
                             </div>
+
                             {designStyle === "other" && (
-                                <div style={{ marginTop: "12px" }}>
-                                    <input
-                                        type="text"
-                                        value={customStyle}
-                                        onChange={(e) => setCustomStyle(e.target.value)}
-                                        placeholder="e.g. brutalist, watercolour, cyberpunk noir, hand-drawn…"
-                                        autoFocus
-                                        style={{
-                                            width: "100%", background: "#f7f2e4",
-                                            border: "1px solid #2563eb66", borderRadius: "10px",
-                                            padding: "11px 14px", fontSize: "13px", color: "#2b2b2b",
-                                            outline: "none", transition: "border-color 0.2s", boxSizing: "border-box",
-                                        }}
-                                        onFocus={(e) => (e.currentTarget.style.borderColor = "#2563eb")}
-                                        onBlur={(e) => (e.currentTarget.style.borderColor = "#2563eb66")}
-                                    />
-                                    <p style={{ fontSize: "11px", color: "#6b7280", marginTop: "6px" }}>
-                                        Describe any style you like — the AI will interpret it freely.
-                                    </p>
+                                <div style={{ marginTop: "14px" }}>
+                                    <input type="text" value={customStyle} onChange={(e) => setCustomStyle(e.target.value)} placeholder="e.g. brutalist, watercolor portrait, retro synthwave..." className="input-field" />
+                                    <p style={{ fontSize: "11px", color: "var(--text-tertiary)", marginTop: "6px" }}>Describe any style concept — the model will generate art to match.</p>
                                 </div>
-                            )}
-                            {designStyle && designStyle !== "other" && (
-                                <p style={{ fontSize: "11px", color: "#6b7280", marginTop: "8px" }}>
-                                    AI will design a{" "}
-                                    <span style={{ color: "#2563eb", fontWeight: "600" }}>{designStyle}</span>{" "}
-                                    themed cover. Hover a style to see a description.
-                                </p>
                             )}
                         </div>
 
-                        {/* ── Error banner ── */}
                         {error && (
-                            <div
-                                style={{
-                                    background: "#fff0f0", border: "1px solid #fecaca",
-                                    borderRadius: "10px", padding: "12px 16px",
-                                    color: "#dc2626", fontSize: "13px", marginBottom: "20px",
-                                }}
-                            >
+                            <div style={{ background: "rgba(239,68,68,0.06)", border: "1px solid rgba(239,68,68,0.18)", borderRadius: "10px", padding: "12px 16px", color: "var(--crimson)", fontSize: "13px", marginBottom: "20px" }}>
                                 {error}
                             </div>
                         )}
 
-                        {/* ── Nano Banana warning ── */}
                         {nbWarning && (
-                            <div
-                                style={{
-                                    background: "#fffbeb", border: "1px solid #fde68a",
-                                    borderRadius: "10px", padding: "12px 16px",
-                                    color: "#92400e", fontSize: "13px", marginBottom: "20px",
-                                    display: "flex", gap: "8px", alignItems: "flex-start",
-                                }}
-                            >
-                                <span>🍌</span>
-                                <span>
-                                    <strong>Nano Banana note:</strong> Image generation was unavailable —
-                                    cover uses a gradient background. Check that your GEMINI_API_KEY has image generation access.
-                                </span>
+                            <div style={{ background: "rgba(245,158,11,0.06)", border: "1.5px solid rgba(245,158,11,0.18)", borderRadius: "10px", padding: "12px 16px", color: "var(--amber)", fontSize: "13px", marginBottom: "20px" }}>
+                                <strong>Nano Banana warning:</strong> Image cluster unavailable — cover defaults to styles gradient.
                             </div>
                         )}
 
-                        {/* ── Submit ── */}
-                        <button
-                            onClick={handleSubmit}
-                            disabled={!file || loading}
-                            style={{
-                                width: "100%",
-                                background: !file || loading ? "#e8e8e4" : "#1a1a1a",
-                                color: !file || loading ? "#9ca3af" : "#ffffff",
-                                border: "none", borderRadius: "12px", padding: "14px 24px",
-                                fontSize: "14px", fontWeight: "700",
-                                cursor: !file || loading ? "not-allowed" : "pointer",
-                                display: "flex", alignItems: "center", justifyContent: "center",
-                                gap: "10px", transition: "opacity 0.2s",
-                            }}
-                        >
+                        <button onClick={handleSubmit} disabled={!file || loading} className="btn-dark" style={{ width: "100%", justifyContent: "center", padding: "14px", borderRadius: "12px" }}>
                             {loading ? (
-                                <><Loader size={18} style={{ animation: "spin 1s linear infinite" }} /> Designing your cover...</>
+                                <><Loader size={18} style={{ animation: "spin 1s linear infinite" }} /> Designing Cover Layout...</>
                             ) : (
-                                <><Sparkles size={18} /> 🍌 Design Cover with Nano Banana</>
+                                <><Sparkles size={18} /> Design Cover with AI</>
                             )}
                         </button>
-
-                        {loading && (
-                            <p style={{ textAlign: "center", color: "#6b7280", fontSize: "12px", marginTop: "12px" }}>
-                                AI is creating your cover concept and rendering the design… usually takes 15–30 seconds 🍌
-                            </p>
-                        )}
                     </>
                 ) : (
-                    /* ── Results ── */
+                    /* Results panel */
                     <div style={{ animation: "fadeInUp 0.4s ease forwards" }}>
-
-                        {/* Success banner */}
-                        <div
-                            style={{
-                                display: "flex", alignItems: "center", gap: "12px",
-                                background: "#ffffff", border: "1px solid #e8e8e4",
-                                borderRadius: "12px", padding: "16px 20px", marginBottom: "28px",
-                            }}
-                        >
-                            <CheckCircle size={20} color="#16a34a" />
-                            <div>
-                                <p style={{ fontWeight: "600", fontSize: "14px", color: "#2b2b2b" }}>
+                        <div className="card" style={{ display: "flex", alignItems: "center", gap: "16px", background: "var(--onyx)", border: "1.5px solid var(--border-mid)", borderRadius: "16px", padding: "20px 24px", marginBottom: "28px" }}>
+                            <div style={{ width: "44px", height: "44px", background: "rgba(16,185,129,0.06)", border: "1px solid rgba(16,185,129,0.15)", borderRadius: "11px", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                                <CheckCircle size={22} color="var(--emerald)" />
+                            </div>
+                            <div style={{ flex: 1 }}>
+                                <h3 className="serif" style={{ fontSize: "20px", color: "var(--text-primary)" }}>
                                     {isZipBundle
-                                        ? `${result!.files_processed} cover${result!.files_processed !== 1 ? "s" : ""} designed successfully`
+                                        ? `${result!.files_processed} covers designed successfully`
                                         : "Cover designed successfully"
                                     }
-                                </p>
-                                <p style={{ color: "#6b7280", fontSize: "12px", marginTop: "2px" }}>
+                                </h3>
+                                <p style={{ color: "var(--text-secondary)", fontSize: "12px", marginTop: "3px" }}>
                                     {result!.original_filename}
-                                    {isZipBundle && (
-                                        <span style={{ marginLeft: "6px", color: "#2563eb", fontWeight: "500" }}>· ZIP bundle</span>
-                                    )}
                                 </p>
                             </div>
-                            <button
-                                onClick={handleDownload}
-                                style={{
-                                    marginLeft: "auto", display: "flex", alignItems: "center", gap: "6px",
-                                    background: "#1a1a1a", color: "#ffffff", border: "none",
-                                    borderRadius: "8px", padding: "9px 18px", fontSize: "13px",
-                                    fontWeight: "600", cursor: "pointer", whiteSpace: "nowrap", transition: "opacity 0.2s",
-                                }}
-                                onMouseOver={(e) => ((e.currentTarget as HTMLButtonElement).style.opacity = "0.82")}
-                                onMouseOut={(e) => ((e.currentTarget as HTMLButtonElement).style.opacity = "1")}
-                            >
+                            <button onClick={handleDownload} className="btn-dark" style={{ padding: "10px 18px", fontSize: "13px", borderRadius: "10px" }}>
                                 <Download size={14} />
                                 {isZipBundle ? "Download ZIP Bundle" : "Download with Cover"}
                             </button>
                         </div>
 
-                        {/* ZIP bundle preview grid */}
+                        {/* ZIP multiple preview grid */}
                         {isZipBundle && result!.files && result!.files.length > 0 && (
                             <div>
-                                <h2
-                                    style={{
-                                        fontSize: "18px", fontWeight: "800",
-                                        fontFamily: "'Playfair Display', serif",
-                                        marginBottom: "20px", color: "#2b2b2b", letterSpacing: "-0.02em",
-                                    }}
-                                >
-                                    Covers Generated ({result!.files_processed})
-                                </h2>
+                                <h3 className="serif" style={{ fontSize: "22px", marginBottom: "20px", color: "var(--text-primary)" }}>Covers Generated</h3>
                                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: "24px" }}>
                                     {result!.files.map((f, idx) => (
-                                        <div key={idx}>
+                                        <div key={idx} className="card" style={{ padding: "16px", background: "var(--onyx)", border: "1.5px solid var(--border-mid)", borderRadius: "12px" }}>
                                             <CoverPreview concept={f.concept} />
-                                            <div style={{ marginTop: "10px" }}>
-                                                <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "4px" }}>
-                                                    <FileText size={12} color="#2563eb" />
-                                                    <span
-                                                        style={{
-                                                            fontSize: "12px", fontWeight: "600", color: "#2b2b2b",
-                                                            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                                                        }}
-                                                    >
+                                            <div style={{ marginTop: "14px" }}>
+                                                <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "6px" }}>
+                                                    <FileText size={12} color="var(--sapphire)" />
+                                                    <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                                                         {f.source_filename}
                                                     </span>
                                                 </div>
-                                                <p style={{ fontSize: "11px", color: "#6b7280", marginBottom: "2px" }}>
-                                                    <span style={{ color: "#2b2b2b", fontWeight: "500" }}>Style:</span>{" "}
-                                                    {f.concept.style} · {f.concept.genre_label}
-                                                </p>
-                                                <p style={{ fontSize: "11px", color: "#6b7280" }}>
-                                                    <span style={{ color: "#2b2b2b", fontWeight: "500" }}>Motif:</span>{" "}
-                                                    {f.concept.motif}
-                                                </p>
-                                                <div style={{ display: "flex", gap: "5px", marginTop: "6px", flexWrap: "wrap" }}>
-                                                    {Object.entries(f.concept.palette).map(([key, val]) => (
-                                                        <div
-                                                            key={key}
-                                                            title={`${key}: ${val}`}
-                                                            style={{
-                                                                width: "18px", height: "18px", borderRadius: "4px",
-                                                                background: val, border: "1px solid rgba(0,0,0,0.08)", cursor: "help",
-                                                            }}
-                                                        />
-                                                    ))}
-                                                </div>
+                                                <p style={{ fontSize: "11px", color: "var(--text-tertiary)", marginBottom: "2px" }}>Style: {f.concept.style}</p>
+                                                <p style={{ fontSize: "11px", color: "var(--text-tertiary)" }}>Motif: {f.concept.motif}</p>
                                             </div>
                                         </div>
                                     ))}
@@ -761,66 +516,32 @@ export default function CoverDesignerPage() {
                             </div>
                         )}
 
-                        {/* Single file: preview + concept detail card */}
+                        {/* Single Cover preview details */}
                         {!isZipBundle && concept && (
-                            <div style={{ display: "flex", gap: "32px", alignItems: "flex-start" }}>
+                            <div style={{ display: "flex", gap: "36px", alignItems: "flex-start", marginTop: "16px" }}>
                                 <CoverPreview concept={concept} />
                                 <div style={{ flex: 1 }}>
-                                    <h2
-                                        style={{
-                                            fontSize: "20px", fontWeight: "800",
-                                            fontFamily: "'Playfair Display', serif",
-                                            marginBottom: "20px", color: "#2b2b2b", letterSpacing: "-0.02em",
-                                        }}
-                                    >
-                                        Nano Banana Design Concept 🍌
-                                    </h2>
-                                    <div
-                                        style={{
-                                            background: "#ffffff", border: "1px solid #e8e8e4",
-                                            borderRadius: "12px", padding: "20px", display: "grid", gap: "16px",
-                                        }}
-                                    >
+                                    <h3 className="serif" style={{ fontSize: "24px", marginBottom: "16px", color: "var(--text-primary)" }}>Nano Banana Design Concept</h3>
+                                    
+                                    <div className="card" style={{ background: "var(--onyx)", border: "1.5px solid var(--border-mid)", borderRadius: "16px", padding: "24px", display: "grid", gap: "16px" }}>
                                         {[
                                             { label: "Title", value: concept.title.replace("\n", " ") },
                                             { label: "Subtitle", value: concept.subtitle || "—" },
                                             { label: "Tagline", value: concept.tagline || "—" },
-                                            { label: "Style", value: concept.style },
-                                            { label: "Genre", value: concept.genre_label },
-                                            { label: "Design Motif", value: concept.motif },
+                                            { label: "Style Preset", value: concept.style },
+                                            { label: "Genre Label", value: concept.genre_label },
+                                            { label: "Motif", value: concept.motif },
                                         ].map(({ label, value }) => (
                                             <div key={label}>
-                                                <span
-                                                    style={{
-                                                        fontSize: "10px", fontWeight: "700",
-                                                        letterSpacing: "0.08em", textTransform: "uppercase", color: "#0c43bb",
-                                                    }}
-                                                >
-                                                    {label}
-                                                </span>
-                                                <p style={{ fontSize: "14px", color: "#2b2b2b", marginTop: "3px" }}>{value}</p>
+                                                <span className="field-label" style={{ fontSize: "10px", margin: 0, color: "var(--sapphire)" }}>{label}</span>
+                                                <p style={{ fontSize: "14px", color: "var(--text-primary)", fontWeight: "600", marginTop: "3px" }}>{value}</p>
                                             </div>
                                         ))}
                                         <div>
-                                            <span
-                                                style={{
-                                                    fontSize: "10px", fontWeight: "700",
-                                                    letterSpacing: "0.08em", textTransform: "uppercase",
-                                                    color: "#0c43bb", display: "block", marginBottom: "8px",
-                                                }}
-                                            >
-                                                Colour Palette
-                                            </span>
+                                            <span className="field-label" style={{ fontSize: "10px", margin: "0 0 8px", color: "var(--sapphire)" }}>Color Palette Colors</span>
                                             <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
                                                 {Object.entries(concept.palette).map(([key, val]) => (
-                                                    <div
-                                                        key={key}
-                                                        title={`${key}: ${val}`}
-                                                        style={{
-                                                            width: "28px", height: "28px", borderRadius: "6px",
-                                                            background: val, border: "1px solid rgba(0,0,0,0.08)", cursor: "help",
-                                                        }}
-                                                    />
+                                                    <div key={key} title={`${key}: ${val}`} style={{ width: "24px", height: "24px", borderRadius: "5px", background: val, border: "1px solid rgba(0,0,0,0.1)", cursor: "help" }} />
                                                 ))}
                                             </div>
                                         </div>
@@ -829,41 +550,12 @@ export default function CoverDesignerPage() {
                             </div>
                         )}
 
-                        {/* Design another */}
-                        <button
-                            onClick={() => {
-                                setResult(null);
-                                setFile(null);
-                                setBookTitle("");
-                                setDescription("");
-                                setDesignStyle("");
-                                setCustomStyle("");
-                            }}
-                            style={{
-                                marginTop: "28px", background: "#f7f2e4",
-                                border: "1px solid #e8e8e4", borderRadius: "10px",
-                                padding: "10px 20px", color: "#2b2b2b", fontSize: "13px",
-                                fontWeight: "500", cursor: "pointer", transition: "all 0.2s",
-                            }}
-                            onMouseOver={(e) => {
-                                (e.currentTarget as HTMLButtonElement).style.background = "#efefcf";
-                                (e.currentTarget as HTMLButtonElement).style.borderColor = "#d0d0cc";
-                            }}
-                            onMouseOut={(e) => {
-                                (e.currentTarget as HTMLButtonElement).style.background = "#f7f2e4";
-                                (e.currentTarget as HTMLButtonElement).style.borderColor = "#e8e8e4";
-                            }}
-                        >
+                        <button onClick={() => { setResult(null); setFile(null); setBookTitle(""); setDescription(""); setDesignStyle(""); setCustomStyle(""); }} className="btn-outline" style={{ marginTop: "32px" }}>
                             ← Design another cover
                         </button>
                     </div>
                 )}
             </main>
-
-            <style>{`
-        @keyframes spin { to { transform: rotate(360deg); } }
-        @keyframes fadeInUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
-      `}</style>
         </div>
     );
 }

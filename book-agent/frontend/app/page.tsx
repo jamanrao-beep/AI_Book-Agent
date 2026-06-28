@@ -8,9 +8,11 @@ import {
   RefreshCw,
   BookOpen,
   ArrowRight,
+  Sparkles,
+  Layers,
+  Wand2,
 } from "lucide-react";
-
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { loginWithGoogle, auth } from "@/lib/firebase";
 import { onAuthStateChanged, getRedirectResult } from "firebase/auth";
@@ -18,6 +20,8 @@ import { onAuthStateChanged, getRedirectResult } from "firebase/auth";
 export default function Home() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
+  const [outlineStep, setOutlineStep] = useState(0);
+  const terminalCardRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (user) => {
@@ -30,6 +34,14 @@ export default function Home() {
     return () => unsub();
   }, [router]);
 
+  // Terminal text cycle animation
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setOutlineStep((prev) => (prev + 1) % 4);
+    }, 2800);
+    return () => clearInterval(interval);
+  }, []);
+
   const handleGoogle = async () => {
     setLoading(true);
     try {
@@ -40,52 +52,114 @@ export default function Home() {
     }
   };
 
+  // Direct 3D Tilt handler for terminal mock card
+  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!terminalCardRef.current) return;
+    const card = terminalCardRef.current;
+    const rect = card.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const xc = rect.width / 2;
+    const yc = rect.height / 2;
+    const angleX = (yc - y) / 18; // vertical tilt speed
+    const angleY = (x - xc) / 18; // horizontal tilt speed
+    card.style.transform = `perspective(1000px) rotateX(${angleX}deg) rotateY(${angleY}deg) scale(1.025)`;
+  };
+
+  const handleMouseLeave = () => {
+    if (!terminalCardRef.current) return;
+    const card = terminalCardRef.current;
+    card.style.transform = "perspective(1000px) rotateX(0deg) rotateY(0deg) scale(1)";
+  };
+
   return (
     <div
       style={{
-        background: "#f7f2e4ff",
+        background: "var(--void)",
         minHeight: "100vh",
         fontFamily: "'DM Sans', sans-serif",
+        color: "var(--text-primary)",
+        position: "relative",
+        overflowX: "hidden",
       }}
     >
-      {/* Nav */}
+      <div className="grid-overlay" />
+
+      {/* Decorative Blur Blobs */}
+      <div
+        style={{
+          position: "absolute",
+          top: "10%",
+          left: "5%",
+          width: "400px",
+          height: "400px",
+          borderRadius: "50%",
+          background: "radial-gradient(circle, rgba(37, 99, 235, 0.08) 0%, transparent 70%)",
+          filter: "blur(60px)",
+          pointerEvents: "none",
+          zIndex: 1,
+        }}
+      />
+      <div
+        style={{
+          position: "absolute",
+          top: "40%",
+          right: "5%",
+          width: "500px",
+          height: "500px",
+          borderRadius: "50%",
+          background: "radial-gradient(circle, rgba(139, 92, 246, 0.06) 0%, transparent 70%)",
+          filter: "blur(80px)",
+          pointerEvents: "none",
+          zIndex: 1,
+        }}
+      />
+
+      {/* Navigation */}
       <nav
+        className="glass"
         style={{
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
           padding: "0 48px",
-          height: "56px",
-          borderBottom: "1px solid #efefcfff",
+          height: "64px",
+          borderBottom: "1px solid var(--border-mid)",
           position: "sticky",
           top: 0,
-          background: "white",
           zIndex: 50,
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
           <div
             style={{
-              width: "28px",
-              height: "28px",
-              background: "#1a1a1a",
-              borderRadius: "6px",
+              width: "32px",
+              height: "32px",
+              background: "var(--text-primary)",
+              borderRadius: "8px",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
+              boxShadow: "0 4px 10px rgba(0,0,0,0.1)",
             }}
           >
-            <FileText size={14} color="white" />
+            <FileText size={16} color="var(--void)" />
           </div>
-          <span style={{ fontWeight: "700", fontSize: "15px", color: "#2a2929ff" }}>
+          <span style={{ fontWeight: "800", fontSize: "16px", letterSpacing: "-0.02em", color: "var(--text-primary)" }}>
             Publixo AI
           </span>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+        
+        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
           <span
             style={{
-              fontSize: "12px",
-              color: "#262626ff",
+              fontSize: "11px",
+              fontWeight: "600",
+              color: "var(--text-secondary)",
+              background: "rgba(37, 99, 235, 0.06)",
+              border: "1px solid rgba(37, 99, 235, 0.15)",
+              padding: "4px 10px",
+              borderRadius: "20px",
               display: "flex",
               alignItems: "center",
               gap: "6px",
@@ -93,24 +167,20 @@ export default function Home() {
           >
             <span
               style={{
-                width: "7px",
-                height: "7px",
-                background: "#22c55e",
+                width: "6px",
+                height: "6px",
+                background: "var(--emerald)",
                 borderRadius: "50%",
                 display: "inline-block",
+                boxShadow: "0 0 8px var(--emerald)",
               }}
             />
-            AI Health: Optimal
+            AI Status: Online
           </span>
           <Link
             href="/login"
-            style={{
-              color: "#262626ff",
-              fontSize: "14px",
-              fontWeight: "500",
-              padding: "6px 14px",
-              textDecoration: "none",
-            }}
+            className="btn-ghost"
+            style={{ padding: "6px 16px", fontSize: "13px" }}
           >
             Sign In
           </Link>
@@ -125,80 +195,75 @@ export default function Home() {
         </div>
       </nav>
 
-      {/* Hero */}
+      {/* Hero Section */}
       <section
         style={{
-          background:
-            "linear-gradient(160deg, #f0f4ff 0%, #faf8f5 40%, #f0fff4 100%)",
-          padding: "80px 48px 60px",
+          padding: "100px 48px 80px",
           textAlign: "center",
           position: "relative",
-          overflow: "hidden",
+          zIndex: 2,
         }}
       >
         <div
           style={{
-            position: "absolute",
-            top: "20px",
-            left: "50%",
-            transform: "translateX(-50%)",
-            background: "white",
-            border: "1px solid #e0e0dc",
-            borderRadius: "20px",
-            padding: "4px 14px",
-            fontSize: "11px",
-            color: "#2563eb",
-            fontWeight: "600",
-            letterSpacing: "0.06em",
-            display: "flex",
+            display: "inline-flex",
             alignItems: "center",
-            gap: "6px",
+            gap: "8px",
+            background: "rgba(255, 255, 255, 0.8)",
+            border: "1.5px solid var(--border-mid)",
+            borderRadius: "30px",
+            padding: "6px 16px",
+            fontSize: "11px",
+            color: "var(--sapphire)",
+            fontWeight: "700",
+            letterSpacing: "0.08em",
+            marginBottom: "24px",
+            boxShadow: "0 4px 12px rgba(37, 99, 235, 0.05)",
           }}
         >
-          <Zap size={11} />
-          POWERED BY OPENAI — GPT-4o
+          <Sparkles size={12} />
+          POWERED BY GPT-4o & CLAUDE 3.5
         </div>
+
         <h1
+          className="serif fade-in"
           style={{
-            fontSize: "56px",
-            fontWeight: "800",
-            color: '#2d2c2cff',
-            lineHeight: "1.1",
+            fontSize: "64px",
+            fontWeight: "400",
+            color: 'var(--text-primary)',
+            lineHeight: "1.05",
             letterSpacing: "-0.03em",
-            marginTop: "36px",
-            fontFamily: "'Playfair Display', serif",
+            maxWidth: "800px",
+            margin: "0 auto 24px",
           }}
         >
-          Write a Full Book with AI
-          <br />
-          <span style={{ color: "#2563eb" }}>in Minutes</span>
+          Write a Full Book with AI <br />
+          <span style={{ color: "var(--sapphire)", fontStyle: "italic", textShadow: "0 0 40px rgba(37, 99, 235, 0.15)" }}>
+            in Minutes
+          </span>
         </h1>
+
         <p
           style={{
-            color: "#555",
-            fontSize: "18px",
-            maxWidth: "560px",
-            margin: "20px auto 36px",
+            color: "var(--text-secondary)",
+            fontSize: "17px",
+            maxWidth: "600px",
+            margin: "0 auto 36px",
             lineHeight: "1.6",
           }}
         >
-          Simply enter your title and vision. Our autonomous agent researches,
-          structures, and writes your entire manuscript into a print-ready PDF
-          or Word document.
+          Simply enter your title and vision. Our autonomous agent structures,
+          researches, writes, and formats your entire manuscript into a print-ready PDF or Word document.
         </p>
-        <div style={{ display: "flex", gap: "12px", justifyContent: "center" }}>
+
+        <div style={{ display: "flex", gap: "16px", justifyContent: "center", alignItems: "center" }}>
           <button
             onClick={handleGoogle}
             disabled={loading}
             className="btn-dark"
             style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "8px",
               padding: "14px 28px",
               fontSize: "14px",
-              justifyContent: "center",
-              margin: "0 auto",
               opacity: loading ? 0.7 : 1,
             }}
           >
@@ -207,313 +272,347 @@ export default function Home() {
           <Link href="/login">
             <button
               className="btn-outline"
-              style={{ padding: "14px 28px", fontSize: "14px" }}
+              style={{ padding: "13px 28px", fontSize: "14px" }}
             >
               Sign In
             </button>
           </Link>
         </div>
 
-        {/* Mock app screenshot */}
-        <div
-          style={{
-            marginTop: "56px",
-            maxWidth: "560px",
-            margin: "56px auto 0",
-            background: "#1a1a1a",
-            borderRadius: "12px",
-            padding: "20px",
-            boxShadow: "0 24px 60px rgba(0,0,0,0.18)",
-          }}
-        >
-          <div style={{ display: "flex", gap: "6px", marginBottom: "16px" }}>
-            <div
-              style={{
-                width: "10px",
-                height: "10px",
-                borderRadius: "50%",
-                background: "#ff5f57",
-              }}
-            />
-            <div
-              style={{
-                width: "10px",
-                height: "10px",
-                borderRadius: "50%",
-                background: "#febc2e",
-              }}
-            />
-            <div
-              style={{
-                width: "10px",
-                height: "10px",
-                borderRadius: "50%",
-                background: "#28c840",
-              }}
-            />
-          </div>
+        {/* 3D Tilt Mock Terminal */}
+        <div className="card-3d-container" style={{ marginTop: "64px" }}>
           <div
+            ref={terminalCardRef}
+            onMouseMove={handleMouseMove}
+            onMouseLeave={handleMouseLeave}
+            className="card card-3d"
             style={{
-              fontFamily: "DM Mono, monospace",
-              fontSize: "12px",
-              color: "#888",
-              lineHeight: 2,
+              maxWidth: "600px",
+              margin: "0 auto",
+              background: "#18181b",
+              borderRadius: "16px",
+              padding: "24px 28px",
+              border: "1px solid rgba(255, 255, 255, 0.1)",
+              boxShadow: "0 30px 70px rgba(0,0,0,0.3), 0 0 40px rgba(37, 99, 235, 0.08)",
+              textAlign: "left",
             }}
           >
-            <div>
-              <span style={{ color: "#2563eb" }}>◆</span>{" "}
-              <span style={{ color: "#ccc" }}>Generating outline</span>{" "}
-              <span style={{ color: "#22c55e" }}>✓</span>
+            {/* Windows Dots */}
+            <div style={{ display: "flex", gap: "8px", marginBottom: "20px" }}>
+              <div style={{ width: "12px", height: "12px", borderRadius: "50%", background: "#ef4444" }} />
+              <div style={{ width: "12px", height: "12px", borderRadius: "50%", background: "#f59e0b" }} />
+              <div style={{ width: "12px", height: "12px", borderRadius: "50%", background: "#10b981" }} />
             </div>
-            <div>
-              <span style={{ color: "#2563eb" }}>◆</span>{" "}
-              <span style={{ color: "#ccc" }}>Chapter 1: The Foundation</span>{" "}
-              <span style={{ color: "#22c55e" }}>✓</span>
-            </div>
-            <div>
-              <span style={{ color: "#2563eb" }}>◆</span>{" "}
-              <span style={{ color: "#ccc" }}>Chapter 2: Core Principles</span>{" "}
-              <span style={{ color: "#2563eb" }}>writing...</span>
-            </div>
-            <div style={{ color: "#555" }}>
-              <span>◆</span> Chapter 3: Advanced Techniques{" "}
-              <span className="blink">|</span>
+
+            {/* Simulated generation logs */}
+            <div
+              style={{
+                fontFamily: "DM Sans Mono, monospace",
+                fontSize: "13px",
+                color: "#a1a1aa",
+                lineHeight: 1.9,
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <span style={{ color: "var(--sapphire)" }}>◆</span>
+                <span style={{ color: "#ffffff" }}>Initializing autonomous manuscript agent...</span>
+                <span style={{ color: "var(--emerald)", fontWeight: "bold" }}>✓</span>
+              </div>
+              
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", opacity: outlineStep >= 1 ? 1 : 0.25, transition: "opacity 0.5s" }}>
+                <span style={{ color: "var(--sapphire)" }}>◆</span>
+                <span style={{ color: "#ffffff" }}>Structuring chapters & reference blueprints...</span>
+                {outlineStep >= 1 ? (
+                  <span style={{ color: "var(--emerald)", fontWeight: "bold" }}>✓</span>
+                ) : (
+                  <span style={{ color: "var(--sapphire)", animation: "pulse 1.5s infinite" }}>processing...</span>
+                )}
+              </div>
+
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", opacity: outlineStep >= 2 ? 1 : 0.25, transition: "opacity 0.5s" }}>
+                <span style={{ color: "var(--sapphire)" }}>◆</span>
+                <span style={{ color: "#ffffff" }}>Writing Chapter 1: The Foundation...</span>
+                {outlineStep >= 2 ? (
+                  <span style={{ color: "var(--emerald)", fontWeight: "bold" }}>✓</span>
+                ) : outlineStep === 1 ? (
+                  <span style={{ color: "var(--sapphire)", animation: "pulse 1.5s infinite" }}>writing...</span>
+                ) : (
+                  <span>pending</span>
+                )}
+              </div>
+
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", opacity: outlineStep >= 3 ? 1 : 0.25, transition: "opacity 0.5s" }}>
+                <span style={{ color: "var(--sapphire)" }}>◆</span>
+                <span style={{ color: "#ffffff" }}>Compiling index templates & final PDF layout...</span>
+                {outlineStep >= 3 ? (
+                  <span style={{ color: "var(--emerald)", fontWeight: "bold" }}>✓</span>
+                ) : outlineStep === 2 ? (
+                  <span style={{ color: "var(--sapphire)", animation: "pulse 1.5s infinite" }}>assembling...</span>
+                ) : (
+                  <span>pending</span>
+                )}
+              </div>
+
+              <div style={{ color: "#52525b", marginTop: "10px", borderTop: "1px solid #27272a", paddingTop: "10px", fontSize: "11px", display: "flex", justifyContent: "space-between" }}>
+                <span>Publixo Engine v1.4.2</span>
+                <span style={{ animation: "pulse 1.8s infinite" }}>● System Ready</span>
+              </div>
             </div>
           </div>
         </div>
       </section>
 
-      {/* Stats strip */}
+      {/* Stats Section */}
       <section
         style={{
-          borderTop: "1px solid #e8e8e4",
-          borderBottom: "1px solid #e8e8e4",
+          borderTop: "1.5px solid var(--border-mid)",
+          borderBottom: "1.5px solid var(--border-mid)",
           display: "grid",
           gridTemplateColumns: "repeat(3, 1fr)",
+          background: "rgba(255, 255, 255, 0.5)",
+          backdropFilter: "blur(8px)",
         }}
       >
         {[
           {
             label: "PRICING",
             value: "100% Free",
-            sub: "to start your journey",
+            sub: "no credit card required",
           },
           {
             label: "EFFICIENCY",
-            value: "< 30m",
-            sub: "for a full 200-page book",
+            value: "< 30 Minutes",
+            sub: "for a fully researched manuscript",
           },
           {
             label: "COMPATIBILITY",
-            value: "PDF + DOCX",
-            sub: "standard export formats",
+            value: "PDF + Word",
+            sub: "standard self-publishing format",
           },
         ].map((s, i) => (
           <div
             key={i}
+            className="card-hover"
             style={{
-              padding: "32px 40px",
-              borderRight: i < 2 ? "1px solid #e8e8e4" : "none",
+              padding: "40px 48px",
+              borderRight: i < 2 ? "1.5px solid var(--border-mid)" : "none",
+              textAlign: "center",
+              transition: "background 0.3s",
             }}
           >
             <div
               style={{
                 fontSize: "10px",
-                color: "#0c43bbff",
-                fontWeight: "700",
-                letterSpacing: "0.1em",
-                marginBottom: "8px",
+                color: "var(--sapphire)",
+                fontWeight: "800",
+                letterSpacing: "0.12em",
+                marginBottom: "10px",
               }}
             >
               {s.label}
             </div>
             <div
+              className="serif"
               style={{
-                fontSize: "32px",
-                fontWeight: "800",
-                letterSpacing: "-0.02em",
-                fontFamily: "Playfair Display, serif",
-                color: '#2b2b2bff',
+                fontSize: "36px",
+                fontWeight: "400",
+                letterSpacing: "-0.01em",
+                color: 'var(--text-primary)',
               }}
             >
               {s.value}
             </div>
-            <div style={{ fontSize: "13px", color: "#2a2929ff", marginTop: "4px" }}>
+            <div style={{ fontSize: "13px", color: "var(--text-secondary)", marginTop: "6px" }}>
               {s.sub}
             </div>
           </div>
         ))}
       </section>
 
-      {/* How it works */}
+      {/* Process Section */}
       <section
-        style={{ padding: "80px 48px", maxWidth: "680px", margin: "0 auto" }}
+        style={{ padding: "100px 48px 80px", maxWidth: "800px", margin: "0 auto" }}
       >
-        <div style={{ textAlign: "center", marginBottom: "56px" }}>
+        <div style={{ textAlign: "center", marginBottom: "64px" }}>
           <div
             style={{
               fontSize: "11px",
-              color: "#0c43bbff",
-              fontWeight: "700",
-              letterSpacing: "0.1em",
+              color: "var(--sapphire)",
+              fontWeight: "800",
+              letterSpacing: "0.15em",
               marginBottom: "12px",
             }}
           >
             THE PROCESS
           </div>
           <h2
+            className="serif"
             style={{
-              fontSize: "40px",
-              fontWeight: "800",
-              color: '#2b2b2bff',
+              fontSize: "44px",
+              fontWeight: "400",
+              color: 'var(--text-primary)',
               letterSpacing: "-0.02em",
-              fontFamily: "Playfair Display, serif",
             }}
           >
             The Editorial Workflow
           </h2>
         </div>
-        {[
-          {
-            n: "01",
-            title: "Enter Details",
-            desc: "Provide a working title and a brief description of your vision. AI handles the complex prompt engineering for you.",
-          },
-          {
-            n: "02",
-            title: "AI Writes Chapter by Chapter",
-            desc: "The agent crafts a structured outline and writes each chapter with stylistic consistency, maintaining the narrative thread.",
-          },
-          {
-            n: "03",
-            title: "Download Your Book",
-            desc: "Instantly export your manuscript in professional PDF or DOCX formats, ready for editing or immediate self-publishing.",
-          },
-        ].map((s, i) => (
-          <div
-            key={i}
-            style={{
-              display: "flex",
-              gap: "24px",
-              marginBottom: "40px",
-              borderBottom: i < 2 ? "1px solid #f0f0ec" : "none",
-              paddingBottom: "40px",
-            }}
-          >
+        
+        <div style={{ display: "flex", flexDirection: "column", gap: "32px" }}>
+          {[
+            {
+              n: "01",
+              title: "Provide Vision",
+              desc: "Enter a working title and describe your vision. Our agent automatically designs outlines based on genres and parameters.",
+            },
+            {
+              n: "02",
+              title: "AI Writes Chapter by Chapter",
+              desc: "The agent develops headings, generates citations, researches topics, and compiles detailed prose while maintaining stylistic consistency.",
+            },
+            {
+              n: "03",
+              title: "Download Print-Ready Documents",
+              desc: "Instantly export your generated books as formatted DOCX or PDF, ready for final proofreading or immediate Kindle publishing.",
+            },
+          ].map((s, i) => (
             <div
+              key={i}
+              className="card card-hover"
               style={{
-                width: "48px",
-                height: "48px",
-                borderRadius: "8px",
-                background: "#1a1a1a",
                 display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                flexShrink: 0,
+                gap: "24px",
+                padding: "28px 32px",
+                border: "1.5px solid var(--border-mid)",
+                background: "var(--onyx)",
               }}
             >
-              <span
+              <div
                 style={{
-                  fontSize: "15px",
-                  fontWeight: "700",
-                  color: "white",
+                  width: "48px",
+                  height: "48px",
+                  borderRadius: "12px",
+                  background: "var(--text-primary)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                  boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
                 }}
               >
-                {s.n}
-              </span>
+                <span
+                  style={{
+                    fontSize: "16px",
+                    fontWeight: "700",
+                    color: "var(--void)",
+                  }}
+                >
+                  {s.n}
+                </span>
+              </div>
+              <div>
+                <h3
+                  style={{
+                    fontWeight: "700",
+                    fontSize: "17px",
+                    marginBottom: "8px",
+                    color: 'var(--text-primary)',
+                  }}
+                >
+                  {s.title}
+                </h3>
+                <p style={{ color: "var(--text-secondary)", fontSize: "14px", lineHeight: "1.6" }}>
+                  {s.desc}
+                </p>
+              </div>
             </div>
-            <div>
-              <h3
-                style={{
-                  fontWeight: "700",
-                  fontSize: "18px",
-                  marginBottom: "8px",
-                  color: '#2b2b2bff',
-                }}
-              >
-                {s.title}
-              </h3>
-              <p style={{ color: "#666", fontSize: "14px", lineHeight: "1.6" }}>
-                {s.desc}
-              </p>
-            </div>
-          </div>
-        ))}
+          ))}
+        </div>
       </section>
 
-      {/* Features grid */}
+      {/* Features Grid */}
       <section
-        style={{ padding: "0 48px 80px", maxWidth: "960px", margin: "0 auto" }}
+        style={{ padding: "0 48px 100px", maxWidth: "960px", margin: "0 auto" }}
       >
+        <div style={{ textAlign: "center", marginBottom: "48px" }}>
+          <span style={{ fontSize: "11px", color: "var(--sapphire)", fontWeight: "800", letterSpacing: "0.15em", textTransform: "uppercase" }}>Features</span>
+          <h2 className="serif" style={{ fontSize: "36px", color: "var(--text-primary)", marginTop: "8px" }}>Full Editorial Suite</h2>
+        </div>
+        
         <div
           style={{
             display: "grid",
             gridTemplateColumns: "repeat(3, 1fr)",
-            gap: "1px",
-            border: "1px solid #e8e8e4",
-            borderRadius: "12px",
-            overflow: "hidden",
-            background: "#e8e8e4",
+            gap: "20px",
           }}
         >
           {[
             {
               icon: Zap,
               title: "AI-Powered Writing",
-              desc: "GPT-4o generates coherent, professional prose chapter by chapter with unprecedented quality.",
+              desc: "Deep narrative planning creates organic chapters with consistent flow and tone.",
             },
             {
               icon: Download,
               title: "PDF & Word Export",
-              desc: "Get a print-ready PDF and fully formatted .docx file instantly, ready for KDP or editing.",
+              desc: "Fully paginated PDFs and style-formatted DOCX outputs standard for print.",
             },
             {
               icon: RefreshCw,
-              title: "Resume on Failure",
-              desc: "Generation paused? The agent picks up exactly where it left off. Never lose progress.",
+              title: "Resume Processing",
+              desc: "If backend timeouts occur, simple one-click retry recovers exact draft stage.",
             },
             {
               icon: Shield,
-              title: "Your Books, Secure",
-              desc: "Every manuscript is private to your account with Firebase-secured authentication.",
+              title: "Secured Vault",
+              desc: "Firebase user security makes sure your proprietary manuscripts are yours alone.",
             },
             {
               icon: BookOpen,
-              title: "Any Topic",
-              desc: "Non-fiction, guides, textbooks, business books — any title you choose, any genre.",
+              title: "Versatile Genres",
+              desc: "From poetry and research papers to fiction novellas and instructional guides.",
             },
             {
-              icon: FileText,
-              title: "Structured Output",
-              desc: "Beautiful cover pages, table of contents, chapter headings and formatted body text.",
+              icon: Layers,
+              title: "Layout Engine",
+              desc: "Format page trim sizes, outer margins, lines per page, and drop caps visually.",
             },
           ].map((f, i) => (
-            <div key={i} style={{ background: "white", padding: "28px 24px" }}>
+            <div
+              key={i}
+              className="card card-hover"
+              style={{
+                background: "var(--onyx)",
+                padding: "32px 28px",
+                border: "1.5px solid var(--border-mid)",
+              }}
+            >
               <div
                 style={{
-                  width: "36px",
-                  height: "36px",
-                  background: "#f0f6ff",
-                  borderRadius: "8px",
+                  width: "40px",
+                  height: "40px",
+                  background: "var(--sapphire-dim)",
+                  borderRadius: "10px",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
-                  marginBottom: "14px",
+                  marginBottom: "20px",
+                  border: "1px solid rgba(37, 99, 235, 0.15)",
                 }}
               >
-                <f.icon size={18} color="#2563eb" />
+                <f.icon size={18} color="var(--sapphire)" />
               </div>
               <h3
                 style={{
-                  fontWeight: "600",
+                  fontWeight: "700",
                   fontSize: "15px",
-                  marginBottom: "6px",
-                  color: '#2b2b2bff',
+                  marginBottom: "8px",
+                  color: 'var(--text-primary)',
                 }}
               >
                 {f.title}
               </h3>
-              <p style={{ color: "#777", fontSize: "13px", lineHeight: "1.5" }}>
+              <p style={{ color: "var(--text-tertiary)", fontSize: "13px", lineHeight: "1.5" }}>
                 {f.desc}
               </p>
             </div>
@@ -521,45 +620,58 @@ export default function Home() {
         </div>
       </section>
 
-      {/* CTA */}
+      {/* CTA Section */}
       <section
         style={{
-          background: "#1a1a1a",
-          padding: "80px 48px",
+          background: "var(--text-primary)",
+          padding: "100px 48px",
           textAlign: "center",
+          position: "relative",
+          overflow: "hidden",
         }}
       >
+        {/* Glow overlay */}
+        <div style={{
+          position: "absolute", inset: 0, opacity: 0.15, pointerEvents: "none",
+          background: "radial-gradient(circle at center, var(--sapphire) 0%, transparent 60%)"
+        }} />
+        
         <h2
+          className="serif fade-in"
           style={{
-            fontSize: "48px",
-            fontWeight: "800",
-            color: "white",
+            fontSize: "52px",
+            fontWeight: "400",
+            color: "var(--void)",
             letterSpacing: "-0.02em",
-            fontFamily: "Playfair Display, serif",
-            marginBottom: "16px",
+            marginBottom: "20px",
+            position: "relative",
+            zIndex: 2,
           }}
         >
           Ready to Write Your Book?
         </h2>
-        <p style={{ color: "#888", fontSize: "16px", marginBottom: "36px" }}>
-          The blank page is a thing of the past. Join authors using Publixo AI
-          to bring their stories to life.
+        <p style={{ color: "var(--ash)", fontSize: "16px", marginBottom: "40px", maxWidth: "540px", margin: "0 auto 40px", lineHeight: 1.6, position: "relative", zIndex: 2 }}>
+          The blank page is a thing of the past. Join writers using Publixo AI to bring their manuscript to life.
         </p>
-        <Link href="/login?signup=true">
+        <Link href="/login?signup=true" style={{ position: "relative", zIndex: 2 }}>
           <button
             style={{
-              background: "white",
-              color: "#1a1a1a",
+              background: "var(--void)",
+              color: "var(--text-primary)",
               border: "none",
-              borderRadius: "8px",
-              padding: "14px 32px",
+              borderRadius: "12px",
+              padding: "16px 36px",
               fontSize: "14px",
               fontWeight: "700",
               cursor: "pointer",
               display: "inline-flex",
               alignItems: "center",
               gap: "8px",
+              boxShadow: "0 10px 25px rgba(0,0,0,0.2)",
+              transition: "transform 0.2s",
             }}
+            onMouseOver={e => e.currentTarget.style.transform = "translateY(-2px)"}
+            onMouseOut={e => e.currentTarget.style.transform = "translateY(0)"}
           >
             Start Writing Free <ArrowRight size={16} />
           </button>
@@ -569,11 +681,13 @@ export default function Home() {
       {/* Footer */}
       <footer
         style={{
-          borderTop: "1px solid #e8e8e4",
-          padding: "24px 48px",
+          borderTop: "1.5px solid var(--border-mid)",
+          padding: "32px 48px",
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
+          background: "rgba(255, 255, 255, 0.4)",
+          backdropFilter: "blur(8px)",
         }}
       >
         <div
@@ -582,7 +696,8 @@ export default function Home() {
             alignItems: "center",
             gap: "8px",
             fontSize: "13px",
-            color: "#888",
+            color: "var(--text-tertiary)",
+            fontWeight: "600",
           }}
         >
           <FileText size={14} />
@@ -591,16 +706,16 @@ export default function Home() {
         <div
           style={{
             display: "flex",
-            gap: "20px",
+            gap: "24px",
             fontSize: "13px",
-            color: "#888",
+            color: "var(--text-tertiary)",
           }}
         >
-          <span style={{ cursor: "pointer" }}>Privacy Policy</span>
-          <span style={{ cursor: "pointer" }}>Terms of Service</span>
-          <span style={{ cursor: "pointer" }}>Documentation</span>
+          <span style={{ cursor: "pointer", transition: "color 0.2s" }} onMouseOver={e => e.currentTarget.style.color="var(--text-primary)"} onMouseOut={e => e.currentTarget.style.color="var(--text-tertiary)"}>Privacy Policy</span>
+          <span style={{ cursor: "pointer", transition: "color 0.2s" }} onMouseOver={e => e.currentTarget.style.color="var(--text-primary)"} onMouseOut={e => e.currentTarget.style.color="var(--text-tertiary)"}>Terms of Service</span>
+          <span style={{ cursor: "pointer", transition: "color 0.2s" }} onMouseOver={e => e.currentTarget.style.color="var(--text-primary)"} onMouseOut={e => e.currentTarget.style.color="var(--text-tertiary)"}>Documentation</span>
         </div>
-        <span style={{ fontSize: "12px", color: "#aaa" }}>
+        <span style={{ fontSize: "12px", color: "var(--ash)" }}>
           © 2026 Publixo AI Suite
         </span>
       </footer>

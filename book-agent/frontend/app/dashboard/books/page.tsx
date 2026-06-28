@@ -27,25 +27,24 @@ import {
   ArrowLeft,
   Sparkles,
   Zap,
-  Globe,
   RefreshCw,
   AlertTriangle,
 } from "lucide-react";
 
 // ── Status config ──────────────────────────────────────────────────────────────
 const STATUS_META: Record<string, { label: string; color: string; bg: string; border: string; glow: string }> = {
-  pending: { label: "Pending", color: "#6b7280", bg: "rgba(107,114,128,0.06)", border: "#e8e8e4", glow: "transparent" },
-  outlining: { label: "Creating Outline…", color: "#2563eb", bg: "rgba(37,99,235,0.05)", border: "rgba(37,99,235,0.18)", glow: "rgba(37,99,235,0.08)" },
-  generating: { label: "Writing Chapters…", color: "#2563eb", bg: "rgba(37,99,235,0.05)", border: "rgba(37,99,235,0.18)", glow: "rgba(37,99,235,0.08)" },
-  assembling: { label: "Assembling Book…", color: "#b45309", bg: "rgba(180,83,9,0.05)", border: "rgba(180,83,9,0.18)", glow: "rgba(180,83,9,0.06)" },
-  done: { label: "Complete", color: "#16a34a", bg: "rgba(22,163,74,0.05)", border: "rgba(22,163,74,0.2)", glow: "rgba(22,163,74,0.06)" },
-  failed: { label: "Failed", color: "#dc2626", bg: "rgba(220,38,38,0.05)", border: "rgba(220,38,38,0.18)", glow: "transparent" },
+  pending: { label: "Pending", color: "var(--mist)", bg: "rgba(110,110,110,0.06)", border: "var(--border-mid)", glow: "transparent" },
+  outlining: { label: "Creating Outline…", color: "var(--violet)", bg: "rgba(139,92,246,0.06)", border: "rgba(139,92,246,0.18)", glow: "rgba(139,92,246,0.08)" },
+  generating: { label: "Writing Chapters…", color: "var(--sapphire)", bg: "var(--sapphire-dim)", border: "var(--border-strong)", glow: "var(--sapphire-glow)" },
+  assembling: { label: "Assembling Book…", color: "var(--amber)", bg: "rgba(245,158,11,0.06)", border: "rgba(245,158,11,0.18)", glow: "rgba(245,158,11,0.06)" },
+  done: { label: "Complete", color: "var(--emerald)", bg: "rgba(16,185,129,0.06)", border: "rgba(16,185,129,0.2)", glow: "rgba(16,185,129,0.06)" },
+  failed: { label: "Failed", color: "var(--crimson)", bg: "rgba(239,68,68,0.06)", border: "rgba(239,68,68,0.18)", glow: "transparent" },
 };
 
 const STYLE_OPTIONS = [
   { value: "", label: "✦ Default", hint: "Professional & balanced" },
   { value: "academic", label: "🎓 Academic", hint: "Formal, research-oriented, citation-friendly" },
-  { value: "conversational", label: "💬 Conversational", hint: "Friendly, accessible, like talking to a friend" },
+  { value: "conversational", label: "💬 Conversational", hint: "Friendly, accessible, conversational" },
   { value: "storytelling", label: "📖 Storytelling", hint: "Narrative-driven, vivid scenes, character focus" },
   { value: "technical", label: "⚙️ Technical", hint: "Precise, structured, jargon-appropriate" },
   { value: "inspirational", label: "✨ Inspirational", hint: "Motivating, uplifting, call-to-action tone" },
@@ -53,7 +52,7 @@ const STYLE_OPTIONS = [
   { value: "journalistic", label: "📰 Journalistic", hint: "Objective, concise, fact-forward" },
   { value: "poetic", label: "🌿 Poetic", hint: "Lyrical, metaphor-rich, literary" },
   { value: "minimalist", label: "◻ Minimalist", hint: "Sparse, direct, no fluff" },
-  { value: "other", label: "\u270F\uFE0F Other", hint: "Describe your own style" },
+  { value: "other", label: "✍️ Other", hint: "Describe your own style" },
 ];
 
 const LANGUAGE_OPTIONS = [
@@ -217,24 +216,23 @@ export default function BooksPage() {
   const totalWords = pages * wpp;
   const estimatedTime = pages < 20 ? "5–10" : pages < 100 ? "10–20" : "20–35";
 
-  // ── Render ──────────────────────────────────────────────────────────────────
   return (
     <div style={{
       minHeight: "100vh",
-      background: "#f7f2e4",
-      color: "#2b2b2b",
+      background: "var(--void)",
+      color: "var(--text-primary)",
       fontFamily: "'DM Sans', sans-serif",
       position: "relative",
       overflowX: "hidden",
     }}>
+      <div className="grid-overlay" />
 
       {/* ── Nav ──────────────────────────────────────────────────────────────── */}
-      <nav style={{
+      <nav className="glass" style={{
         position: "sticky", top: 0, zIndex: 50,
-        background: "#ffffff",
-        borderBottom: "1px solid #efefcf",
+        borderBottom: "1.5px solid var(--border-mid)",
         padding: "0 32px",
-        height: "58px",
+        height: "60px",
         display: "flex",
         alignItems: "center",
         justifyContent: "space-between",
@@ -242,49 +240,40 @@ export default function BooksPage() {
         <div style={{ display: "flex", alignItems: "center", gap: "20px" }}>
           <button
             onClick={() => router.push("/dashboard")}
+            className="btn-ghost"
             style={{
               display: "flex", alignItems: "center", gap: "6px",
-              background: "none", border: "none", color: "#6b7280",
-              fontSize: "13px", fontWeight: "500", cursor: "pointer", padding: "6px 0",
-              transition: "color 0.2s",
+              fontSize: "12px", padding: "6px 12px", borderRadius: "8px"
             }}
-            onMouseOver={e => (e.currentTarget.style.color = "#2b2b2b")}
-            onMouseOut={e => (e.currentTarget.style.color = "#6b7280")}
           >
             <ArrowLeft size={13} /> Dashboard
           </button>
 
-          <div style={{ width: "1px", height: "16px", background: "#e8e8e4" }} />
+          <div style={{ width: "1px", height: "16px", background: "var(--border-mid)" }} />
 
           <div style={{ display: "flex", alignItems: "center", gap: "9px" }}>
             <div style={{
-              width: "30px", height: "30px",
-              background: "#1a1a1a",
-              borderRadius: "7px",
+              width: "28px", height: "28px",
+              background: "var(--text-primary)",
+              borderRadius: "6px",
               display: "flex", alignItems: "center", justifyContent: "center",
             }}>
-              <BookOpen size={14} color="#ffffff" />
+              <BookOpen size={14} color="var(--void)" />
             </div>
-            <span style={{ fontWeight: "600", fontSize: "14px", letterSpacing: "-0.01em", color: "#2b2b2b" }}>
+            <span style={{ fontWeight: "800", fontSize: "14px", letterSpacing: "-0.01em", color: "var(--text-primary)" }}>
               Book Writing
             </span>
           </div>
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
-          <span style={{ fontSize: "12px", color: "#9ca3af" }}>{user?.email}</span>
+          <span style={{ fontSize: "12px", color: "var(--text-tertiary)", fontWeight: "500" }}>{user?.email}</span>
           <button
             onClick={() => logout().then(() => router.push("/login"))}
+            className="btn-ghost"
             style={{
-              display: "flex", alignItems: "center", gap: "6px",
-              background: "#ffffff",
-              border: "1px solid #e8e8e4",
-              borderRadius: "8px", padding: "6px 12px",
-              color: "#6b7280", fontSize: "12px", fontWeight: "500", cursor: "pointer",
-              transition: "all 0.2s",
+              padding: "6px 12px", borderRadius: "8px", fontSize: "12px"
             }}
-            onMouseOver={e => { e.currentTarget.style.background = "#f7f2e4"; e.currentTarget.style.color = "#2b2b2b"; }}
-            onMouseOut={e => { e.currentTarget.style.background = "#ffffff"; e.currentTarget.style.color = "#6b7280"; }}
           >
             <LogOut size={12} /> Sign out
           </button>
@@ -292,91 +281,78 @@ export default function BooksPage() {
       </nav>
 
       {/* ── Main ─────────────────────────────────────────────────────────────── */}
-      <main style={{ maxWidth: "900px", margin: "0 auto", padding: "48px 32px 80px" }}>
+      <main style={{ maxWidth: "920px", margin: "0 auto", padding: "64px 32px 96px", position: "relative", zIndex: 2 }}>
 
         {/* Page header */}
         <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", marginBottom: "40px" }}>
           <div>
             <div style={{
               display: "inline-flex", alignItems: "center", gap: "6px",
-              background: "#ffffff",
-              border: "1px solid #e8e8e4",
-              borderRadius: "20px", padding: "3px 12px",
+              background: "var(--onyx)",
+              border: "1.5px solid var(--border-mid)",
+              borderRadius: "20px", padding: "4px 14px",
               fontSize: "10px", fontWeight: "700", letterSpacing: "0.1em",
-              color: "#2563eb", marginBottom: "14px",
+              color: "var(--sapphire)", marginBottom: "14px",
             }}>
               <Sparkles size={10} /> AI MANUSCRIPT STUDIO
             </div>
-            <h1 style={{
-              fontSize: "36px", fontWeight: "800", letterSpacing: "-0.03em",
-              fontFamily: "'Playfair Display', Georgia, serif",
+            <h1 className="serif" style={{
+              fontSize: "40px", fontWeight: "400", letterSpacing: "-0.02em",
               lineHeight: "1.1", marginBottom: "8px",
-              color: "#2b2b2b",
+              color: "var(--text-primary)",
             }}>
               My Books
             </h1>
-            <p style={{ color: "#6b7280", fontSize: "13px", fontWeight: "400" }}>
+            <p style={{ color: "var(--text-secondary)", fontSize: "14px" }}>
               Generate and manage your AI-written manuscripts
             </p>
           </div>
 
           <button
             onClick={() => setShowForm(!showForm)}
+            className="btn-dark"
             style={{
-              display: "flex", alignItems: "center", gap: "8px",
-              background: showForm ? "#f7f2e4" : "#1a1a1a",
-              border: showForm ? "1px solid #e8e8e4" : "1px solid #1a1a1a",
-              borderRadius: "12px", padding: "11px 20px",
-              color: showForm ? "#2b2b2b" : "#ffffff",
-              fontSize: "13px", fontWeight: "600",
-              cursor: "pointer",
-              transition: "all 0.2s",
-              letterSpacing: "0.01em",
-            }}
-            onMouseOver={e => {
-              if (!showForm) { e.currentTarget.style.background = "#333333"; }
-            }}
-            onMouseOut={e => {
-              if (!showForm) { e.currentTarget.style.background = "#1a1a1a"; }
+              padding: "10px 20px", borderRadius: "10px", fontSize: "13px",
+              background: showForm ? "var(--onyx)" : "var(--text-primary)",
+              color: showForm ? "var(--text-primary)" : "var(--void)",
+              borderColor: showForm ? "var(--border-strong)" : "var(--text-primary)",
             }}
           >
             <Plus size={15} />
             New Book
-            {showForm ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+            {showForm ? <ChevronUp size={13} style={{ marginLeft: "4px" }} /> : <ChevronDown size={13} style={{ marginLeft: "4px" }} />}
           </button>
         </div>
 
         {/* ── New Book Form ───────────────────────────────────────────────────── */}
         {showForm && (
-          <div style={{
-            background: "#ffffff",
-            border: "1px solid #e8e8e4",
+          <div className="card fade-in" style={{
+            background: "var(--onyx)",
+            border: "1.5px solid var(--border-mid)",
             borderRadius: "20px",
-            padding: "32px",
+            padding: "36px",
             marginBottom: "32px",
-            boxShadow: "0 8px 40px rgba(0,0,0,0.08)",
-            animation: "slideDown 0.25s ease",
+            boxShadow: "0 15px 40px -10px rgba(37,99,235,0.06)",
           }}>
             {/* Form header */}
             <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "28px" }}>
               <div style={{
                 width: "36px", height: "36px",
-                background: "#f7f2e4",
-                border: "1px solid #e8e8e4",
+                background: "var(--void)",
+                border: "1.5px solid var(--border-mid)",
                 borderRadius: "10px",
                 display: "flex", alignItems: "center", justifyContent: "center",
               }}>
-                <Zap size={16} color="#2563eb" />
+                <Zap size={16} color="var(--sapphire)" />
               </div>
               <div>
-                <h2 style={{
-                  fontWeight: "700", fontSize: "16px", letterSpacing: "-0.01em",
-                  fontFamily: "'Playfair Display', Georgia, serif",
-                  color: "#2b2b2b",
+                <h2 className="serif" style={{
+                  fontWeight: "400", fontSize: "18px",
+                  color: "var(--text-primary)",
                 }}>
                   Generate New Book
                 </h2>
-                <p style={{ color: "#9ca3af", fontSize: "12px", marginTop: "1px" }}>
+                <p style={{ color: "var(--text-tertiary)", fontSize: "12px", marginTop: "1px" }}>
                   Configure your manuscript parameters
                 </p>
               </div>
@@ -385,58 +361,40 @@ export default function BooksPage() {
             <form onSubmit={handleGenerate}>
 
               {/* ── STEP 1: Describe ── */}
-              <div style={{ marginBottom: "20px" }}>
-                <label style={{
-                  display: "flex", alignItems: "center", gap: "8px",
-                  fontSize: "11px", fontWeight: "700", letterSpacing: "0.1em",
-                  textTransform: "uppercase", color: "#0c43bb", marginBottom: "8px",
-                }}>
+              <div style={{ marginBottom: "24px" }}>
+                <label className="field-label" style={{ display: "flex", alignItems: "center", gap: "8px", color: "var(--sapphire)" }}>
                   <span style={{
                     width: "20px", height: "20px", borderRadius: "50%",
-                    background: "#1a1a1a", color: "#ffffff",
+                    background: "var(--text-primary)", color: "var(--void)",
                     display: "inline-flex", alignItems: "center", justifyContent: "center",
-                    fontSize: "10px", fontWeight: "700", flexShrink: 0,
+                    fontSize: "10px", fontWeight: "700",
                   }}>1</span>
                   Describe what you want to write
                 </label>
                 <textarea
                   value={description}
                   onChange={e => setDescription(e.target.value)}
-                  placeholder="e.g. A thriller about an AI that gains consciousness, or a self-help book on building better habits…"
-                  rows={3}
-                  style={{
-                    width: "100%", background: "#f7f2e4",
-                    border: "1px solid #e8e8e4",
-                    borderRadius: "12px", padding: "13px 16px",
-                    fontSize: "14px", color: "#2b2b2b",
-                    outline: "none", resize: "vertical", lineHeight: "1.6",
-                    fontFamily: "inherit", boxSizing: "border-box",
-                    transition: "border-color 0.2s, box-shadow 0.2s",
-                  }}
-                  onFocus={e => { e.target.style.borderColor = "#2563eb"; e.target.style.boxShadow = "0 0 0 3px rgba(37,99,235,0.08)"; }}
-                  onBlur={e => { e.target.style.borderColor = "#e8e8e4"; e.target.style.boxShadow = "none"; }}
+                  placeholder="e.g. A mystery novel set in medieval Varanasi about an astrologer, or an ultimate self-help manual on coding habits…"
+                  rows={4}
+                  className="input-field"
+                  style={{ resize: "vertical", lineHeight: "1.6" }}
                 />
-                <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "8px" }}>
+                <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "10px" }}>
                   <button
                     type="button"
                     onClick={handleSuggestTitles}
                     disabled={suggestingTitles || description.trim().length < 5}
+                    className="btn-outline"
                     style={{
-                      display: "flex", alignItems: "center", gap: "6px",
-                      background: "#f7f2e4",
-                      border: "1px solid #e8e8e4",
-                      borderRadius: "10px", padding: "8px 16px",
-                      color: "#2563eb", fontSize: "12px", fontWeight: "600",
-                      cursor: suggestingTitles || description.trim().length < 5 ? "not-allowed" : "pointer",
+                      padding: "8px 16px", borderRadius: "8px", fontSize: "12px",
                       opacity: description.trim().length < 5 ? 0.45 : 1,
-                      transition: "all 0.15s",
                     }}
                   >
                     {suggestingTitles
-                      ? <><Loader size={12} style={{ animation: "spin 1s linear infinite" }} /> Thinking…</>
+                      ? <><Loader size={12} style={{ animation: "spin 1s linear infinite" }} /> Suggesting…</>
                       : suggestedTitles.length > 0
                         ? <><RefreshCw size={12} /> Regenerate titles</>
-                        : <><Sparkles size={12} /> Suggest titles &amp; chapters</>
+                        : <><Sparkles size={12} /> Suggest titles</>
                     }
                   </button>
                 </div>
@@ -444,21 +402,17 @@ export default function BooksPage() {
 
               {/* ── STEP 2: Suggested Titles ── */}
               {suggestedTitles.length > 0 && (
-                <div style={{ marginBottom: "20px" }}>
-                  <label style={{
-                    display: "flex", alignItems: "center", gap: "8px",
-                    fontSize: "11px", fontWeight: "700", letterSpacing: "0.1em",
-                    textTransform: "uppercase", color: "#0c43bb", marginBottom: "10px",
-                  }}>
+                <div style={{ marginBottom: "24px" }}>
+                  <label className="field-label" style={{ display: "flex", alignItems: "center", gap: "8px", color: "var(--sapphire)" }}>
                     <span style={{
                       width: "20px", height: "20px", borderRadius: "50%",
-                      background: "#1a1a1a", color: "#ffffff",
+                      background: "var(--text-primary)", color: "var(--void)",
                       display: "inline-flex", alignItems: "center", justifyContent: "center",
-                      fontSize: "10px", fontWeight: "700", flexShrink: 0,
+                      fontSize: "10px", fontWeight: "700",
                     }}>2</span>
-                    Suggested titles
+                    Select a Title Concept
                   </label>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: "7px" }}>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
                     {suggestedTitles.map((t) => {
                       const isSelected = title === t;
                       return (
@@ -467,14 +421,14 @@ export default function BooksPage() {
                           type="button"
                           onClick={() => setTitle(t)}
                           style={{
-                            padding: "7px 14px",
-                            borderRadius: "8px",
-                            fontSize: "13px", fontWeight: "500",
-                            border: isSelected ? "1px solid #2563eb" : "1px solid #e8e8e4",
-                            background: isSelected ? "rgba(37,99,235,0.07)" : "#f7f2e4",
-                            color: isSelected ? "#2563eb" : "#2b2b2b",
+                            padding: "8px 16px",
+                            borderRadius: "10px",
+                            fontSize: "13px", fontWeight: "600",
+                            border: isSelected ? "1.5px solid var(--sapphire)" : "1px solid var(--border-mid)",
+                            background: isSelected ? "var(--sapphire-dim)" : "var(--onyx)",
+                            color: isSelected ? "var(--sapphire)" : "var(--text-primary)",
                             cursor: "pointer",
-                            transition: "all 0.15s",
+                            transition: "all 0.2s",
                           }}
                         >
                           {t}
@@ -486,247 +440,143 @@ export default function BooksPage() {
               )}
 
               {/* ── STEP 3: Book Title (final) ── */}
-              <div style={{ marginBottom: "20px" }}>
-                <label style={{
-                  display: "flex", alignItems: "center", gap: "8px",
-                  fontSize: "11px", fontWeight: "700", letterSpacing: "0.1em",
-                  textTransform: "uppercase", color: "#0c43bb", marginBottom: "8px",
-                }}>
+              <div style={{ marginBottom: "24px" }}>
+                <label className="field-label" style={{ display: "flex", alignItems: "center", gap: "8px", color: "var(--sapphire)" }}>
                   <span style={{
                     width: "20px", height: "20px", borderRadius: "50%",
-                    background: "#1a1a1a", color: "#ffffff",
+                    background: "var(--text-primary)", color: "var(--void)",
                     display: "inline-flex", alignItems: "center", justifyContent: "center",
-                    fontSize: "10px", fontWeight: "700", flexShrink: 0,
+                    fontSize: "10px", fontWeight: "700",
                   }}>3</span>
-                  {suggestedTitles.length > 0 ? "Choose a suggested title or write your own" : "Book Title"}
+                  Final Book Title
                 </label>
                 <input
                   type="text"
                   value={title}
                   onChange={e => setTitle(e.target.value)}
-                  required
-                  placeholder="e.g. The Art of Leadership"
-                  style={{
-                    width: "100%", background: "#f7f2e4",
-                    border: "1px solid #e8e8e4",
-                    borderRadius: "12px", padding: "13px 16px",
-                    fontSize: "14px", color: "#2b2b2b",
-                    outline: "none", transition: "border-color 0.2s, box-shadow 0.2s",
-                    boxSizing: "border-box",
-                  }}
-                  onFocus={e => { e.target.style.borderColor = "#2563eb"; e.target.style.boxShadow = "0 0 0 3px rgba(37,99,235,0.08)"; }}
-                  onBlur={e => { e.target.style.borderColor = "#e8e8e4"; e.target.style.boxShadow = "none"; }}
+                  placeholder="Or enter your custom title here..."
+                  className="input-field"
                 />
               </div>
 
-              {/* ── Output Language ── */}
-              <div style={{ marginBottom: "24px" }}>
-                <label style={{
-                  display: "flex", alignItems: "center", gap: "6px",
-                  fontSize: "11px", fontWeight: "700", letterSpacing: "0.1em",
-                  textTransform: "uppercase", color: "#0c43bb", marginBottom: "10px",
-                }}>
-                  <Globe size={11} color="#2563eb" /> Output language
-                  <span style={{ color: "#9ca3af", fontSize: "10px", fontWeight: "400", textTransform: "none", letterSpacing: "0", marginLeft: "4px" }}>
-                    — book will be written in this language
-                  </span>
-                </label>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginBottom: "10px" }}>
-                  {LANGUAGE_OPTIONS.map((lang) => {
-                    const isSelected = selectedLanguage === lang;
-                    return (
-                      <button
-                        key={lang}
-                        type="button"
-                        onClick={() => setSelectedLanguage(lang)}
-                        style={{
-                          padding: "5px 12px",
-                          borderRadius: "8px",
-                          fontSize: "12px", fontWeight: "500",
-                          border: isSelected ? "1px solid #2563eb" : "1px solid #e8e8e4",
-                          background: isSelected ? "rgba(37,99,235,0.07)" : "#f7f2e4",
-                          color: isSelected ? "#2563eb" : "#6b7280",
-                          cursor: "pointer",
-                          transition: "all 0.15s",
-                        }}
-                      >
-                        {lang}
-                      </button>
-                    );
-                  })}
-                </div>
-                {selectedLanguage === "Other" && (
-                  <input
-                    type="text"
-                    value={customLanguage}
-                    onChange={e => setCustomLanguage(e.target.value)}
-                    placeholder="Type your language (e.g. Swahili, Malay…)"
-                    autoFocus
-                    style={{
-                      width: "100%", background: "#f7f2e4",
-                      border: "1px solid rgba(37,99,235,0.3)",
-                      borderRadius: "10px", padding: "11px 14px",
-                      fontSize: "13px", color: "#2b2b2b",
-                      outline: "none", boxSizing: "border-box",
-                      transition: "border-color 0.2s",
-                    }}
-                    onFocus={e => e.target.style.borderColor = "#2563eb"}
-                    onBlur={e => e.target.style.borderColor = "rgba(37,99,235,0.3)"}
-                  />
-                )}
-                {selectedLanguage && selectedLanguage !== "Other" && (
-                  <p style={{ color: "#9ca3af", fontSize: "11px", marginTop: "6px" }}>
-                    Book will be written entirely in <span style={{ color: "#2563eb", fontWeight: "600" }}>{selectedLanguage}</span>.
-                  </p>
-                )}
-              </div>
-
-              {/* ── Writing Style ── */}
-              <div style={{ marginBottom: "24px" }}>
-                <label style={{
-                  display: "block", fontSize: "11px", fontWeight: "700",
-                  letterSpacing: "0.1em", textTransform: "uppercase",
-                  color: "#0c43bb", marginBottom: "10px",
-                }}>
-                  Writing Style
-                  <span style={{ color: "#9ca3af", fontSize: "10px", fontWeight: "400", marginLeft: "8px", textTransform: "none", letterSpacing: "0" }}>
-                    (hover for details)
-                  </span>
-                </label>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: "7px" }}>
-                  {STYLE_OPTIONS.map(({ value, label, hint }) => {
-                    const selected = writingStyle === value;
-                    return (
-                      <button
-                        key={value}
-                        type="button"
-                        title={hint}
-                        onClick={() => setWritingStyle(value)}
-                        style={{
-                          padding: "6px 13px",
-                          borderRadius: "8px",
-                          fontSize: "12px", fontWeight: "500",
-                          border: selected ? "1px solid #2563eb" : "1px solid #e8e8e4",
-                          background: selected ? "rgba(37,99,235,0.07)" : "#f7f2e4",
-                          color: selected ? "#2563eb" : "#6b7280",
-                          cursor: "pointer", whiteSpace: "nowrap",
-                          transition: "all 0.15s",
-                        }}
-                        onMouseOver={e => { if (!selected) { e.currentTarget.style.borderColor = "#d0d0cc"; e.currentTarget.style.color = "#2b2b2b"; } }}
-                        onMouseOut={e => { if (!selected) { e.currentTarget.style.borderColor = "#e8e8e4"; e.currentTarget.style.color = "#6b7280"; } }}
-                      >
-                        {label}
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {writingStyle === "other" && (
-                  <div style={{ marginTop: "12px" }}>
-                    <input
-                      type="text"
-                      value={customWritingStyle}
-                      onChange={e => setCustomWritingStyle(e.target.value)}
-                      placeholder="e.g. Socratic dialogue, stream of consciousness, epistolary…"
-                      autoFocus
-                      style={{
-                        width: "100%", background: "#f7f2e4",
-                        border: "1px solid rgba(37,99,235,0.3)",
-                        borderRadius: "10px", padding: "11px 14px",
-                        fontSize: "13px", color: "#2b2b2b",
-                        outline: "none", transition: "border-color 0.2s",
-                        boxSizing: "border-box",
-                      }}
-                      onFocus={e => e.target.style.borderColor = "#2563eb"}
-                      onBlur={e => e.target.style.borderColor = "rgba(37,99,235,0.3)"}
-                    />
-                    <p style={{ color: "#9ca3af", fontSize: "11px", marginTop: "6px" }}>
-                      Describe any style — AI will interpret and apply it throughout.
-                    </p>
-                  </div>
-                )}
-
-                {writingStyle && writingStyle !== "other" && (
-                  <p style={{ color: "#9ca3af", fontSize: "11px", marginTop: "8px" }}>
-                    Writing in a <span style={{ color: "#2563eb", fontWeight: "600" }}>{writingStyle}</span> style throughout.
-                  </p>
-                )}
-              </div>
-
-              {/* ── Sliders ── */}
+              {/* ── STEP 4: Configuration parameters ── */}
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px", marginBottom: "24px" }}>
-                <div style={{ background: "#f7f2e4", border: "1px solid #e8e8e4", borderRadius: "12px", padding: "16px" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
-                    <label style={{ fontSize: "11px", fontWeight: "700", letterSpacing: "0.08em", textTransform: "uppercase", color: "#0c43bb" }}>Pages</label>
-                    <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "22px", fontWeight: "800", color: "#2b2b2b", letterSpacing: "-0.02em" }}>{pages}</span>
+                {/* Trim details */}
+                <div style={{ background: "var(--void)", padding: "20px", borderRadius: "12px", border: "1px solid var(--border-mid)" }}>
+                  <label className="field-label" style={{ color: "var(--text-primary)", marginBottom: "12px" }}>Manuscript Size</label>
+                  
+                  <div style={{ marginBottom: "14px" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", marginBottom: "6px" }}>
+                      <span style={{ fontWeight: "600" }}>Total Chapters:</span>
+                      <span style={{ color: "var(--sapphire)", fontWeight: "700" }}>{pages} chapters</span>
+                    </div>
+                    <input
+                      type="range" min="3" max="25"
+                      value={pages} onChange={e => setPages(parseInt(e.target.value))}
+                      style={{ width: "100%" }}
+                    />
                   </div>
-                  <input type="range" min={5} max={200} step={5} value={pages} onChange={e => setPages(Number(e.target.value))} style={{ width: "100%", accentColor: "#2563eb" }} />
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "10px", color: "#9ca3af", marginTop: "4px" }}>
-                    <span>5</span><span>200</span>
+
+                  <div>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", marginBottom: "6px" }}>
+                      <span style={{ fontWeight: "600" }}>Words Per Chapter:</span>
+                      <span style={{ color: "var(--sapphire)", fontWeight: "700" }}>{wpp} words</span>
+                    </div>
+                    <input
+                      type="range" min="150" max="600" step="50"
+                      value={wpp} onChange={e => setWpp(parseInt(e.target.value))}
+                      style={{ width: "100%" }}
+                    />
+                  </div>
+
+                  <div style={{ borderTop: "1px solid var(--border-mid)", paddingTop: "12px", marginTop: "14px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+                    <div>
+                      <span style={{ fontSize: "10px", color: "var(--text-tertiary)", textTransform: "uppercase", fontWeight: "700" }}>Total Words</span>
+                      <p style={{ fontSize: "16px", fontWeight: "700", color: "var(--text-primary)" }}>{totalWords.toLocaleString()}</p>
+                    </div>
+                    <div>
+                      <span style={{ fontSize: "10px", color: "var(--text-tertiary)", textTransform: "uppercase", fontWeight: "700" }}>Write Time</span>
+                      <p style={{ fontSize: "16px", fontWeight: "700", color: "var(--text-primary)" }}>~{estimatedTime} mins</p>
+                    </div>
                   </div>
                 </div>
 
-                <div style={{ background: "#f7f2e4", border: "1px solid #e8e8e4", borderRadius: "12px", padding: "16px" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
-                    <label style={{ fontSize: "11px", fontWeight: "700", letterSpacing: "0.08em", textTransform: "uppercase", color: "#0c43bb" }}>Words / Page</label>
-                    <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "22px", fontWeight: "800", color: "#2b2b2b", letterSpacing: "-0.02em" }}>{wpp}</span>
+                {/* Style and language options */}
+                <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+                  <div>
+                    <label className="field-label">Writing Tone & Style</label>
+                    <select
+                      value={writingStyle}
+                      onChange={e => setWritingStyle(e.target.value)}
+                      className="input-field"
+                    >
+                      {STYLE_OPTIONS.map(opt => (
+                        <option key={opt.value} value={opt.value}>
+                          {opt.label} — {opt.hint}
+                        </option>
+                      ))}
+                    </select>
+
+                    {writingStyle === "other" && (
+                      <input
+                        type="text" value={customWritingStyle} onChange={e => setCustomWritingStyle(e.target.value)}
+                        placeholder="e.g. Victorian, cyber-noir, dense academic jargon..."
+                        className="input-field" style={{ marginTop: "8px" }}
+                      />
+                    )}
                   </div>
-                  <input type="range" min={150} max={300} step={10} value={wpp} onChange={e => setWpp(Number(e.target.value))} style={{ width: "100%", accentColor: "#2563eb" }} />
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "10px", color: "#9ca3af", marginTop: "4px" }}>
-                    <span>150</span><span>300</span>
+
+                  <div>
+                    <label className="field-label">Language</label>
+                    <select
+                      value={selectedLanguage}
+                      onChange={e => setSelectedLanguage(e.target.value)}
+                      className="input-field"
+                    >
+                      {LANGUAGE_OPTIONS.map(l => (
+                        <option key={l} value={l}>{l}</option>
+                      ))}
+                      <option value="Other">✏️ Other language</option>
+                    </select>
+
+                    {selectedLanguage === "Other" && (
+                      <input
+                        type="text" value={customLanguage} onChange={e => setCustomLanguage(e.target.value)}
+                        placeholder="e.g. Sanskrit, Icelandic..."
+                        className="input-field" style={{ marginTop: "8px" }}
+                      />
+                    )}
                   </div>
                 </div>
               </div>
 
-              {/* ── Estimate strip ── */}
-              <div style={{
-                display: "flex", gap: "0",
-                background: "#ffffff",
-                border: "1px solid #e8e8e4",
-                borderRadius: "12px", overflow: "hidden",
-                marginBottom: "24px",
-              }}>
-                {[
-                  { label: "Total Words", value: totalWords.toLocaleString() },
-                  { label: "Sections", value: `~${Math.ceil((pages * wpp) / 250) * 4}` },
-                  { label: "Est. Time", value: `~${estimatedTime} min` },
-                ].map((stat, i) => (
-                  <div key={stat.label} style={{ flex: 1, padding: "14px 16px", textAlign: "center", borderRight: i < 2 ? "1px solid #e8e8e4" : "none" }}>
-                    <div style={{ fontSize: "17px", fontWeight: "800", color: "#2b2b2b", fontFamily: "'Playfair Display', serif", letterSpacing: "-0.02em" }}>{stat.value}</div>
-                    <div style={{ fontSize: "10px", color: "#2563eb", fontWeight: "700", letterSpacing: "0.08em", textTransform: "uppercase", marginTop: "3px" }}>{stat.label}</div>
-                  </div>
-                ))}
-              </div>
-
-              {/* ── Error ── */}
+              {/* Error indicator */}
               {error && (
-                <div style={{ background: "#fff0f0", border: "1px solid rgba(220,38,38,0.2)", borderRadius: "10px", padding: "12px 14px", color: "#dc2626", fontSize: "13px", marginBottom: "20px" }}>
+                <div style={{
+                  background: "rgba(239,68,68,0.06)",
+                  border: "1px solid rgba(239,68,68,0.18)",
+                  borderRadius: "10px", padding: "12px 16px",
+                  color: "var(--crimson)", fontSize: "13px", marginBottom: "20px"
+                }}>
                   {error}
                 </div>
               )}
 
-              {/* ── Actions ── */}
+              {/* Actions */}
               <div style={{ display: "flex", gap: "10px" }}>
                 <button
                   type="submit"
                   disabled={loading || !title.trim()}
+                  className="btn-dark"
                   style={{
-                    flex: 1,
-                    background: loading || !title.trim() ? "#e8e8e4" : "#1a1a1a",
-                    border: "none", borderRadius: "12px",
-                    padding: "13px 24px",
-                    color: loading || !title.trim() ? "#9ca3af" : "#ffffff",
-                    fontSize: "14px", fontWeight: "700",
-                    cursor: loading || !title.trim() ? "not-allowed" : "pointer",
-                    display: "flex", alignItems: "center", justifyContent: "center", gap: "8px",
-                    transition: "all 0.2s",
-                    letterSpacing: "0.01em",
+                    flex: 1, justifyItems: "center", justifyContent: "center",
+                    background: loading || !title.trim() ? "rgba(0,0,0,0.04)" : "var(--text-primary)",
+                    color: loading || !title.trim() ? "var(--ash)" : "var(--void)",
+                    border: "none", opacity: loading || !title.trim() ? 0.6 : 1,
                   }}
-                  onMouseOver={e => { if (!loading && title.trim()) e.currentTarget.style.background = "#333333"; }}
-                  onMouseOut={e => { if (!loading && title.trim()) e.currentTarget.style.background = "#1a1a1a"; }}
                 >
                   {loading ? (
-                    <><Loader size={15} style={{ animation: "spin 1s linear infinite" }} /> Starting…</>
+                    <><Loader size={15} style={{ animation: "spin 1s linear infinite" }} /> Deploying Agent…</>
                   ) : (
                     <><Sparkles size={15} /> Generate Book</>
                   )}
@@ -734,15 +584,7 @@ export default function BooksPage() {
                 <button
                   type="button"
                   onClick={() => setShowForm(false)}
-                  style={{
-                    background: "#f7f2e4",
-                    border: "1px solid #e8e8e4",
-                    borderRadius: "12px", padding: "13px 20px",
-                    color: "#6b7280", fontSize: "13px", fontWeight: "500",
-                    cursor: "pointer", transition: "all 0.2s",
-                  }}
-                  onMouseOver={e => { e.currentTarget.style.color = "#2b2b2b"; e.currentTarget.style.borderColor = "#d0d0cc"; }}
-                  onMouseOut={e => { e.currentTarget.style.color = "#6b7280"; e.currentTarget.style.borderColor = "#e8e8e4"; }}
+                  className="btn-ghost"
                 >
                   Cancel
                 </button>
@@ -754,50 +596,47 @@ export default function BooksPage() {
         {/* ── Active Job Banner ───────────────────────────────────────────────── */}
         {activeJob && activeJob.status !== "done" && (() => {
 
-          // ── FAILED: friendly error card ──────────────────────────────────────
+          // FAILED Status
           if (activeJob.status === "failed") {
             return (
-              <div style={{
-                background: "#fff8f8",
-                border: "1px solid rgba(220,38,38,0.2)",
+              <div className="card fade-in" style={{
+                background: "rgba(239,68,68,0.02)",
+                border: "1.5px solid rgba(239,68,68,0.18)",
                 borderRadius: "16px",
-                padding: "20px 24px",
-                marginBottom: "28px",
+                padding: "24px",
+                marginBottom: "32px",
                 display: "flex",
                 alignItems: "flex-start",
-                gap: "14px",
-                animation: "fadeInUp 0.3s ease",
+                gap: "16px",
               }}>
                 <div style={{
                   width: "40px", height: "40px", flexShrink: 0,
-                  background: "#fff0f0",
-                  border: "1px solid rgba(220,38,38,0.2)",
+                  background: "rgba(239,68,68,0.08)",
+                  border: "1px solid rgba(239,68,68,0.15)",
                   borderRadius: "11px",
                   display: "flex", alignItems: "center", justifyContent: "center",
                 }}>
-                  <AlertTriangle size={18} color="#dc2626" />
+                  <AlertTriangle size={18} color="var(--crimson)" />
                 </div>
                 <div style={{ flex: 1 }}>
-                  <p style={{ fontWeight: "700", fontSize: "14px", color: "#dc2626", marginBottom: "5px", letterSpacing: "-0.01em", fontFamily: "'Playfair Display', serif" }}>
-                    "{activeJob.title}" couldn't be generated
+                  <h3 className="serif" style={{ fontWeight: "400", fontSize: "18px", color: "var(--crimson)", marginBottom: "6px" }}>
+                    "{activeJob.title}" failed to generate
+                  </h3>
+                  <p style={{ fontSize: "13px", color: "var(--text-secondary)", lineHeight: "1.6" }}>
+                    {activeJob.errorMessage ?? "An unexpected model error occurred during the outlining stage. Please retry."}
                   </p>
-                  <p style={{ fontSize: "13px", color: "#6b7280", lineHeight: "1.65" }}>
-                    {activeJob.errorMessage ?? "Something went wrong while generating your book. Please try again."}
-                  </p>
-                  <div style={{ display: "flex", gap: "8px", marginTop: "12px" }}>
+                  <div style={{ display: "flex", gap: "10px", marginTop: "14px" }}>
                     <button
                       onClick={() => { setShowForm(true); setActiveJob(null); }}
-                      style={{ display: "flex", alignItems: "center", gap: "6px", background: "#f7f2e4", border: "1px solid #e8e8e4", borderRadius: "8px", padding: "7px 14px", color: "#2563eb", fontSize: "12px", fontWeight: "600", cursor: "pointer", transition: "all 0.15s" }}
-                      onMouseOver={e => e.currentTarget.style.background = "#eeeade"}
-                      onMouseOut={e => e.currentTarget.style.background = "#f7f2e4"}
+                      className="btn-dark"
+                      style={{ padding: "6px 14px", fontSize: "12px", borderRadius: "8px", gap: "4px" }}
                     >
                       <RefreshCw size={12} /> Try Again
                     </button>
                     <button
                       onClick={() => setActiveJob(null)}
-                      style={{ background: "#ffffff", border: "1px solid #e8e8e4", borderRadius: "8px", padding: "7px 14px", color: "#6b7280", fontSize: "12px", cursor: "pointer", transition: "all 0.15s" }}
-                      onMouseOver={e => e.currentTarget.style.color = "#2b2b2b"}
-                      onMouseOut={e => e.currentTarget.style.color = "#6b7280"}
+                      className="btn-ghost"
+                      style={{ padding: "6px 14px", fontSize: "12px", borderRadius: "8px" }}
                     >
                       Dismiss
                     </button>
@@ -807,23 +646,22 @@ export default function BooksPage() {
             );
           }
 
-          // ── IN PROGRESS ───────────────────────────────────────────────────────
+          // IN PROGRESS
           const meta = STATUS_META[activeJob.status] || STATUS_META.pending;
           return (
-            <div style={{
-              background: "#ffffff",
-              border: `1px solid ${meta.border}`,
+            <div className="card pulse-glow" style={{
+              background: "var(--onyx)",
+              border: `1.5px solid ${meta.border}`,
               borderRadius: "16px",
-              padding: "20px 24px",
-              marginBottom: "28px",
-              boxShadow: `0 4px 24px ${meta.glow}`,
+              padding: "24px",
+              marginBottom: "32px",
               animation: "fadeInUp 0.3s ease",
             }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "16px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "14px", marginBottom: "18px" }}>
                 <div style={{
                   width: "36px", height: "36px",
-                  background: "#f7f2e4",
-                  border: "1px solid #e8e8e4",
+                  background: "var(--void)",
+                  border: "1.5px solid var(--border-mid)",
                   borderRadius: "10px",
                   display: "flex", alignItems: "center", justifyContent: "center",
                   flexShrink: 0,
@@ -831,33 +669,24 @@ export default function BooksPage() {
                   <Loader size={15} style={{ color: meta.color, animation: "spin 1.2s linear infinite" }} />
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <p style={{ fontWeight: "600", fontSize: "14px", letterSpacing: "-0.01em", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", color: "#2b2b2b", fontFamily: "'Playfair Display', serif" }}>
+                  <h3 className="serif" style={{ fontWeight: "400", fontSize: "18px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", color: "var(--text-primary)" }}>
                     {activeJob.title}
-                  </p>
-                  <p style={{ fontSize: "12px", color: meta.color, marginTop: "2px", fontWeight: "600" }}>
+                  </h3>
+                  <p style={{ fontSize: "12px", color: meta.color, marginTop: "2px", fontWeight: "700", letterSpacing: "0.02em", textTransform: "uppercase" }}>
                     {meta.label}
                   </p>
                 </div>
                 <div style={{ textAlign: "right", flexShrink: 0 }}>
-                  <span style={{
-                    fontFamily: "'Playfair Display', serif", fontSize: "28px", fontWeight: "800",
-                    color: "#2b2b2b", letterSpacing: "-0.03em",
-                  }}>{progress}%</span>
+                  <span className="serif" style={{ fontSize: "28px", fontWeight: "400", color: "var(--text-primary)" }}>{progress}%</span>
                 </div>
               </div>
 
               {/* Progress bar */}
-              <div style={{ height: "4px", background: "#e8e8e4", borderRadius: "4px", overflow: "hidden", marginBottom: "10px" }}>
-                <div style={{
-                  height: "100%",
-                  width: `${Math.max(4, progress)}%`,
-                  background: `linear-gradient(90deg, ${meta.color}88, ${meta.color})`,
-                  borderRadius: "4px",
-                  transition: "width 0.6s ease",
-                }} />
+              <div className="progress-bar" style={{ marginBottom: "14px" }}>
+                <div className="progress-fill" style={{ width: `${Math.max(4, progress)}%`, background: meta.color }} />
               </div>
 
-              {/* Step indicators */}
+              {/* Steps indicators */}
               <div style={{ display: "flex", gap: "6px" }}>
                 {["pending", "outlining", "generating", "assembling", "done"].map((step, i) => {
                   const steps = ["pending", "outlining", "generating", "assembling", "done"];
@@ -867,15 +696,15 @@ export default function BooksPage() {
                   return (
                     <div key={step} style={{
                       flex: 1, height: "3px", borderRadius: "3px",
-                      background: isDone ? meta.color : isActive ? `${meta.color}55` : "#e8e8e4",
+                      background: isDone ? meta.color : isActive ? `${meta.color}55` : "var(--graphite)",
                       transition: "background 0.4s",
                     }} />
                   );
                 })}
               </div>
 
-              <p style={{ fontSize: "11px", color: "#9ca3af", marginTop: "10px" }}>
-                {activeJob.segments} sections written of ~{totalSegments}
+              <p style={{ fontSize: "11px", color: "var(--text-tertiary)", marginTop: "12px" }}>
+                {activeJob.segments} sections compiled of ~{totalSegments} total
               </p>
             </div>
           );
@@ -886,49 +715,49 @@ export default function BooksPage() {
           <div style={{ textAlign: "center", padding: "80px 0" }}>
             <div style={{
               width: "48px", height: "48px", margin: "0 auto 16px",
-              background: "#f7f2e4", border: "1px solid #e8e8e4",
+              background: "var(--onyx)", border: "1.5px solid var(--border-mid)",
               borderRadius: "14px", display: "flex", alignItems: "center", justifyContent: "center",
             }}>
-              <Loader size={20} color="#2563eb" style={{ animation: "spin 1s linear infinite" }} />
+              <Loader size={20} color="var(--sapphire)" style={{ animation: "spin 1.2s linear infinite" }} />
             </div>
-            <p style={{ color: "#9ca3af", fontSize: "13px" }}>Loading your manuscripts…</p>
+            <p style={{ color: "var(--text-tertiary)", fontSize: "13px" }}>Querying manuscripts…</p>
           </div>
 
         ) : books.length === 0 ? (
           <div style={{
             textAlign: "center", padding: "80px 0",
-            background: "#ffffff",
-            border: "1px dashed #d0d0cc",
+            background: "var(--onyx)",
+            border: "1.5px dashed var(--border-strong)",
             borderRadius: "20px",
           }}>
             <div style={{
               width: "64px", height: "64px", margin: "0 auto 20px",
-              background: "#f7f2e4", border: "1px solid #e8e8e4",
+              background: "var(--void)", border: "1.5px solid var(--border-mid)",
               borderRadius: "18px", display: "flex", alignItems: "center", justifyContent: "center",
             }}>
-              <BookOpen size={28} color="#2563eb" style={{ opacity: 0.5 }} />
+              <BookOpen size={28} color="var(--sapphire)" style={{ opacity: 0.6 }} />
             </div>
-            <p style={{ fontSize: "18px", fontWeight: "800", color: "#2b2b2b", marginBottom: "6px", fontFamily: "'Playfair Display', serif" }}>
+            <p className="serif" style={{ fontSize: "20px", color: "var(--text-primary)", marginBottom: "6px" }}>
               No manuscripts yet
             </p>
-            <p style={{ fontSize: "13px", color: "#9ca3af" }}>
-              Click "New Book" above to generate your first AI manuscript
+            <p style={{ fontSize: "13px", color: "var(--text-tertiary)" }}>
+              Click "New Book" above to prompt your first AI writing model.
             </p>
           </div>
 
         ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
             {/* List header */}
             <div style={{
               display: "flex", alignItems: "center", justifyContent: "space-between",
-              paddingBottom: "12px", borderBottom: "1px solid #e8e8e4",
-              marginBottom: "4px",
+              paddingBottom: "12px", borderBottom: "1.5px solid var(--border-mid)",
+              marginBottom: "8px",
             }}>
-              <span style={{ fontSize: "11px", fontWeight: "700", letterSpacing: "0.1em", textTransform: "uppercase", color: "#0c43bb" }}>
+              <span className="field-label" style={{ margin: 0, color: "var(--sapphire)" }}>
                 {books.length} Manuscript{books.length !== 1 ? "s" : ""}
               </span>
-              <span style={{ fontSize: "11px", color: "#9ca3af" }}>
-                {books.filter(b => b.status === "done").length} complete
+              <span style={{ fontSize: "12px", color: "var(--text-tertiary)", fontWeight: "600" }}>
+                {books.filter(b => b.status === "done").length} ready for print
               </span>
             </div>
 
@@ -941,112 +770,111 @@ export default function BooksPage() {
               return (
                 <div
                   key={book.book_id}
+                  className="card"
                   style={{
-                    background: "#ffffff",
-                    border: `1px solid ${isComplete ? "rgba(22,163,74,0.2)" : "#e8e8e4"}`,
-                    borderRadius: "14px",
-                    padding: "18px 20px",
-                    transition: "all 0.2s",
+                    background: "var(--onyx)",
+                    border: `1.5px solid ${isComplete ? "rgba(16,185,129,0.18)" : "var(--border-mid)"}`,
+                    borderRadius: "16px",
+                    padding: "20px 24px",
+                    transition: "all 0.25s cubic-bezier(0.16, 1, 0.3, 1)",
                     animation: `fadeInUp 0.3s ease ${idx * 0.04}s both`,
                     position: "relative",
                     overflow: "hidden",
                   }}
                   onMouseOver={e => {
                     const el = e.currentTarget;
-                    el.style.borderColor = isComplete ? "rgba(22,163,74,0.35)" : "#d0d0cc";
-                    el.style.transform = "translateY(-1px)";
-                    el.style.boxShadow = "0 8px 24px rgba(0,0,0,0.08)";
+                    el.style.borderColor = isComplete ? "var(--emerald)" : "var(--border-strong)";
+                    el.style.transform = "translateY(-2px)";
+                    el.style.boxShadow = "0 12px 30px -8px rgba(37,99,235,0.08)";
                   }}
                   onMouseOut={e => {
                     const el = e.currentTarget;
-                    el.style.borderColor = isComplete ? "rgba(22,163,74,0.2)" : "#e8e8e4";
+                    el.style.borderColor = isComplete ? "rgba(16,185,129,0.18)" : "var(--border-mid)";
                     el.style.transform = "translateY(0)";
                     el.style.boxShadow = "none";
                   }}
                 >
-                  {/* Active top accent line */}
+                  {/* Top shimmer accent for executing agents */}
                   {isActive && (
                     <div style={{
                       position: "absolute", top: 0, left: 0, right: 0, height: "2px",
                       background: `linear-gradient(90deg, transparent, ${meta.color}, transparent)`,
-                      animation: "shimmer 2s ease infinite",
+                      animation: "pulse 2s ease infinite",
                     }} />
                   )}
 
-                  <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
-                    {/* Book icon */}
+                  <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
+                    {/* Book status indicator icon */}
                     <div style={{
                       width: "42px", height: "42px", flexShrink: 0,
-                      background: "#f7f2e4",
-                      border: "1px solid #e8e8e4",
-                      borderRadius: "11px",
+                      background: "var(--void)",
+                      border: "1.5px solid var(--border-mid)",
+                      borderRadius: "10px",
                       display: "flex", alignItems: "center", justifyContent: "center",
                     }}>
                       {isComplete
-                        ? <CheckCircle size={18} color="#16a34a" />
+                        ? <CheckCircle size={18} color="var(--emerald)" />
                         : isFailed
-                          ? <XCircle size={18} color="#dc2626" />
-                          : <FileText size={18} color="#9ca3af" />
+                          ? <XCircle size={18} color="var(--crimson)" />
+                          : <FileText size={18} color="var(--text-tertiary)" />
                       }
                     </div>
 
-                    {/* Title & date */}
+                    {/* Title & metadata */}
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <p style={{
-                        fontWeight: "700", fontSize: "14px",
-                        letterSpacing: "-0.01em",
+                      <h4 className="serif" style={{
+                        fontSize: "17px",
                         whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-                        color: "#2b2b2b",
-                        marginBottom: "3px",
-                        fontFamily: "'Playfair Display', serif",
+                        color: "var(--text-primary)",
+                        marginBottom: "4px",
                       }}>
                         {book.title}
-                      </p>
-                      <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                        <span style={{ fontSize: "11px", color: "#9ca3af" }}>
+                      </h4>
+                      <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                        <span style={{ fontSize: "11px", color: "var(--text-tertiary)", fontWeight: "600" }}>
                           {new Date(book.created_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
                         </span>
                         {isActive && (
                           <span style={{
-                            fontSize: "10px", color: meta.color,
-                            display: "flex", alignItems: "center", gap: "4px",
-                            fontWeight: "600",
+                            fontSize: "11px", color: meta.color,
+                            display: "inline-flex", alignItems: "center", gap: "5px",
+                            fontWeight: "700",
                           }}>
                             <span style={{
                               width: "6px", height: "6px", borderRadius: "50%",
                               background: meta.color, display: "inline-block",
-                              animation: "pulse 1.5s ease infinite",
+                              animation: "pulse 1.2s ease infinite",
                             }} />
                             {meta.label}
                           </span>
                         )}
                       </div>
 
-                      {/* ── Friendly error message on failed book cards ── */}
+                      {/* Error trace on card */}
                       {isFailed && book.error_message && (
                         <div style={{
                           display: "flex", alignItems: "flex-start", gap: "6px",
-                          marginTop: "8px", padding: "8px 10px",
-                          background: "#fff0f0",
-                          border: "1px solid rgba(220,38,38,0.15)",
+                          marginTop: "10px", padding: "8px 12px",
+                          background: "rgba(239,68,68,0.04)",
+                          border: "1px solid rgba(239,68,68,0.15)",
                           borderRadius: "8px",
                         }}>
-                          <AlertTriangle size={12} color="#dc2626" style={{ flexShrink: 0, marginTop: "1px" }} />
-                          <p style={{ fontSize: "12px", color: "#dc2626", lineHeight: "1.5", margin: 0 }}>
+                          <AlertTriangle size={12} color="var(--crimson)" style={{ flexShrink: 0, marginTop: "2px" }} />
+                          <p style={{ fontSize: "12px", color: "var(--crimson)", lineHeight: "1.5", margin: 0 }}>
                             {book.error_message}
                           </p>
                         </div>
                       )}
                     </div>
 
-                    {/* Status + Downloads */}
+                    {/* Badges / Download lists */}
                     <div style={{ display: "flex", alignItems: "center", gap: "10px", flexShrink: 0 }}>
                       {!isActive && (
                         <span style={{
                           display: "inline-flex", alignItems: "center", gap: "5px",
-                          fontSize: "11px", fontWeight: "600",
+                          fontSize: "11px", fontWeight: "700",
                           padding: "4px 10px", borderRadius: "20px",
-                          background: meta.bg, border: `1px solid ${meta.border}`,
+                          background: meta.bg, border: `1.5px solid ${meta.border}`,
                           color: meta.color, letterSpacing: "0.02em",
                         }}>
                           {book.status === "done" && <CheckCircle size={11} />}
@@ -1061,32 +889,20 @@ export default function BooksPage() {
                           <a
                             href={downloadPDF(book.book_id)}
                             target="_blank" rel="noopener noreferrer"
+                            className="btn-dark"
                             style={{
-                              display: "flex", alignItems: "center", gap: "5px",
-                              background: "#1a1a1a",
-                              border: "1px solid #1a1a1a",
-                              borderRadius: "8px", padding: "6px 12px",
-                              color: "#ffffff", fontSize: "12px", fontWeight: "600",
-                              textDecoration: "none", transition: "all 0.15s",
+                              padding: "6px 12px", fontSize: "12px", borderRadius: "8px", textDecoration: "none"
                             }}
-                            onMouseOver={e => { e.currentTarget.style.background = "#333333"; e.currentTarget.style.borderColor = "#333333"; }}
-                            onMouseOut={e => { e.currentTarget.style.background = "#1a1a1a"; e.currentTarget.style.borderColor = "#1a1a1a"; }}
                           >
                             <Download size={11} /> PDF
                           </a>
                           <a
                             href={downloadDOCX(book.book_id)}
                             target="_blank" rel="noopener noreferrer"
+                            className="btn-outline"
                             style={{
-                              display: "flex", alignItems: "center", gap: "5px",
-                              background: "#ffffff",
-                              border: "1px solid #2b2b2b",
-                              borderRadius: "8px", padding: "6px 12px",
-                              color: "#2b2b2b", fontSize: "12px", fontWeight: "600",
-                              textDecoration: "none", transition: "all 0.15s",
+                              padding: "6px 12px", fontSize: "12px", borderRadius: "8px", textDecoration: "none"
                             }}
-                            onMouseOver={e => { e.currentTarget.style.background = "#f7f2e4"; }}
-                            onMouseOut={e => { e.currentTarget.style.background = "#ffffff"; }}
                           >
                             <Download size={11} /> DOCX
                           </a>
@@ -1100,18 +916,6 @@ export default function BooksPage() {
           </div>
         )}
       </main>
-
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@800&family=DM+Sans:wght@400;500;600;700&display=swap');
-        @keyframes spin       { to { transform: rotate(360deg); } }
-        @keyframes fadeInUp   { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
-        @keyframes slideDown  { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
-        @keyframes pulse      { 0%,100% { opacity:1; } 50% { opacity:0.3; } }
-        @keyframes shimmer    { 0%,100% { opacity:0.4; } 50% { opacity:1; } }
-        input::placeholder    { color: #9ca3af; }
-        textarea::placeholder { color: #9ca3af; }
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-      `}</style>
     </div>
   );
 }

@@ -1,8 +1,9 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { onAuthStateChanged, User } from "firebase/auth";
 import { auth, logout } from "@/lib/firebase";
+import Link from "next/link";
 import {
   BookOpen,
   LogOut,
@@ -15,6 +16,8 @@ import {
   PencilLine,
   Languages,
   LayoutTemplate,
+  Library,
+  Settings,
 } from "lucide-react";
 
 export default function DashboardHome() {
@@ -39,7 +42,7 @@ export default function DashboardHome() {
       icon: ScanLine,
       label: "Handwritten Scanner",
       tag: "AI VISION",
-      tagColor: "#7c3aed",
+      tagColor: "var(--violet)",
       description:
         "Photograph up to 400 handwritten pages — in any language — and AI transcribes every word into a clean, structured book exported as PDF & DOCX.",
       features: [
@@ -49,7 +52,7 @@ export default function DashboardHome() {
       ],
       cta: "Scan Handwriting",
       href: "/dashboard/scan",
-      accent: "#7c3aed",
+      accent: "var(--violet)",
       row: 1,
     },
     {
@@ -57,7 +60,7 @@ export default function DashboardHome() {
       icon: BookOpen,
       label: "Book Writing",
       tag: "AI AGENT",
-      tagColor: "#2563eb",
+      tagColor: "var(--sapphire)",
       description:
         "Give us a title and vision. Our autonomous AI agent researches, structures, and writes your entire manuscript — exported as print-ready PDF & Word.",
       features: [
@@ -67,7 +70,7 @@ export default function DashboardHome() {
       ],
       cta: "Start Writing",
       href: "/dashboard/books",
-      accent: "#2563eb",
+      accent: "var(--sapphire)",
       row: 1,
     },
     // ── Row 2 (3 cards) ───────────────────────────────────────────────────────
@@ -76,7 +79,7 @@ export default function DashboardHome() {
       icon: PencilLine,
       label: "Book Editor",
       tag: "EXPERT",
-      tagColor: "#be185d",
+      tagColor: "var(--crimson)",
       description:
         "Upload your book (PDF / DOCX / ZIP) and have a conversation to edit it — rewrite chapters, change the theme, adjust tone, add sections, and download each new version instantly.",
       features: [
@@ -86,7 +89,7 @@ export default function DashboardHome() {
       ],
       cta: "Edit a Book",
       href: "/dashboard/editor",
-      accent: "#be185d",
+      accent: "var(--crimson)",
       row: 2,
     },
     {
@@ -94,7 +97,7 @@ export default function DashboardHome() {
       icon: FileSearch,
       label: "Proofreading",
       tag: "POPULAR",
-      tagColor: "#047857",
+      tagColor: "var(--emerald)",
       description:
         "Upload any document and get an AI-powered edit covering grammar, punctuation, style, and readability — with a clean corrected file to download.",
       features: [
@@ -104,7 +107,7 @@ export default function DashboardHome() {
       ],
       cta: "Proofread a Doc",
       href: "/dashboard/proofread",
-      accent: "#047857",
+      accent: "var(--emerald)",
       row: 2,
     },
     {
@@ -131,7 +134,7 @@ export default function DashboardHome() {
       icon: Palette,
       label: "Cover Designer",
       tag: "AI ART",
-      tagColor: "#c2410c",
+      tagColor: "var(--amber)",
       description:
         "Upload your manuscript (PDF or DOCX) and let AI design a stunning, print-ready cover page — professionally typeset and attached to your book.",
       features: [
@@ -141,7 +144,7 @@ export default function DashboardHome() {
       ],
       cta: "Design a Cover",
       href: "/dashboard/cover",
-      accent: "#c2410c",
+      accent: "var(--amber)",
       row: 3,
     },
     {
@@ -151,11 +154,11 @@ export default function DashboardHome() {
       tag: "DESIGNER",
       tagColor: "#92400e",
       description:
-        "Upload your manuscript (PDF, DOCX, or ZIP), choose a paper size, and describe your vision. AI designs a fully typeset internal layout — custom page dimensions, fonts, colour palette, chapter ornaments, drop caps, and more — exported as a print-ready PDF & DOCX.",
+        "Upload your manuscript (PDF, DOCX, or ZIP), choose a paper size, and describe your vision. AI designs a fully typeset internal layout — custom page dimensions, fonts, drop caps, and more.",
       features: [
-        "Custom paper size (A4, A5, US Trade, or any mm)",
-        "AI-chosen typography, spacing & colour palette",
-        "Drop caps, ornaments & page numbers",
+        "Custom paper size (A4, A5, US Trade, etc.)",
+        "AI-chosen typography & spacing presets",
+        "Drop caps, ornaments & page numbering",
         "PDF + DOCX export",
       ],
       cta: "Design Layout",
@@ -169,50 +172,63 @@ export default function DashboardHome() {
   const row2 = tools.filter((t) => t.row === 2);
   const row3 = tools.filter((t) => t.row === 3);
 
-  const Card = ({
-    tool,
-  }: {
-    tool: (typeof tools)[0];
-  }) => {
+  const Card = ({ tool }: { tool: (typeof tools)[0] }) => {
     const Icon = tool.icon;
+    const cardRef = useRef<HTMLDivElement>(null);
+
+    const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+      if (!cardRef.current) return;
+      const card = cardRef.current;
+      const rect = card.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      const xc = rect.width / 2;
+      const yc = rect.height / 2;
+      const angleX = (yc - y) / 12; // tilt angle
+      const angleY = (x - xc) / 12;
+      card.style.transform = `perspective(1000px) rotateX(${angleX}deg) rotateY(${angleY}deg) scale(1.02)`;
+      card.style.boxShadow = "0 20px 45px -12px rgba(37, 99, 235, 0.15), 0 0 20px rgba(37, 99, 235, 0.04)";
+      card.style.borderColor = "var(--border-strong)";
+    };
+
+    const handleMouseLeave = () => {
+      if (!cardRef.current) return;
+      const card = cardRef.current;
+      card.style.transform = "perspective(1000px) rotateX(0deg) rotateY(0deg) scale(1)";
+      card.style.boxShadow = "0 10px 30px -10px rgba(0, 0, 0, 0.04), 0 1px 3px rgba(0, 0, 0, 0.01)";
+      card.style.borderColor = "var(--border-subtle)";
+    };
+
     return (
       <div
+        ref={cardRef}
+        onMouseMove={handleMouseMove}
+        onMouseLeave={handleMouseLeave}
+        onClick={() => router.push(tool.href)}
+        className="card card-3d"
         style={{
-          background: "white",
-          border: "1px solid #e8e8e4",
-          borderRadius: "12px",
-          padding: "28px",
+          background: "var(--onyx)",
+          border: "1.5px solid var(--border-mid)",
+          borderRadius: "16px",
+          padding: "32px",
           cursor: "pointer",
-          transition: "transform 0.2s, box-shadow 0.2s",
           position: "relative",
           overflow: "hidden",
           display: "flex",
           flexDirection: "column",
+          boxShadow: "0 10px 30px -10px rgba(0, 0, 0, 0.04), 0 1px 3px rgba(0, 0, 0, 0.01)",
         }}
-        onMouseOver={(e) => {
-          (e.currentTarget as HTMLDivElement).style.transform =
-            "translateY(-2px)";
-          (e.currentTarget as HTMLDivElement).style.boxShadow =
-            "0 12px 40px rgba(0,0,0,0.10)";
-          (e.currentTarget as HTMLDivElement).style.borderColor = "#d0d0cc";
-        }}
-        onMouseOut={(e) => {
-          (e.currentTarget as HTMLDivElement).style.transform = "translateY(0)";
-          (e.currentTarget as HTMLDivElement).style.boxShadow = "none";
-          (e.currentTarget as HTMLDivElement).style.borderColor = "#e8e8e4";
-        }}
-        onClick={() => router.push(tool.href)}
       >
         {/* Tag */}
         <div
           style={{
             position: "absolute",
-            top: "18px",
-            right: "18px",
-            background: "#f7f2e4",
-            border: `1px solid #e8e8e4`,
-            borderRadius: "5px",
-            padding: "2px 8px",
+            top: "20px",
+            right: "20px",
+            background: "rgba(37, 99, 235, 0.05)",
+            border: `1.5px solid var(--border-mid)`,
+            borderRadius: "6px",
+            padding: "3px 10px",
             fontSize: "9px",
             fontWeight: "700",
             letterSpacing: "0.1em",
@@ -227,14 +243,15 @@ export default function DashboardHome() {
           style={{
             width: "44px",
             height: "44px",
-            background: "#f7f2e4",
-            border: "1px solid #e8e8e4",
+            background: "var(--void)",
+            border: "1.5px solid var(--border-mid)",
             borderRadius: "10px",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            marginBottom: "18px",
+            marginBottom: "20px",
             flexShrink: 0,
+            boxShadow: "0 4px 10px rgba(0,0,0,0.02)",
           }}
         >
           <Icon size={20} color={tool.accent} />
@@ -243,23 +260,23 @@ export default function DashboardHome() {
         {/* Content */}
         <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
           <h2
+            className="serif"
             style={{
-              fontSize: "18px",
-              fontWeight: "800",
-              letterSpacing: "-0.02em",
+              fontSize: "20px",
+              fontWeight: "400",
+              letterSpacing: "-0.01em",
               marginBottom: "8px",
-              color: "#2b2b2b",
-              fontFamily: "'Playfair Display', serif",
+              color: "var(--text-primary)",
             }}
           >
             {tool.label}
           </h2>
           <p
             style={{
-              color: "#666",
+              color: "var(--text-secondary)",
               fontSize: "13px",
-              lineHeight: "1.65",
-              marginBottom: "20px",
+              lineHeight: "1.6",
+              marginBottom: "24px",
               flex: 1,
             }}
           >
@@ -282,16 +299,17 @@ export default function DashboardHome() {
                   alignItems: "flex-start",
                   gap: "8px",
                   fontSize: "12px",
-                  color: "#555",
-                  marginBottom: "5px",
+                  color: "var(--text-tertiary)",
+                  marginBottom: "6px",
                 }}
               >
                 <span
                   style={{
-                    color: tool.accent,
+                    color: "var(--sapphire)",
                     fontSize: "13px",
                     lineHeight: "1.4",
                     flexShrink: 0,
+                    fontWeight: "bold",
                   }}
                 >
                   ✓
@@ -301,20 +319,16 @@ export default function DashboardHome() {
             ))}
           </ul>
 
-          {/* CTA */}
+          {/* CTA Button */}
           <div
+            className="btn-outline"
             style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "8px",
-              background: "#1a1a1a",
-              color: "white",
-              borderRadius: "8px",
-              padding: "9px 18px",
-              fontSize: "12px",
-              fontWeight: "700",
               alignSelf: "flex-start",
-              letterSpacing: "0.01em",
+              padding: "8px 16px",
+              fontSize: "12px",
+              borderRadius: "8px",
+              borderWidth: "1px",
+              gap: "6px",
             }}
           >
             {tool.cta} <ArrowRight size={13} />
@@ -328,92 +342,104 @@ export default function DashboardHome() {
     <div
       style={{
         minHeight: "100vh",
-        background: "#f7f2e4",
+        background: "var(--void)",
         fontFamily: "'DM Sans', sans-serif",
-        color: "#2b2b2b",
+        color: "var(--text-primary)",
+        position: "relative",
       }}
     >
+      <div className="grid-overlay" />
+
       {/* Nav */}
       <nav
+        className="glass"
         style={{
-          borderBottom: "1px solid #efefcf",
+          borderBottom: "1.5px solid var(--border-mid)",
           padding: "0 40px",
-          height: "56px",
+          height: "60px",
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
           position: "sticky",
           top: 0,
-          background: "white",
           zIndex: 50,
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
           <div
             style={{
-              width: "28px",
-              height: "28px",
-              background: "#1a1a1a",
-              borderRadius: "6px",
+              width: "30px",
+              height: "30px",
+              background: "var(--text-primary)",
+              borderRadius: "7px",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
+              boxShadow: "0 4px 8px rgba(0,0,0,0.06)",
             }}
           >
-            <FileText size={14} color="white" />
+            <FileText size={15} color="var(--void)" />
           </div>
           <span
             style={{
-              fontWeight: "700",
+              fontWeight: "800",
               fontSize: "15px",
-              color: "#2a2929",
-              letterSpacing: "-0.01em",
+              color: "var(--text-primary)",
+              letterSpacing: "-0.02em",
             }}
           >
             Publixo AI
           </span>
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: "20px" }}>
-          <span style={{ fontSize: "13px", color: "#888" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
+          <Link
+            href="/library"
+            className="btn-ghost"
+            style={{
+              padding: "6px 12px",
+              fontSize: "12px",
+              borderRadius: "8px",
+              gap: "6px",
+            }}
+          >
+            <Library size={13} /> Library
+          </Link>
+          <Link
+            href="/settings"
+            className="btn-ghost"
+            style={{
+              padding: "6px 12px",
+              fontSize: "12px",
+              borderRadius: "8px",
+              gap: "6px",
+            }}
+          >
+            <Settings size={13} /> Settings
+          </Link>
+          <div style={{ width: "1px", height: "16px", background: "var(--border-mid)" }} />
+          <span style={{ fontSize: "12px", color: "var(--text-tertiary)", fontWeight: "500" }}>
             {user?.email}
           </span>
           <button
             onClick={() => logout().then(() => router.push("/login"))}
+            className="btn-ghost"
             style={{
+              padding: "6px 14px",
+              fontSize: "12px",
+              borderRadius: "8px",
               display: "flex",
               alignItems: "center",
               gap: "6px",
-              background: "none",
-              border: "1px solid #e8e8e4",
-              borderRadius: "7px",
-              padding: "6px 14px",
-              color: "#555",
-              fontSize: "13px",
-              cursor: "pointer",
-              fontFamily: "'DM Sans', sans-serif",
-              fontWeight: "500",
-              transition: "all 0.15s",
-            }}
-            onMouseOver={(e) => {
-              (e.currentTarget as HTMLButtonElement).style.background =
-                "#f7f2e4";
-              (e.currentTarget as HTMLButtonElement).style.borderColor =
-                "#d0d0cc";
-            }}
-            onMouseOut={(e) => {
-              (e.currentTarget as HTMLButtonElement).style.background = "none";
-              (e.currentTarget as HTMLButtonElement).style.borderColor =
-                "#e8e8e4";
             }}
           >
-            <LogOut size={14} /> Sign out
+            <LogOut size={13} /> Sign out
           </button>
         </div>
       </nav>
 
       <main
-        style={{ maxWidth: "1060px", margin: "0 auto", padding: "60px 40px" }}
+        style={{ maxWidth: "1100px", margin: "0 auto", padding: "64px 40px 96px", position: "relative", zIndex: 2 }}
       >
         {/* Header */}
         <div style={{ marginBottom: "52px" }}>
@@ -422,33 +448,34 @@ export default function DashboardHome() {
               display: "inline-flex",
               alignItems: "center",
               gap: "6px",
-              background: "white",
-              border: "1px solid #e8e8e4",
+              background: "var(--onyx)",
+              border: "1.5px solid var(--border-mid)",
               borderRadius: "20px",
               padding: "4px 14px",
               fontSize: "10px",
               fontWeight: "700",
               letterSpacing: "0.1em",
-              color: "#2563eb",
-              marginBottom: "20px",
+              color: "var(--sapphire)",
+              marginBottom: "18px",
+              boxShadow: "0 4px 10px rgba(0,0,0,0.02)",
             }}
           >
             <Sparkles size={11} /> AI-POWERED WRITING SUITE
           </div>
           <h1
+            className="serif"
             style={{
               fontSize: "44px",
-              fontWeight: "800",
-              letterSpacing: "-0.03em",
-              fontFamily: "'Playfair Display', serif",
+              fontWeight: "400",
+              letterSpacing: "-0.02em",
               lineHeight: "1.1",
               marginBottom: "12px",
-              color: "#2d2c2c",
+              color: "var(--text-primary)",
             }}
           >
             Welcome back, {firstName}.
           </h1>
-          <p style={{ color: "#666", fontSize: "16px", lineHeight: "1.6" }}>
+          <p style={{ color: "var(--text-secondary)", fontSize: "15px" }}>
             What would you like to work on today?
           </p>
         </div>
@@ -458,8 +485,8 @@ export default function DashboardHome() {
           style={{
             display: "grid",
             gridTemplateColumns: "repeat(2, 1fr)",
-            gap: "16px",
-            marginBottom: "16px",
+            gap: "20px",
+            marginBottom: "20px",
           }}
         >
           {row1.map((tool) => (
@@ -472,8 +499,8 @@ export default function DashboardHome() {
           style={{
             display: "grid",
             gridTemplateColumns: "repeat(3, 1fr)",
-            gap: "16px",
-            marginBottom: "16px",
+            gap: "20px",
+            marginBottom: "20px",
           }}
         >
           {row2.map((tool) => (
@@ -486,8 +513,8 @@ export default function DashboardHome() {
           style={{
             display: "grid",
             gridTemplateColumns: "repeat(2, 1fr)",
-            gap: "16px",
-            marginBottom: "16px",
+            gap: "20px",
+            marginBottom: "20px",
           }}
         >
           {row3.map((tool) => (
@@ -498,19 +525,20 @@ export default function DashboardHome() {
         {/* Footer strip */}
         <div
           style={{
-            marginTop: "16px",
+            marginTop: "32px",
             padding: "16px 24px",
-            background: "white",
-            border: "1px solid #e8e8e4",
-            borderRadius: "10px",
+            background: "var(--onyx)",
+            border: "1.5px solid var(--border-mid)",
+            borderRadius: "12px",
             display: "flex",
             gap: "40px",
             alignItems: "center",
+            boxShadow: "0 4px 12px rgba(0,0,0,0.01)",
           }}
         >
-          <div style={{ fontSize: "12px", color: "#888" }}>
+          <div style={{ fontSize: "12px", color: "var(--text-tertiary)" }}>
             Signed in as{" "}
-            <span style={{ color: "#2b2b2b", fontWeight: "600" }}>
+            <span style={{ color: "var(--text-primary)", fontWeight: "600" }}>
               {user?.email}
             </span>
           </div>
@@ -520,8 +548,9 @@ export default function DashboardHome() {
               alignItems: "center",
               gap: "6px",
               fontSize: "12px",
-              color: "#047857",
+              color: "var(--emerald)",
               marginLeft: "auto",
+              fontWeight: "600",
             }}
           >
             <span
@@ -529,8 +558,9 @@ export default function DashboardHome() {
                 width: "7px",
                 height: "7px",
                 borderRadius: "50%",
-                background: "#22c55e",
+                background: "var(--emerald)",
                 display: "inline-block",
+                boxShadow: "0 0 8px var(--emerald)",
               }}
             />
             AI services online

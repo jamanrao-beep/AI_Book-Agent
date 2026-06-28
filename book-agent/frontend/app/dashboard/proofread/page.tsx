@@ -12,6 +12,9 @@ import {
   X,
   ChevronDown,
   ChevronUp,
+  AlertCircle,
+  FileDown,
+  BookOpen,
 } from "lucide-react";
 import { proofreadDocument, downloadProofreadDoc, parseFriendlyError } from "@/lib/api";
 
@@ -118,15 +121,12 @@ export default function ProofreadPage() {
     setElapsedSeconds(0);
     setChunkProgress(null);
     setError("");
-    // Reset selections to all-on for each new upload
     setApplyGrammar(true);
     setApplyPunctuation(true);
     setApplyStyle(true);
     setPdfError("");
 
-    // Tick elapsed time every second while loading
-    const timerRef = { id: 0 };
-    timerRef.id = window.setInterval(() => {
+    const timer = setInterval(() => {
       setElapsedSeconds((s) => s + 1);
     }, 1000);
 
@@ -140,8 +140,6 @@ export default function ProofreadPage() {
       setActiveTab("summary");
       setExpandedErrors(new Set());
 
-      // Fetch corrected text from the download endpoint (it is not in the
-      // status payload — we stripped it to stay under Railway's response limit).
       if (res.data.download_url) {
         setCorrectedTextLoading(true);
         try {
@@ -151,49 +149,15 @@ export default function ProofreadPage() {
             const text = await textRes.text();
             setResult((prev) => prev ? { ...prev, corrected_text: text } : prev);
           }
-        } catch (_) {
-          // Non-fatal — corrected text tab will stay empty but download still works
-        } finally {
+        } catch (_) { }
+        finally {
           setCorrectedTextLoading(false);
         }
       }
     } catch (err: unknown) {
-      // Extract the most useful error message from axios errors
-      let message = "Proofreading failed. Make sure the backend is running.";
-      if (err && typeof err === "object") {
-        const axiosErr = err as {
-          response?: { status: number; data?: { detail?: string } };
-          request?: unknown;
-          message?: string;
-          code?: string;
-        };
-        if (axiosErr.response) {
-          // Server responded with a non-2xx status
-          const status = axiosErr.response.status;
-          const detail = axiosErr.response.data?.detail ?? axiosErr.message ?? "";
-          message = `Server error ${status}${detail ? `: ${detail}` : ""}`;
-          console.error("[Proofread] Server error", status, axiosErr.response.data);
-        } else if (axiosErr.request) {
-          // Request was made but no response received (timeout, CORS, backend down)
-          const code = axiosErr.code ?? "";
-          if (code === "ECONNABORTED" || axiosErr.message?.includes("timeout")) {
-            message =
-              "The request timed out waiting for the server — but the backend may still be processing. " +
-              "If you see a result missing some sections, this is why. " +
-              "To fix permanently, increase the axios timeout in @/lib/api.ts (set timeout: 30 * 60 * 1000 for 30 min).";
-          } else {
-            message =
-              "No response from server. Check that the backend is running and that there is no CORS or proxy issue. See browser console for details.";
-          }
-          console.error("[Proofread] No response received", axiosErr.request, axiosErr.message, code);
-        } else {
-          message = axiosErr.message ?? message;
-          console.error("[Proofread] Request setup error", axiosErr.message);
-        }
-      }
-      setError(message);
+      setError(parseFriendlyError(err));
     } finally {
-      clearInterval(timerRef.id);
+      clearInterval(timer);
       setLoading(false);
       setUploadProgress(0);
     }
@@ -277,255 +241,145 @@ export default function ProofreadPage() {
     }
   };
 
+  const minutes = Math.floor(elapsedSeconds / 60);
+  const seconds = elapsedSeconds % 60;
+  const timerStr = minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
 
-  const TABS: { id: TabType; label: string; color: string; count?: number }[] = result
-    ? [
-      { id: "summary", label: "AI Summary", color: "#555555" },
-      { id: "grammar", label: "Grammar", count: result.grammar_fixes, color: "#6366f1" },
-      { id: "punctuation", label: "Punctuation", count: result.punctuation_fixes, color: "#f59e0b" },
-      { id: "style", label: "Style", count: result.style_suggestions, color: "#10b981" },
-      { id: "corrected", label: "Corrected Text", color: "#555555" },
-    ]
-    : [];
-
-  const getDetailList = (): ErrorDetail[] => {
-    if (!result) return [];
-    if (activeTab === "grammar") return result.grammar_details ?? [];
-    if (activeTab === "punctuation") return result.punctuation_details ?? [];
-    if (activeTab === "style") return result.style_details ?? [];
-    return [];
-  };
-
-  const tabColor =
-    TABS.find((t) => t.id === activeTab)?.color ?? "#555555";
-
-  const categoryMeta: Record<string, { label: string; emptyMsg: string; badgeColor: string; badgeBg: string }> = {
-    grammar: {
-      label: "Grammar Fix",
-      emptyMsg: "No grammar errors found — great writing!",
-      badgeColor: "#818cf8",
-      badgeBg: "rgba(99,102,241,0.12)",
-    },
-    punctuation: {
-      label: "Punctuation Fix",
-      emptyMsg: "No punctuation errors found.",
-      badgeColor: "#fbbf24",
-      badgeBg: "rgba(245,158,11,0.12)",
-    },
-    style: {
-      label: "Style Suggestion",
-      emptyMsg: "No style suggestions — the prose flows well.",
-      badgeColor: "#34d399",
-      badgeBg: "rgba(16,185,129,0.12)",
-    },
-  };
-
-  // Derive a human-readable loading stage label
-  const loadingLabel = (() => {
-    if (!loading) return "";
-    if (uploadProgress < 100) return `Uploading… ${uploadProgress}%`;
-    const mins = Math.floor(elapsedSeconds / 60);
-    const secs = elapsedSeconds % 60;
-    const elapsed = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
-    if (chunkProgress && chunkProgress.total > 1) {
-      const chunkPct = Math.round((chunkProgress.done / chunkProgress.total) * 100);
-      return `Proofreading chunk ${chunkProgress.done} of ${chunkProgress.total} (${chunkPct}%) — ${elapsed} elapsed. Please keep this tab open.`;
+  let loadingLabel = "Initializing…";
+  if (uploadProgress > 0 && uploadProgress < 100) {
+    loadingLabel = `Uploading document: ${uploadProgress}%`;
+  } else if (uploadProgress === 100) {
+    if (chunkProgress) {
+      loadingLabel = `Parsing chunk ${chunkProgress.done} of ${chunkProgress.total}…`;
+    } else {
+      loadingLabel = `AI processing sections (elapsed: ${timerStr})…`;
     }
-    return `Analysing document… ${elapsed} elapsed. Large files can take 10–20 min — please keep this tab open.`;
-  })();
+  }
 
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        background: "#f7f2e4",
-        fontFamily: "'DM Sans', sans-serif",
-        color: "#2b2b2b",
-      }}
-    >
+    <div style={{
+      minHeight: "100vh",
+      background: "var(--void)",
+      fontFamily: "'DM Sans', sans-serif",
+      color: "var(--text-primary)",
+      position: "relative",
+    }}>
+      <div className="grid-overlay" />
+
       {/* Nav */}
-      <nav
-        style={{
-          borderBottom: "1px solid #efefcf",
-          padding: "0 40px",
-          height: "60px",
-          display: "flex",
-          alignItems: "center",
-          gap: "16px",
-          position: "sticky",
-          top: 0,
-          background: "#ffffff",
-          zIndex: 50,
-        }}
-      >
-        <button
-          onClick={() => router.push("/dashboard")}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "6px",
-            background: "none",
-            border: "none",
-            color: "#6b6b63",
-            fontSize: "13px",
-            cursor: "pointer",
-            padding: "6px 0",
-            transition: "color 0.2s",
-          }}
-          onMouseOver={(e) =>
-            ((e.currentTarget as HTMLButtonElement).style.color = "#2b2b2b")
-          }
-          onMouseOut={(e) =>
-            ((e.currentTarget as HTMLButtonElement).style.color = "#6b6b63")
-          }
-        >
-          <ArrowLeft size={14} /> Back to Dashboard
+      <nav className="glass" style={{
+        borderBottom: "1.5px solid var(--border-mid)",
+        padding: "0 40px", height: "60px",
+        display: "flex", alignItems: "center", gap: "16px",
+        position: "sticky", top: 0, zIndex: 50,
+      }}>
+        <button onClick={() => router.push("/dashboard")} className="btn-ghost" style={{
+          display: "flex", alignItems: "center", gap: "6px",
+          padding: "6px 12px", fontSize: "12px", borderRadius: "8px"
+        }}>
+          <ArrowLeft size={13} /> Dashboard
         </button>
-        <span style={{ color: "#e8e8e4" }}>|</span>
-        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          <div
-            style={{
-              width: "28px",
-              height: "28px",
-              background: "#1a1a1a",
-              border: "1px solid #1a1a1a",
-              borderRadius: "8px",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-          >
-            <Sparkles size={14} color="#ffffff" />
+        <span style={{ color: "var(--border-mid)" }}>|</span>
+        <div style={{ display: "flex", alignItems: "center", gap: "9px" }}>
+          <div style={{
+            width: "28px", height: "28px",
+            background: "var(--text-primary)",
+            borderRadius: "6px", display: "flex", alignItems: "center", justifyContent: "center"
+          }}>
+            <Sparkles size={14} color="var(--void)" />
           </div>
-          <span style={{ fontWeight: "600", fontSize: "14px" }}>
-            AI Proofreader
-          </span>
+          <span style={{ fontWeight: "800", fontSize: "14px", color: "var(--text-primary)" }}>AI Proofreader</span>
         </div>
       </nav>
 
-      <main
-        style={{ maxWidth: "820px", margin: "0 auto", padding: "52px 40px" }}
-      >
+      <main style={{ maxWidth: "880px", margin: "0 auto", padding: "64px 32px 96px", position: "relative", zIndex: 2 }}>
+        
         {/* Header */}
         <div style={{ marginBottom: "40px" }}>
-          <h1
-            style={{
-              fontSize: "36px",
-              fontWeight: "800",
-              letterSpacing: "-0.03em",
-              fontFamily: "'Playfair Display', serif",
-              marginBottom: "10px",
-            }}
-          >
+          <div style={{
+            display: "inline-flex", alignItems: "center", gap: "6px",
+            background: "var(--onyx)", border: "1.5px solid var(--border-mid)",
+            borderRadius: "20px", padding: "4px 14px",
+            fontSize: "10px", fontWeight: "700", letterSpacing: "0.1em",
+            color: "var(--emerald)", marginBottom: "16px",
+            boxShadow: "0 4px 10px rgba(0,0,0,0.02)",
+          }}>
+            <Sparkles size={10} /> GRAMMAR & READABILITY ENGINE
+          </div>
+          <h1 className="serif" style={{
+            fontSize: "40px", fontWeight: "400", letterSpacing: "-0.02em",
+            marginBottom: "10px", color: "var(--text-primary)"
+          }}>
             Proofread Your Document
           </h1>
-          <p style={{ color: "#6b6b63", fontSize: "15px", lineHeight: "1.6" }}>
-            Upload a .txt, .docx, .pdf, .md, .rtf, or .zip file. AI will correct grammar,
-            punctuation, and suggest style improvements — with full error breakdowns.
+          <p style={{ color: "var(--text-secondary)", fontSize: "15px", lineHeight: "1.6" }}>
+            Upload any text file or PDF manuscript. AI will scan grammatical errors, punctuation anomalies, and make suggestions to improve formatting style.
           </p>
         </div>
 
         {/* Upload zone */}
         {!result && (
           <div
-            onDragOver={(e) => {
-              e.preventDefault();
-              setDragging(true);
-            }}
+            onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
             onDragLeave={() => setDragging(false)}
             onDrop={handleDrop}
             onClick={() => !file && fileInputRef.current?.click()}
             style={{
-              border: `2px dashed ${dragging ? "#10b981" : file ? "rgba(16,185,129,0.4)" : "#d0d0cc"}`,
-              borderRadius: "16px",
-              padding: "48px 32px",
-              textAlign: "center",
-              cursor: file ? "default" : "pointer",
-              background: dragging
-                ? "rgba(16,185,129,0.06)"
-                : file
-                  ? "rgba(16,185,129,0.04)"
-                  : "#ffffff",
-              transition: "all 0.2s",
-              marginBottom: "20px",
+              border: `2px dashed ${dragging ? "var(--emerald)" : file ? "rgba(16,185,129,0.4)" : "var(--border-strong)"}`,
+              borderRadius: "20px", padding: "48px 32px",
+              background: dragging ? "rgba(16, 185, 129, 0.05)" : file ? "rgba(16, 185, 129, 0.02)" : "var(--onyx)",
+              cursor: file ? "default" : "pointer", textAlign: "center",
+              transition: "all 0.25s cubic-bezier(0.16, 1, 0.3, 1)", marginBottom: "20px",
+              boxShadow: "0 10px 30px -10px rgba(0, 0, 0, 0.02)",
             }}
           >
             <input
-              ref={fileInputRef}
-              type="file"
+              ref={fileInputRef} type="file"
               accept=".txt,.docx,.pdf,.md,.rtf,.zip"
               style={{ display: "none" }}
-              onChange={(e) =>
-                e.target.files?.[0] && handleFile(e.target.files[0])
-              }
+              onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])}
             />
 
             {file ? (
               <div>
-                <div
-                  style={{
-                    width: "56px",
-                    height: "56px",
-                    background: "rgba(16,185,129,0.12)",
-                    border: "1px solid rgba(16,185,129,0.3)",
-                    borderRadius: "12px",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    margin: "0 auto 16px",
-                  }}
-                >
-                  <FileText size={24} color="#10b981" />
+                <div style={{
+                  width: "56px", height: "56px", margin: "0 auto 16px",
+                  background: "var(--void)", border: "1.5px solid var(--border-mid)",
+                  borderRadius: "14px", display: "flex", alignItems: "center", justifyContent: "center",
+                }}>
+                  <FileText size={24} color="var(--emerald)" />
                 </div>
-                <p style={{ fontWeight: "600", fontSize: "15px", marginBottom: "4px" }}>
+                <p style={{ fontWeight: "700", fontSize: "15px", marginBottom: "4px", color: "var(--text-primary)" }}>
                   {file.name}
                 </p>
-                <p style={{ color: "#6b6b63", fontSize: "13px", marginBottom: "12px" }}>
+                <p style={{ color: "var(--text-tertiary)", fontSize: "12px", marginBottom: "14px" }}>
                   {(file.size / 1024).toFixed(1)} KB
                 </p>
                 <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setFile(null);
-                  }}
+                  onClick={(e) => { e.stopPropagation(); setFile(null); }}
+                  className="btn-ghost"
                   style={{
-                    background: "#fff0f0",
-                    border: "1px solid #f5d5d5",
-                    borderRadius: "8px",
-                    padding: "6px 14px",
-                    color: "#c23b3b",
-                    fontSize: "12px",
-                    cursor: "pointer",
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: "6px",
+                    padding: "6px 14px", fontSize: "12px", borderRadius: "8px",
+                    background: "rgba(239, 68, 68, 0.05)", color: "var(--crimson)", border: "none"
                   }}
                 >
-                  <X size={12} /> Remove
+                  <X size={12} /> Remove file
                 </button>
               </div>
             ) : (
               <div>
-                <div
-                  style={{
-                    width: "56px",
-                    height: "56px",
-                    background: "#f7f2e4",
-                    border: "1px solid #e8e8e4",
-                    borderRadius: "12px",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    margin: "0 auto 16px",
-                  }}
-                >
-                  <Upload size={24} color="#2b2b2b" />
+                <div style={{
+                  width: "56px", height: "56px", margin: "0 auto 16px",
+                  background: "var(--void)", border: "1.5px solid var(--border-mid)",
+                  borderRadius: "14px", display: "flex", alignItems: "center", justifyContent: "center",
+                }}>
+                  <Upload size={22} color="var(--emerald)" />
                 </div>
-                <p style={{ fontWeight: "600", fontSize: "15px", marginBottom: "6px" }}>
+                <p style={{ fontWeight: "700", fontSize: "15px", marginBottom: "6px", color: "var(--text-primary)" }}>
                   Drop your document here
                 </p>
-                <p style={{ color: "#6b6b63", fontSize: "13px" }}>
-                  or click to browse · .txt .docx .pdf .md .rtf .zip · max 150 MB
+                <p style={{ color: "var(--text-tertiary)", fontSize: "13px" }}>
+                  or click to select · TXT, DOCX, PDF, MD, RTF, ZIP · max 150 MB
                 </p>
               </div>
             )}
@@ -533,92 +387,58 @@ export default function ProofreadPage() {
         )}
 
         {error && (
-          <div
-            style={{
-              background: "rgba(239,68,68,0.1)",
-              border: "1px solid rgba(239,68,68,0.2)",
-              borderRadius: "10px",
-              padding: "12px 16px",
-              color: "#f87171",
-              fontSize: "13px",
-              marginBottom: "16px",
-            }}
-          >
+          <div style={{
+            background: "rgba(239,68,68,0.06)", border: "1px solid rgba(239,68,68,0.18)",
+            borderRadius: "10px", padding: "12px 16px", color: "var(--crimson)", fontSize: "13px", marginBottom: "16px"
+          }}>
             {error}
           </div>
         )}
 
-        {/* Submit button + upload progress bar */}
+        {/* Submit action */}
         {file && !result && (
           <div style={{ marginBottom: "32px" }}>
             <button
-              onClick={handleSubmit}
-              disabled={loading}
+              onClick={handleSubmit} disabled={loading}
+              className="btn-dark"
               style={{
-                width: "100%",
-                background: loading ? "#3d3d3d" : "#1a1a1a",
-                color: "#ffffff",
-                border: "none",
-                borderRadius: "12px",
-                padding: "14px 24px",
-                fontSize: "14px",
-                fontWeight: "700",
-                cursor: loading ? "not-allowed" : "pointer",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: "10px",
-                transition: "background 0.2s",
-                letterSpacing: "0.01em",
+                width: "100%", padding: "13px 24px", fontSize: "14px", borderRadius: "12px",
+                justifyContent: "center", opacity: loading ? 0.7 : 1,
               }}
             >
               {loading ? (
                 <>
-                  <Loader size={18} style={{ animation: "spin 1s linear infinite" }} />
+                  <Loader size={16} style={{ animation: "spin 1s linear infinite" }} />
                   {loadingLabel}
                 </>
               ) : (
                 <>
-                  <Sparkles size={18} /> Run AI Proofreader
+                  <Sparkles size={16} /> Run AI Proofreader
                 </>
               )}
             </button>
 
-            {/* Upload progress bar — only visible while uploading */}
-            {loading && uploadProgress > 0 && uploadProgress < 100 && (
-              <div
-                style={{
-                  marginTop: "10px",
-                  height: "4px",
-                  borderRadius: "99px",
-                  background: "#e8e8e4",
-                  overflow: "hidden",
-                }}
-              >
-                <div
-                  style={{
-                    height: "100%",
-                    width: `${uploadProgress}%`,
-                    background: "#1a1a1a",
-                    borderRadius: "99px",
-                    transition: "width 0.3s ease",
-                  }}
-                />
+            {loading && (
+              <div className="card pulse-glow" style={{
+                background: "var(--onyx)", border: "1.5px solid var(--border-mid)",
+                borderRadius: "14px", padding: "20px", marginTop: "16px",
+              }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
+                  <span style={{ fontSize: "12px", fontWeight: "700", textTransform: "uppercase", color: "var(--emerald)" }}>Analyzing Draft</span>
+                  <span className="serif" style={{ fontSize: "20px", color: "var(--text-primary)" }}>
+                    {uploadProgress === 100 ? "Processing" : `${uploadProgress}%`}
+                  </span>
+                </div>
+                {uploadProgress < 100 ? (
+                  <div className="progress-bar">
+                    <div className="progress-fill" style={{ width: `${uploadProgress}%`, background: "var(--emerald)" }} />
+                  </div>
+                ) : (
+                  <p style={{ fontSize: "12px", color: "var(--text-tertiary)", lineHeight: 1.5, margin: 0 }}>
+                    Upload complete. Our AI is parsing your text blocks sequentially. Keep this browser window open.
+                  </p>
+                )}
               </div>
-            )}
-
-            {/* Post-upload waiting hint */}
-            {loading && uploadProgress === 100 && (
-              <p
-                style={{
-                  marginTop: "10px",
-                  fontSize: "12px",
-                  color: "#6b6b63",
-                  textAlign: "center",
-                }}
-              >
-                Upload complete — AI is now analysing your document chunk by chunk. Large Hindi/Devanagari files may take 10–20 minutes. Do not close this tab.
-              </p>
             )}
           </div>
         )}
@@ -626,622 +446,190 @@ export default function ProofreadPage() {
         {/* ── RESULTS ── */}
         {result && (
           <div style={{ animation: "fadeInUp 0.4s ease forwards" }}>
-            {/* Success banner */}
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "12px",
-                background: "rgba(16,185,129,0.1)",
-                border: "1px solid rgba(16,185,129,0.25)",
-                borderRadius: "12px",
-                padding: "16px 20px",
-                marginBottom: "24px",
-              }}
-            >
-              <CheckCircle size={20} color="#10b981" />
-              <div>
-                <p style={{ fontWeight: "600", fontSize: "14px" }}>
+            
+            {/* Success panel */}
+            <div className="card" style={{
+              display: "flex", alignItems: "center", gap: "16px",
+              background: "var(--onyx)", border: "1.5px solid var(--border-mid)",
+              borderRadius: "16px", padding: "20px 24px", marginBottom: "28px"
+            }}>
+              <div style={{
+                width: "44px", height: "44px",
+                background: "rgba(16,185,129,0.06)", border: "1px solid rgba(16,185,129,0.15)",
+                borderRadius: "11px", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0
+              }}>
+                <CheckCircle size={22} color="var(--emerald)" />
+              </div>
+              <div style={{ flex: 1 }}>
+                <h3 className="serif" style={{ fontWeight: "400", fontSize: "18px", color: "var(--text-primary)" }}>
                   Proofreading complete
-                </p>
-                <p style={{ color: "#6b6b63", fontSize: "12px", marginTop: "2px" }}>
+                </h3>
+                <p style={{ color: "var(--text-secondary)", fontSize: "12px", marginTop: "3px" }}>
                   {result.original_filename}
                 </p>
               </div>
             </div>
 
-            {/* ── Selective PDF Generator ─────────────────────────────────── */}
-            <div
-              style={{
-                background: "#ffffff",
-                border: "1px solid #e8e8e4",
-                borderRadius: "14px",
-                padding: "22px 24px",
-                marginBottom: "28px",
-              }}
-            >
-              <p
-                style={{
-                  fontSize: "13px",
-                  fontWeight: "700",
-                  letterSpacing: "0.06em",
-                  textTransform: "uppercase",
-                  color: "#2563eb",
-                  marginBottom: "14px",
-                }}
-              >
-                Generate Corrected PDF
-              </p>
-              <p style={{ fontSize: "13px", color: "#6b6b63", marginBottom: "16px", lineHeight: "1.6" }}>
-                Choose which types of corrections to include in your downloaded PDF:
+            {/* Selective PDF/DOCX Generator block */}
+            <div className="card" style={{
+              background: "var(--onyx)", border: "1.5px solid var(--border-mid)",
+              borderRadius: "16px", padding: "24px", marginBottom: "32px",
+            }}>
+              <p className="field-label" style={{ color: "var(--emerald)", marginBottom: "12px" }}>Download Corrected Document</p>
+              <p style={{ fontSize: "13px", color: "var(--text-secondary)", marginBottom: "18px", lineHeight: 1.5 }}>
+                Filter which categories of changes to apply to your downloaded document:
               </p>
 
-              {/* Checkboxes */}
-              <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginBottom: "18px" }}>
+              {/* Toggles */}
+              <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginBottom: "20px" }}>
                 {[
                   {
-                    key: "grammar" as const,
-                    label: "Grammar Fixes",
-                    count: result.grammar_fixes,
-                    color: "#6366f1",
-                    bg: "rgba(99,102,241,0.1)",
-                    border: "rgba(99,102,241,0.25)",
-                    icon: "✦",
-                    checked: applyGrammar,
-                    set: setApplyGrammar,
+                    key: "grammar" as const, label: "Grammar Fixes", count: result.grammar_fixes,
+                    color: "var(--violet)", bg: "rgba(139,92,246,0.06)", checked: applyGrammar, set: setApplyGrammar
                   },
                   {
-                    key: "punctuation" as const,
-                    label: "Punctuation Fixes",
-                    count: result.punctuation_fixes,
-                    color: "#f59e0b",
-                    bg: "rgba(245,158,11,0.1)",
-                    border: "rgba(245,158,11,0.25)",
-                    icon: "✎",
-                    checked: applyPunctuation,
-                    set: setApplyPunctuation,
+                    key: "punctuation" as const, label: "Punctuation Fixes", count: result.punctuation_fixes,
+                    color: "var(--amber)", bg: "rgba(245,158,11,0.06)", checked: applyPunctuation, set: setApplyPunctuation
                   },
                   {
-                    key: "style" as const,
-                    label: "Style Suggestions",
-                    count: result.style_suggestions,
-                    color: "#10b981",
-                    bg: "rgba(16,185,129,0.1)",
-                    border: "rgba(16,185,129,0.25)",
-                    icon: "◈",
-                    checked: applyStyle,
-                    set: setApplyStyle,
-                  },
-                ].map((opt) => (
-                  <label
-                    key={opt.key}
-                    onClick={() => opt.set(!opt.checked)}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "14px",
-                      padding: "12px 16px",
-                      borderRadius: "10px",
-                      border: `1px solid ${opt.checked ? opt.border : "#e8e8e4"}`,
-                      background: opt.checked ? opt.bg : "transparent",
-                      cursor: "pointer",
-                      transition: "all 0.15s",
-                      userSelect: "none",
-                    }}
-                  >
-                    {/* Custom checkbox */}
-                    <div
-                      style={{
-                        width: "18px",
-                        height: "18px",
-                        borderRadius: "5px",
-                        border: `2px solid ${opt.checked ? opt.color : "#d0d0cc"}`,
-                        background: opt.checked ? opt.color : "transparent",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        flexShrink: 0,
-                        transition: "all 0.15s",
-                      }}
-                    >
-                      {opt.checked && (
-                        <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
-                          <path d="M1 4L3.5 6.5L9 1" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-                        </svg>
-                      )}
-                    </div>
-
-                    {/* Icon + Label */}
-                    <span style={{ fontSize: "16px", opacity: 0.8 }}>{opt.icon}</span>
-                    <span style={{ flex: 1, fontSize: "13px", fontWeight: "600", color: "#2b2b2b" }}>
-                      {opt.label}
-                    </span>
-
-                    {/* Count badge */}
-                    <span
-                      style={{
-                        background: opt.checked ? `${opt.color}22` : "#f7f2e4",
-                        color: opt.checked ? opt.color : "#6b6b63",
-                        borderRadius: "20px",
-                        padding: "2px 10px",
-                        fontSize: "12px",
-                        fontWeight: "700",
-                        transition: "all 0.15s",
-                      }}
-                    >
-                      {opt.count}
+                    key: "style" as const, label: "Style Improvements", count: result.style_suggestions,
+                    color: "var(--sapphire)", bg: "var(--sapphire-dim)", checked: applyStyle, set: setApplyStyle
+                  }
+                ].map(opt => (
+                  <label key={opt.key} style={{
+                    display: "flex", alignItems: "center", gap: "12px",
+                    background: "var(--void)", border: `1.5px solid var(--border-mid)`,
+                    borderRadius: "12px", padding: "12px 16px", cursor: "pointer",
+                  }}>
+                    <input type="checkbox" checked={opt.checked} onChange={e => opt.set(e.target.checked)}
+                      style={{ width: "16px", height: "16px", accentColor: opt.color, cursor: "pointer" }} />
+                    <span style={{ flex: 1, fontSize: "13px", fontWeight: "700", color: "var(--text-primary)" }}>{opt.label}</span>
+                    <span style={{ fontSize: "11px", fontWeight: "700", color: opt.color, background: opt.bg, padding: "3px 10px", borderRadius: "10px" }}>
+                      {opt.count} issues
                     </span>
                   </label>
                 ))}
               </div>
 
-              {/* PDF error */}
-              {pdfError && (
-                <div
-                  style={{
-                    background: "rgba(239,68,68,0.1)",
-                    border: "1px solid rgba(239,68,68,0.2)",
-                    borderRadius: "8px",
-                    padding: "10px 14px",
-                    color: "#f87171",
-                    fontSize: "12px",
-                    marginBottom: "10px",
-                  }}
-                >
-                  {pdfError}
+              {/* PDF & DOCX triggers */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+                <div>
+                  <button onClick={handleGeneratePdf} disabled={pdfGenerating} className="btn-dark" style={{ width: "100%", justifyContent: "center" }}>
+                    {pdfGenerating ? <><Loader size={13} style={{ animation: "spin 1.1s linear infinite" }} /> PDF Generating…</> : <><FileDown size={14} /> Download PDF</>}
+                  </button>
+                  {pdfError && <p style={{ color: "var(--crimson)", fontSize: "11px", marginTop: "6px" }}>{pdfError}</p>}
                 </div>
-              )}
 
-              {/* DOCX error */}
-              {docxError && (
-                <div
-                  style={{
-                    background: "rgba(239,68,68,0.1)",
-                    border: "1px solid rgba(239,68,68,0.2)",
-                    borderRadius: "8px",
-                    padding: "10px 14px",
-                    color: "#f87171",
-                    fontSize: "12px",
-                    marginBottom: "10px",
-                  }}
-                >
-                  {docxError}
+                <div>
+                  <button onClick={handleGenerateDocx} disabled={docxGenerating} className="btn-outline" style={{ width: "100%", justifyContent: "center" }}>
+                    {docxGenerating ? <><Loader size={13} style={{ animation: "spin 1.1s linear infinite" }} /> DOCX Generating…</> : <><Download size={14} /> Download DOCX</>}
+                  </button>
+                  {docxError && <p style={{ color: "var(--crimson)", fontSize: "11px", marginTop: "6px" }}>{docxError}</p>}
                 </div>
-              )}
-
-              {/* Download buttons — side by side */}
-              <div style={{ display: "flex", gap: "10px" }}>
-                {/* Download Selective PDF */}
-                <button
-                  onClick={handleGeneratePdf}
-                  disabled={pdfGenerating || (!applyGrammar && !applyPunctuation && !applyStyle)}
-                  style={{
-                    flex: 1,
-                    background:
-                      pdfGenerating || (!applyGrammar && !applyPunctuation && !applyStyle)
-                        ? "#bdbdb8"
-                        : "#1a1a1a",
-                    color: "#ffffff",
-                    border: "none",
-                    borderRadius: "10px",
-                    padding: "12px 16px",
-                    fontSize: "13px",
-                    fontWeight: "700",
-                    cursor:
-                      pdfGenerating || (!applyGrammar && !applyPunctuation && !applyStyle)
-                        ? "not-allowed"
-                        : "pointer",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    gap: "8px",
-                    transition: "background 0.2s",
-                    letterSpacing: "0.01em",
-                  }}
-                >
-                  {pdfGenerating ? (
-                    <>
-                      <Loader size={15} style={{ animation: "spin 1s linear infinite" }} />
-                      Generating…
-                    </>
-                  ) : (
-                    <>
-                      <Download size={15} />
-                      Download PDF
-                    </>
-                  )}
-                </button>
-
-                {/* Download Selective DOCX */}
-                <button
-                  onClick={handleGenerateDocx}
-                  disabled={docxGenerating || (!applyGrammar && !applyPunctuation && !applyStyle)}
-                  style={{
-                    flex: 1,
-                    background: "#ffffff",
-                    color:
-                      docxGenerating || (!applyGrammar && !applyPunctuation && !applyStyle)
-                        ? "#bdbdb8"
-                        : "#1a1a1a",
-                    border: `1px solid ${docxGenerating || (!applyGrammar && !applyPunctuation && !applyStyle) ? "#e8e8e4" : "#1a1a1a"}`,
-                    borderRadius: "10px",
-                    padding: "12px 16px",
-                    fontSize: "13px",
-                    fontWeight: "700",
-                    cursor:
-                      docxGenerating || (!applyGrammar && !applyPunctuation && !applyStyle)
-                        ? "not-allowed"
-                        : "pointer",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    gap: "8px",
-                    transition: "background 0.2s",
-                    letterSpacing: "0.01em",
-                  }}
-                >
-                  {docxGenerating ? (
-                    <>
-                      <Loader size={15} style={{ animation: "spin 1s linear infinite" }} />
-                      Generating…
-                    </>
-                  ) : (
-                    <>
-                      <Download size={15} />
-                      Download DOCX
-                    </>
-                  )}
-                </button>
               </div>
-
-              {/* Helper note */}
-              {!applyGrammar && !applyPunctuation && !applyStyle && (
-                <p style={{ fontSize: "11px", color: "#ef4444", marginTop: "8px", textAlign: "center" }}>
-                  Select at least one correction type above.
-                </p>
-              )}
-            </div>
-            {/* ── End Selective PDF Generator ──────────────────────────────── */}
-
-            {/* Stat cards — clickable to jump to that tab */}
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(3, 1fr)",
-                gap: "12px",
-                marginBottom: "28px",
-              }}
-            >
-              {[
-                { id: "grammar" as TabType, label: "Grammar Fixes", value: result.grammar_fixes, color: "#6366f1", icon: "✦" },
-                { id: "punctuation" as TabType, label: "Punctuation Fixes", value: result.punctuation_fixes, color: "#f59e0b", icon: "✎" },
-                { id: "style" as TabType, label: "Style Suggestions", value: result.style_suggestions, color: "#10b981", icon: "◈" },
-              ].map((s) => (
-                <div
-                  key={s.label}
-                  onClick={() => setActiveTab(s.id)}
-                  style={{
-                    background: "#ffffff",
-                    border: `1px solid ${activeTab === s.id ? s.color : "#e8e8e4"}`,
-                    borderRadius: "12px",
-                    padding: "20px",
-                    textAlign: "center",
-                    cursor: "pointer",
-                    transition: "all 0.2s",
-                    transform: activeTab === s.id ? "translateY(-2px)" : "none",
-                    boxShadow: activeTab === s.id ? "0 8px 24px rgba(0,0,0,0.10)" : "none",
-                  }}
-                >
-                  <div style={{ fontSize: "24px", marginBottom: "4px" }}>{s.icon}</div>
-                  <div
-                    style={{
-                      fontSize: "32px",
-                      fontWeight: "800",
-                      fontFamily: "'Playfair Display', serif",
-                      color: "#2b2b2b",
-                      letterSpacing: "-0.02em",
-                    }}
-                  >
-                    {s.value}
-                  </div>
-                  <div
-                    style={{
-                      fontSize: "11px",
-                      color: "#6b6b63",
-                      marginTop: "4px",
-                      fontWeight: "600",
-                      letterSpacing: "0.06em",
-                      textTransform: "uppercase",
-                    }}
-                  >
-                    {s.label}
-                  </div>
-                  <div
-                    style={{
-                      marginTop: "8px",
-                      fontSize: "11px",
-                      color: s.color,
-                      opacity: 0.7,
-                    }}
-                  >
-                    Click to view details →
-                  </div>
-                </div>
-              ))}
             </div>
 
-            {/* Tab bar */}
-            <div
-              style={{
-                display: "flex",
-                gap: "4px",
-                background: "#f7f2e4",
-                borderRadius: "10px",
-                padding: "4px",
-                marginBottom: "16px",
-                overflowX: "auto",
-              }}
-            >
-              {TABS.map((tab) => (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
-                  style={{
-                    padding: "8px 14px",
-                    borderRadius: "8px",
-                    border: "none",
-                    cursor: "pointer",
-                    fontSize: "13px",
-                    fontWeight: "600",
-                    background:
-                      activeTab === tab.id
-                        ? "#ffffff"
-                        : "transparent",
-                    color: activeTab === tab.id ? tab.color : "#6b6b63",
-                    transition: "all 0.15s",
-                    whiteSpace: "nowrap",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "6px",
-                  }}
-                >
-                  {tab.label}
-                  {tab.count !== undefined && tab.count > 0 && (
-                    <span
-                      style={{
-                        background: `${tab.color}22`,
-                        color: tab.color,
-                        borderRadius: "20px",
-                        padding: "1px 7px",
-                        fontSize: "11px",
-                        fontWeight: "700",
-                      }}
-                    >
-                      {tab.count}
-                    </span>
-                  )}
-                </button>
-              ))}
+            {/* Tab Navigation */}
+            <div style={{ display: "flex", borderBottom: "1.5px solid var(--border-mid)", gap: "4px", marginBottom: "20px" }}>
+              {(["summary", "grammar", "punctuation", "style", "corrected"] as const).map(tab => {
+                const isActive = activeTab === tab;
+                let countLabel = "";
+                if (tab === "grammar") countLabel = ` (${result.grammar_fixes})`;
+                if (tab === "punctuation") countLabel = ` (${result.punctuation_fixes})`;
+                if (tab === "style") countLabel = ` (${result.style_suggestions})`;
+                return (
+                  <button key={tab} onClick={() => setActiveTab(tab)} style={{
+                    background: "none", border: "none",
+                    padding: "10px 16px", fontSize: "13px", fontWeight: isActive ? "700" : "500",
+                    color: isActive ? "var(--emerald)" : "var(--text-tertiary)",
+                    borderBottom: `2px solid ${isActive ? "var(--emerald)" : "transparent"}`,
+                    cursor: "pointer", textTransform: "capitalize",
+                  }}>
+                    {tab === "style" ? "Style Suggestions" : tab + countLabel}
+                  </button>
+                );
+              })}
             </div>
 
             {/* Tab content panel */}
-            <div
-              style={{
-                background: "#ffffff",
-                border: "1px solid #e8e8e4",
-                borderRadius: "12px",
-                padding: "24px",
-                minHeight: "200px",
-              }}
-            >
-              {/* Summary tab */}
+            <div className="card" style={{ background: "var(--onyx)", border: "1.5px solid var(--border-mid)", borderRadius: "16px", padding: "28px" }}>
+              
+              {/* SUMMARY TAB */}
               {activeTab === "summary" && (
-                <p
-                  style={{
-                    fontSize: "14px",
-                    color: "#2b2b2b",
-                    lineHeight: "1.9",
-                    whiteSpace: "pre-wrap",
-                  }}
-                >
-                  {result.corrections_summary}
-                </p>
+                <div style={{ fontSize: "14px", lineHeight: "1.7", color: "var(--text-primary)" }}>
+                  <h4 className="serif" style={{ fontSize: "20px", color: "var(--text-primary)", marginBottom: "12px" }}>Executive Summary</h4>
+                  <div style={{ whiteSpace: "pre-line" }}>{result.corrections_summary}</div>
+                </div>
               )}
 
-              {/* Corrected text tab */}
+              {/* CORRECTED TAB */}
               {activeTab === "corrected" && (
-                correctedTextLoading ? (
-                  <div style={{ color: "#6b6b63", fontSize: "14px", padding: "24px 0", textAlign: "center" }}>
-                    Loading corrected text…
-                  </div>
-                ) : result.corrected_text ? (
-                  <pre
-                    style={{
-                      fontSize: "13px",
-                      color: "#2b2b2b",
-                      lineHeight: "1.9",
-                      whiteSpace: "pre-wrap",
-                      wordBreak: "break-word",
-                      fontFamily: "'DM Mono', monospace",
-                      maxHeight: "500px",
-                      overflowY: "auto",
-                      background: "#f7f2e4",
-                      borderRadius: "10px",
-                      padding: "16px",
-                    }}
-                  >
-                    {result.corrected_text}
-                  </pre>
-                ) : (
-                  <div style={{ color: "#6b6b63", fontSize: "14px", padding: "24px 0", textAlign: "center" }}>
-                    Corrected text preview unavailable — use the Download button above to get the full corrected document.
-                  </div>
-                )
+                <div>
+                  <h4 className="serif" style={{ fontSize: "20px", color: "var(--text-primary)", marginBottom: "12px" }}>Full corrected manuscript preview</h4>
+                  {correctedTextLoading ? (
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "20px 0" }}>
+                      <Loader size={14} style={{ animation: "spin 1s linear infinite" }} />
+                      <span style={{ fontSize: "12px", color: "var(--text-tertiary)" }}>Fetching corrected text preview…</span>
+                    </div>
+                  ) : result.corrected_text ? (
+                    <pre style={{
+                      whiteSpace: "pre-wrap", background: "var(--void)", border: "1px solid var(--border-mid)",
+                      padding: "16px", borderRadius: "10px", fontSize: "12px", fontFamily: "inherit",
+                      maxHeight: "400px", overflowY: "auto", color: "var(--text-primary)"
+                    }}>{result.corrected_text}</pre>
+                  ) : (
+                    <p style={{ color: "var(--text-tertiary)", fontSize: "12px" }}>Manuscript preview not available. Please use the downloads above.</p>
+                  )}
+                </div>
               )}
 
-              {/* Grammar / Punctuation / Style detail tabs */}
-              {(activeTab === "grammar" || activeTab === "punctuation" || activeTab === "style") && (() => {
-                const details = getDetailList();
-                const meta = categoryMeta[activeTab];
-                if (!details || details.length === 0) {
-                  return (
-                    <div
-                      style={{
-                        display: "flex",
-                        flexDirection: "column",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        padding: "40px",
-                        color: "#6b6b63",
-                        gap: "8px",
-                      }}
-                    >
-                      <CheckCircle size={32} color="#10b981" style={{ opacity: 0.5 }} />
-                      <p style={{ fontSize: "14px" }}>{meta.emptyMsg}</p>
-                    </div>
-                  );
+              {/* LIST DETAILS TABS */}
+              {["grammar", "punctuation", "style"].includes(activeTab) && (() => {
+                const type = activeTab === "grammar" ? "grammar_details" : activeTab === "punctuation" ? "punctuation_details" : "style_details";
+                const list = result[type] || [];
+                if (list.length === 0) {
+                  return <p style={{ color: "var(--text-tertiary)", fontSize: "13px", padding: "16px 0" }}>No issues found in this category.</p>;
                 }
+                const colorTheme = activeTab === "grammar" ? "var(--violet)" : activeTab === "punctuation" ? "var(--amber)" : "var(--sapphire)";
+
                 return (
                   <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                    {details.map((item, idx) => {
-                      const key = `${activeTab}-${idx}`;
-                      const isOpen = expandedErrors.has(key);
+                    {list.map((err, i) => {
+                      const key = `${activeTab}-${i}`;
+                      const isExpanded = expandedErrors.has(key);
                       return (
-                        <div
-                          key={key}
-                          style={{
-                            border: "1px solid #e8e8e4",
-                            borderRadius: "10px",
-                            overflow: "hidden",
-                            transition: "border-color 0.2s",
-                          }}
-                        >
-                          {/* Collapsed header — always visible */}
-                          <div
-                            onClick={() => toggleError(key)}
-                            style={{
-                              display: "flex",
-                              alignItems: "flex-start",
-                              gap: "12px",
-                              padding: "14px 16px",
-                              cursor: "pointer",
-                              background: isOpen
-                                ? "#f7f2e4"
-                                : "transparent",
-                              transition: "background 0.15s",
-                            }}
-                          >
-                            {/* Index badge */}
-                            <span
-                              style={{
-                                flexShrink: 0,
-                                width: "22px",
-                                height: "22px",
-                                borderRadius: "6px",
-                                background: meta.badgeBg,
-                                color: meta.badgeColor,
-                                fontSize: "11px",
-                                fontWeight: "700",
-                                display: "flex",
-                                alignItems: "center",
-                                justifyContent: "center",
-                                marginTop: "1px",
-                              }}
-                            >
-                              {idx + 1}
+                        <div key={i} style={{ border: `1.5px solid var(--border-mid)`, borderRadius: "12px", overflow: "hidden" }}>
+                          {/* Header toggle */}
+                          <div onClick={() => toggleError(key)} style={{
+                            display: "flex", alignItems: "center", gap: "14px",
+                            padding: "14px 18px", background: "var(--void)", cursor: "pointer"
+                          }}>
+                            <span style={{ fontSize: "12px", fontWeight: "700", color: colorTheme, border: `1px solid ${colorTheme}`, padding: "2px 8px", borderRadius: "4px" }}>
+                              Issue {i + 1}
                             </span>
-
-                            {/* Original snippet with strikethrough */}
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                              <div
-                                style={{
-                                  display: "flex",
-                                  alignItems: "center",
-                                  gap: "8px",
-                                  flexWrap: "wrap",
-                                }}
-                              >
-                                <span
-                                  style={{
-                                    fontSize: "13px",
-                                    color: "#ef4444",
-                                    textDecoration: "line-through",
-                                    fontFamily: "'DM Mono', monospace",
-                                    opacity: 0.85,
-                                    wordBreak: "break-word",
-                                  }}
-                                >
-                                  {item.original}
-                                </span>
-                                <span style={{ color: "#9b9b91", fontSize: "12px" }}>→</span>
-                                <span
-                                  style={{
-                                    fontSize: "13px",
-                                    color: "#4ade80",
-                                    fontFamily: "'DM Mono', monospace",
-                                    fontWeight: "500",
-                                    wordBreak: "break-word",
-                                  }}
-                                >
-                                  {item.corrected}
-                                </span>
-                              </div>
-                            </div>
-
-                            {/* Expand toggle */}
-                            <span
-                              style={{
-                                flexShrink: 0,
-                                color: "#9b9b91",
-                                display: "flex",
-                                alignItems: "center",
-                              }}
-                            >
-                              {isOpen ? (
-                                <ChevronUp size={15} />
-                              ) : (
-                                <ChevronDown size={15} />
-                              )}
+                            <span style={{ flex: 1, fontSize: "13px", color: "var(--text-primary)", fontWeight: "600", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              Original: &ldquo;{err.original}&rdquo;
                             </span>
+                            {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
                           </div>
 
-                          {/* Expanded explanation */}
-                          {isOpen && (
-                            <div
-                              style={{
-                                padding: "0 16px 14px 50px",
-                                borderTop: "1px solid #e8e8e4",
-                              }}
-                            >
-                              <div
-                                style={{
-                                  display: "inline-flex",
-                                  alignItems: "center",
-                                  gap: "6px",
-                                  background: meta.badgeBg,
-                                  border: `1px solid ${meta.badgeColor}33`,
-                                  borderRadius: "6px",
-                                  padding: "3px 10px",
-                                  fontSize: "10px",
-                                  fontWeight: "700",
-                                  letterSpacing: "0.06em",
-                                  textTransform: "uppercase",
-                                  color: meta.badgeColor,
-                                  marginTop: "12px",
-                                  marginBottom: "8px",
-                                }}
-                              >
-                                {meta.label}
+                          {/* Details panel */}
+                          {isExpanded && (
+                            <div style={{ padding: "18px", borderTop: "1.5px solid var(--border-mid)", background: "var(--onyx)", display: "flex", flexDirection: "column", gap: "12px" }}>
+                              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+                                <div style={{ background: "rgba(239, 68, 68, 0.03)", border: "1px solid rgba(239, 68, 68, 0.15)", padding: "12px", borderRadius: "8px" }}>
+                                  <span style={{ fontSize: "10px", fontWeight: "700", textTransform: "uppercase", color: "var(--crimson)" }}>Original Text</span>
+                                  <p style={{ fontSize: "13px", color: "var(--text-primary)", marginTop: "4px" }}>{err.original}</p>
+                                </div>
+                                <div style={{ background: "rgba(16, 185, 129, 0.03)", border: "1px solid rgba(16, 185, 129, 0.15)", padding: "12px", borderRadius: "8px" }}>
+                                  <span style={{ fontSize: "10px", fontWeight: "700", textTransform: "uppercase", color: "var(--emerald)" }}>Corrected Text</span>
+                                  <p style={{ fontSize: "13px", color: "var(--text-primary)", marginTop: "4px" }}>{err.corrected}</p>
+                                </div>
                               </div>
-                              <p
-                                style={{
-                                  fontSize: "13px",
-                                  color: "#2b2b2b",
-                                  lineHeight: "1.6",
-                                }}
-                              >
-                                {item.explanation}
-                              </p>
+                              <div>
+                                <span className="field-label" style={{ fontSize: "10px" }}>AI Rationale</span>
+                                <p style={{ fontSize: "13px", color: "var(--text-secondary)", lineHeight: 1.5 }}>{err.explanation}</p>
+                              </div>
                             </div>
                           )}
                         </div>
@@ -1252,41 +640,14 @@ export default function ProofreadPage() {
               })()}
             </div>
 
-            {/* New upload */}
-            <button
-              onClick={() => {
-                setResult(null);
-                setFile(null);
-                setExpandedErrors(new Set());
-              }}
-              style={{
-                marginTop: "20px",
-                background: "none",
-                border: "1px solid #e8e8e4",
-                borderRadius: "10px",
-                padding: "10px 20px",
-                color: "#2b2b2b",
-                fontSize: "13px",
-                cursor: "pointer",
-                transition: "all 0.2s",
-              }}
-              onMouseOver={(e) => {
-                (e.currentTarget as HTMLButtonElement).style.background = "#f7f2e4";
-              }}
-              onMouseOut={(e) => {
-                (e.currentTarget as HTMLButtonElement).style.background = "none";
-              }}
-            >
-              ← Proofread another document
+            {/* Clear button */}
+            <button onClick={() => { setResult(null); setFile(null); setError(""); }}
+              className="btn-outline" style={{ marginTop: "24px" }}>
+              ← Proofread another file
             </button>
           </div>
         )}
       </main>
-
-      <style>{`
-        @keyframes spin { to { transform: rotate(360deg); } }
-        @keyframes fadeInUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
-      `}</style>
     </div>
   );
 }

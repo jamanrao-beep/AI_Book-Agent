@@ -30,31 +30,33 @@ export default function DashboardLayout({
       <div
         style={{
           minHeight: "100vh",
-          background: "#f7f2e4",
+          background: "var(--void)",
           display: "flex",
           flexDirection: "column",
           alignItems: "center",
           justifyContent: "center",
           fontFamily: "'DM Sans', sans-serif",
-          color: "#2b2b2b",
+          color: "var(--text-primary)",
         }}
       >
-        <Loader
-          size={32}
-          style={{
-            animation: "spin 1.2s linear infinite",
-            marginBottom: "16px",
-            color: "#2563eb",
-          }}
-        />
-        <p style={{ fontSize: "14px", fontWeight: "600", opacity: 0.8 }}>
-          Verifying session...
+        <div style={{ position: "relative", marginBottom: "20px" }}>
+          <Loader
+            size={36}
+            style={{
+              animation: "spin 1.4s cubic-bezier(0.5, 0.1, 0.4, 0.9) infinite",
+              color: "var(--sapphire)",
+              filter: "drop-shadow(0 0 8px rgba(37, 99, 235, 0.35))",
+            }}
+          />
+        </div>
+        <p style={{ fontSize: "13px", fontWeight: "600", letterSpacing: "0.05em", textTransform: "uppercase", opacity: 0.6 }}>
+          Verifying Session
         </p>
-        <style>{`
-          @keyframes spin {
-            to { transform: rotate(360deg); }
-          }
-        `}</style>
+        <div style={{ display: "flex", gap: "4px", marginTop: "8px" }}>
+          <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "var(--sapphire)", animation: "pulse 1.2s infinite ease-in-out" }} />
+          <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "var(--sapphire)", animation: "pulse 1.2s infinite ease-in-out 0.2s" }} />
+          <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "var(--sapphire)", animation: "pulse 1.2s infinite ease-in-out 0.4s" }} />
+        </div>
       </div>
     );
   }

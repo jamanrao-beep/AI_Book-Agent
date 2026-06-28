@@ -9,11 +9,10 @@ import {
     Shield,
     Database,
     Key,
-    ToggleLeft,
-    ToggleRight,
     User as UserIcon,
     LogOut,
     ExternalLink,
+    CheckCircle,
 } from "lucide-react";
 
 export default function SettingsPage() {
@@ -38,131 +37,108 @@ export default function SettingsPage() {
     };
 
     return (
-        <div style={{ minHeight: "100vh", background: "#f7f2e4", fontFamily: "'DM Sans', sans-serif", color: "#2a2929" }}>
+        <div style={{ minHeight: "100vh", background: "var(--void)", fontFamily: "'DM Sans', sans-serif", color: "var(--text-primary)", position: "relative" }}>
+            <div className="grid-overlay" />
 
             {/* Nav */}
-            <nav style={{
-                borderBottom: "1px solid rgba(0,0,0,0.06)",
+            <nav className="glass" style={{
+                borderBottom: "1.5px solid var(--border-mid)",
                 padding: "0 40px", height: "60px",
-                display: "flex", alignItems: "center", gap: "16px",
-                position: "sticky", top: 0,
-                background: "rgba(8,10,15,0.92)", backdropFilter: "blur(16px)",
-                zIndex: 50,
+                display: "flex", alignItems: "center", justifyItems: "center",
+                position: "sticky", top: 0, zIndex: 50,
             }}>
                 <button
                     onClick={() => router.push("/dashboard")}
+                    className="btn-ghost"
                     style={{
                         display: "flex", alignItems: "center", gap: "6px",
-                        background: "none", border: "1px solid rgba(0,0,0,0.08)",
-                        borderRadius: "8px", padding: "6px 12px",
-                        color: "#555555", fontSize: "12px", cursor: "pointer", transition: "all 0.2s",
+                        padding: "6px 12px", fontSize: "12px", borderRadius: "8px"
                     }}
-                    onMouseOver={e => { (e.currentTarget as HTMLButtonElement).style.color = "#2a2929"; (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(0,0,0,0.14)"; }}
-                    onMouseOut={e => { (e.currentTarget as HTMLButtonElement).style.color = "#555555"; (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(0,0,0,0.08)"; }}
                 >
                     <ArrowLeft size={13} /> Dashboard
                 </button>
-                <div style={{ height: "18px", width: "1px", background: "rgba(0,0,0,0.08)" }} />
-                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <span style={{ color: "var(--border-mid)" }}>|</span>
+                <div style={{ display: "flex", alignItems: "center", gap: "9px" }}>
                     <div style={{
-                        width: "26px", height: "26px",
-                        background: "rgba(138,148,168,0.1)", border: "1px solid rgba(138,148,168,0.18)",
-                        borderRadius: "7px", display: "flex", alignItems: "center", justifyContent: "center",
+                        width: "28px", height: "28px",
+                        background: "var(--text-primary)",
+                        borderRadius: "6px", display: "flex", alignItems: "center", justifyContent: "center",
                     }}>
-                        <Settings size={13} color="#555555" />
+                        <Settings size={14} color="var(--void)" />
                     </div>
-                    <span style={{ fontWeight: "600", fontSize: "14px" }}>Settings</span>
+                    <span style={{ fontWeight: "800", fontSize: "14px", color: "var(--text-primary)" }}>Settings</span>
                 </div>
             </nav>
 
-            <main style={{ maxWidth: "820px", margin: "0 auto", padding: "48px 32px 80px" }}>
-
-                {/* Header */}
+            <main style={{ maxWidth: "860px", margin: "0 auto", padding: "64px 32px 96px", position: "relative", zIndex: 2 }}>
+                
+                {/* Page header */}
                 <div style={{ marginBottom: "40px" }}>
-                    <h1 style={{
-                        fontFamily: "'Playfair Display', serif",
-                        fontSize: "34px", fontWeight: "400",
-                        letterSpacing: "-0.02em", marginBottom: "6px",
-                    }}>
+                    <h1 className="serif" style={{ fontSize: "40px", fontWeight: "400", letterSpacing: "-0.02em", color: "var(--text-primary)" }}>
                         Preferences & Identity
                     </h1>
-                    <p style={{ color: "#555555", fontSize: "14px" }}>
-                        Configure your editorial environment and AI behavioral parameters
+                    <p style={{ color: "var(--text-secondary)", fontSize: "14px", marginTop: "4px" }}>
+                        Configure your user profile, default layout configurations, and model credentials.
                     </p>
                 </div>
 
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginBottom: "16px" }}>
-
-                    {/* Profile settings */}
-                    <div style={{ background: "#faf8f5", border: "1px solid rgba(0,0,0,0.06)", borderRadius: "14px", padding: "24px" }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px", marginBottom: "20px" }}>
+                    
+                    {/* Profile Panel */}
+                    <div className="card" style={{ background: "var(--onyx)", border: "1.5px solid var(--border-mid)", borderRadius: "16px", padding: "24px" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "20px" }}>
-                            <UserIcon size={14} color="#555555" />
-                            <span style={{ fontSize: "11px", fontWeight: "700", letterSpacing: "0.08em", color: "#737373", textTransform: "uppercase" }}>
+                            <UserIcon size={14} color="var(--sapphire)" />
+                            <span style={{ fontSize: "11px", fontWeight: "700", letterSpacing: "0.08em", color: "var(--text-secondary)", textTransform: "uppercase" }}>
                                 Profile Settings
                             </span>
                         </div>
 
-                        {/* Avatar + info */}
+                        {/* Avatar */}
                         <div style={{ display: "flex", alignItems: "center", gap: "14px", marginBottom: "20px" }}>
                             <div style={{
-                                width: "52px", height: "52px", borderRadius: "12px",
-                                background: "linear-gradient(135deg, #3B6FFF, #9B6DFF)",
+                                width: "48px", height: "48px", borderRadius: "10px",
+                                background: "var(--text-primary)",
                                 display: "flex", alignItems: "center", justifyContent: "center",
-                                fontSize: "20px", fontFamily: "'Playfair Display', serif",
-                                color: "#2a2929", fontWeight: "400", flexShrink: 0,
+                                fontSize: "18px", fontFamily: "serif",
+                                color: "var(--void)", fontWeight: "700", flexShrink: 0,
                             }}>
                                 {user?.displayName?.[0] || user?.email?.[0]?.toUpperCase() || "?"}
                             </div>
                             <div>
-                                <div style={{ fontSize: "15px", fontWeight: "600" }}>
-                                    {user?.displayName || "Anonymous User"}
-                                </div>
-                                <div style={{ fontSize: "12px", color: "#555555", marginTop: "2px" }}>
+                                <h4 style={{ fontSize: "14px", fontWeight: "700", color: "var(--text-primary)" }}>
+                                    {user?.displayName || "Anonymous Publisher"}
+                                </h4>
+                                <p style={{ fontSize: "12px", color: "var(--text-tertiary)", marginTop: "2px" }}>
                                     {user?.email}
-                                </div>
+                                </p>
                             </div>
                         </div>
 
                         <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                             <div>
-                                <label className="field-label">Full Name</label>
-                                <input
-                                    type="text"
-                                    defaultValue={user?.displayName || ""}
-                                    placeholder="Your full name"
-                                    className="input-field"
-                                />
+                                <label className="field-label">Display Name</label>
+                                <input type="text" defaultValue={user?.displayName || ""} placeholder="Your name" className="input-field" />
                             </div>
                             <div>
-                                <label className="field-label">Primary Email</label>
-                                <input
-                                    type="email"
-                                    value={user?.email || ""}
-                                    readOnly
-                                    className="input-field"
-                                    style={{ opacity: 0.6, cursor: "not-allowed" }}
-                                />
+                                <label className="field-label">Email Address</label>
+                                <input type="email" value={user?.email || ""} readOnly className="input-field" style={{ opacity: 0.6, cursor: "not-allowed" }} />
                             </div>
                         </div>
                     </div>
 
-                    {/* Account preferences */}
-                    <div style={{ background: "#faf8f5", border: "1px solid rgba(0,0,0,0.06)", borderRadius: "14px", padding: "24px" }}>
+                    {/* Account Prefs Panel */}
+                    <div className="card" style={{ background: "var(--onyx)", border: "1.5px solid var(--border-mid)", borderRadius: "16px", padding: "24px" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "20px" }}>
-                            <Database size={14} color="#555555" />
-                            <span style={{ fontSize: "11px", fontWeight: "700", letterSpacing: "0.08em", color: "#737373", textTransform: "uppercase" }}>
+                            <Database size={14} color="var(--sapphire)" />
+                            <span style={{ fontSize: "11px", fontWeight: "700", letterSpacing: "0.08em", color: "var(--text-secondary)", textTransform: "uppercase" }}>
                                 Account Preferences
                             </span>
                         </div>
 
                         <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
                             <div>
-                                <label className="field-label">Default Output Format</label>
-                                <select
-                                    value={defaultFormat}
-                                    onChange={e => setDefaultFormat(e.target.value)}
-                                    className="input-field"
-                                >
+                                <label className="field-label">Default Format</label>
+                                <select value={defaultFormat} onChange={e => setDefaultFormat(e.target.value)} className="input-field">
                                     <option value="docx">DOCX (Manuscript)</option>
                                     <option value="pdf">PDF (Print Ready)</option>
                                     <option value="both">Both PDF + DOCX</option>
@@ -170,207 +146,87 @@ export default function SettingsPage() {
                             </div>
 
                             <div>
-                                <label className="field-label">
-                                    Words Per Page (Avg){" "}
-                                    <span style={{ color: "#3B6FFF", fontWeight: "700", textTransform: "none", letterSpacing: 0, fontSize: "12px" }}>
-                                        {wppDefault}
-                                    </span>
-                                </label>
-                                <input
-                                    type="range" min={100} max={600} step={25}
-                                    value={wppDefault} onChange={e => setWppDefault(Number(e.target.value))}
-                                    style={{ width: "100%", marginTop: "8px" }}
-                                />
-                                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "10px", color: "#737373", marginTop: "4px" }}>
-                                    <span>100</span><span>Used for progress estimation</span><span>600</span>
+                                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", marginBottom: "6px" }}>
+                                    <span style={{ fontWeight: "700" }}>Words Per Page:</span>
+                                    <span style={{ color: "var(--sapphire)", fontWeight: "700" }}>{wppDefault} words</span>
                                 </div>
+                                <input type="range" min={100} max={600} step={25} value={wppDefault} onChange={e => setWppDefault(Number(e.target.value))} style={{ width: "100%" }} />
                             </div>
                         </div>
                     </div>
                 </div>
 
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginBottom: "16px" }}>
-
-                    {/* Security */}
-                    <div style={{ background: "#faf8f5", border: "1px solid rgba(0,0,0,0.06)", borderRadius: "14px", padding: "24px" }}>
-                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "20px" }}>
-                            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                                <Shield size={14} color="#555555" />
-                                <span style={{ fontSize: "11px", fontWeight: "700", letterSpacing: "0.08em", color: "#737373", textTransform: "uppercase" }}>
-                                    Security & Access
-                                </span>
-                            </div>
-                            <div style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#10D98A" }} />
-                        </div>
-
-                        <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                            <div style={{
-                                background: "rgba(0,0,0,0.03)", border: "1px solid rgba(0,0,0,0.06)",
-                                borderRadius: "10px", padding: "14px 16px",
-                                display: "flex", alignItems: "center", justifyContent: "space-between",
-                            }}>
-                                <div>
-                                    <div style={{ fontWeight: "600", fontSize: "14px" }}>Password</div>
-                                    <div style={{ fontSize: "11px", color: "#737373", marginTop: "2px" }}>Last changed 4 months ago</div>
-                                </div>
-                                <button style={{
-                                    background: "rgba(59,111,255,0.1)", border: "1px solid rgba(59,111,255,0.2)",
-                                    borderRadius: "7px", padding: "7px 14px",
-                                    color: "#6B93FF", fontSize: "12px", fontWeight: "600", cursor: "pointer",
-                                }}>Change</button>
-                            </div>
-
-                            <div style={{
-                                background: "rgba(0,0,0,0.03)", border: "1px solid rgba(0,0,0,0.06)",
-                                borderRadius: "10px", padding: "14px 16px",
-                                display: "flex", alignItems: "center", justifyContent: "space-between",
-                            }}>
-                                <div>
-                                    <div style={{ fontWeight: "600", fontSize: "14px" }}>Two-factor authentication</div>
-                                    <div style={{ fontSize: "11px", color: "#737373", marginTop: "2px" }}>Security key or mobile app</div>
-                                </div>
-                                <button
-                                    onClick={() => setTwoFactor(!twoFactor)}
-                                    style={{ background: "none", border: "none", cursor: "pointer", padding: 0 }}
-                                >
-                                    {twoFactor
-                                        ? <div style={{ width: "40px", height: "22px", borderRadius: "11px", background: "#3B6FFF", position: "relative", transition: "all 0.2s" }}>
-                                            <div style={{ position: "absolute", right: "3px", top: "3px", width: "16px", height: "16px", borderRadius: "50%", background: "white" }} />
-                                        </div>
-                                        : <div style={{ width: "40px", height: "22px", borderRadius: "11px", background: "rgba(0,0,0,0.08)", position: "relative", transition: "all 0.2s" }}>
-                                            <div style={{ position: "absolute", left: "3px", top: "3px", width: "16px", height: "16px", borderRadius: "50%", background: "rgba(0,0,0,0.4)" }} />
-                                        </div>
-                                    }
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* API & Integrations */}
-                    <div style={{ background: "#ffffff", border: "1px solid rgba(0,0,0,0.06)", borderRadius: "14px", padding: "24px" }}>
+                {/* Second row: Security & Credentials */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px", marginBottom: "32px" }}>
+                    
+                    {/* Security Toggle Switch Panel */}
+                    <div className="card" style={{ background: "var(--onyx)", border: "1.5px solid var(--border-mid)", borderRadius: "16px", padding: "24px" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "20px" }}>
-                            <Key size={14} color="#555555" />
-                            <span style={{ fontSize: "11px", fontWeight: "700", letterSpacing: "0.08em", color: "#737373", textTransform: "uppercase" }}>
-                                API & Integrations
+                            <Shield size={14} color="var(--sapphire)" />
+                            <span style={{ fontSize: "11px", fontWeight: "700", letterSpacing: "0.08em", color: "var(--text-secondary)", textTransform: "uppercase" }}>
+                                Security & Access
                             </span>
                         </div>
 
-                        <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                            <div style={{
-                                background: "rgba(0,0,0,0.03)", border: "1px solid rgba(0,0,0,0.06)",
-                                borderRadius: "10px", padding: "14px 16px",
-                                display: "flex", alignItems: "center", gap: "12px",
-                            }}>
-                                <div style={{
-                                    width: "34px", height: "34px", flexShrink: 0,
-                                    background: "rgba(16,217,138,0.1)", border: "1px solid rgba(16,217,138,0.2)",
-                                    borderRadius: "9px", display: "flex", alignItems: "center", justifyContent: "center",
-                                }}>
-                                    <div style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#10D98A" }} />
-                                </div>
-                                <div style={{ flex: 1 }}>
-                                    <div style={{ fontWeight: "600", fontSize: "13px" }}>Groq API Status</div>
-                                    <div style={{ fontSize: "11px", color: "#10D98A", marginTop: "2px" }}>Operational · Latency 42ms</div>
-                                </div>
-                                <button style={{
-                                    background: "none", border: "1px solid rgba(0,0,0,0.08)",
-                                    borderRadius: "7px", padding: "6px 12px",
-                                    color: "#555555", fontSize: "12px", cursor: "pointer",
-                                    display: "flex", alignItems: "center", gap: "4px",
-                                }}>
-                                    Manage <ExternalLink size={11} />
-                                </button>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                            <div>
+                                <p style={{ fontSize: "13px", fontWeight: "700", color: "var(--text-primary)" }}>Two-Factor Auth</p>
+                                <p style={{ fontSize: "11px", color: "var(--text-tertiary)", marginTop: "2px" }}>Require confirmation code on email</p>
                             </div>
 
-                            <div style={{
-                                background: "rgba(0,0,0,0.03)", border: "1px solid rgba(0,0,0,0.06)",
-                                borderRadius: "10px", padding: "14px 16px",
-                                display: "flex", alignItems: "center", gap: "12px",
-                            }}>
+                            {/* Sliding Check Switch */}
+                            <div
+                                onClick={() => setTwoFactor(!twoFactor)}
+                                style={{
+                                    width: "44px", height: "24px", borderRadius: "12px",
+                                    background: twoFactor ? "var(--sapphire)" : "var(--border-strong)",
+                                    position: "relative", cursor: "pointer", transition: "background 0.2s"
+                                }}
+                            >
                                 <div style={{
-                                    width: "34px", height: "34px", flexShrink: 0,
-                                    background: "rgba(59,111,255,0.1)", border: "1px solid rgba(59,111,255,0.2)",
-                                    borderRadius: "9px", display: "flex", alignItems: "center", justifyContent: "center",
-                                }}>
-                                    <Database size={14} color="#6B93FF" />
-                                </div>
-                                <div style={{ flex: 1 }}>
-                                    <div style={{ fontWeight: "600", fontSize: "13px" }}>Data & Archiving</div>
-                                    <div style={{ fontSize: "11px", color: "#737373", marginTop: "2px" }}>Last export 2 days ago</div>
-                                </div>
-                                <button style={{
-                                    background: "rgba(59,111,255,0.1)", border: "1px solid rgba(59,111,255,0.2)",
-                                    borderRadius: "7px", padding: "6px 12px",
-                                    color: "#6B93FF", fontSize: "12px", fontWeight: "600", cursor: "pointer",
-                                }}>
-                                    Export
-                                </button>
+                                    width: "18px", height: "18px", borderRadius: "50%",
+                                    background: "var(--void)", position: "absolute", top: "3px",
+                                    left: twoFactor ? "23px" : "3px", transition: "left 0.2s"
+                                }} />
                             </div>
                         </div>
                     </div>
-                </div>
 
-                {/* Save button */}
-                <div style={{ display: "flex", justifyContent: "flex-end", gap: "12px", marginBottom: "32px" }}>
-                    <button className="btn-ghost" onClick={() => router.push("/dashboard")}>
-                        Cancel
-                    </button>
-                    <button
-                        className="btn-dark"
-                        onClick={handleSave}
-                        style={{ padding: "11px 28px" }}
-                    >
-                        {saved ? "✓ Saved" : "Save Changes"}
-                    </button>
-                </div>
-
-                {/* Danger zone */}
-                <div style={{
-                    background: "rgba(255,77,106,0.04)",
-                    border: "1px solid rgba(255,77,106,0.15)",
-                    borderRadius: "14px", padding: "24px",
-                }}>
-                    <div style={{ fontSize: "11px", fontWeight: "700", letterSpacing: "0.08em", color: "#FF4D6A", textTransform: "uppercase", marginBottom: "12px" }}>
-                        Danger Zone
-                    </div>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    {/* API credentials mock */}
+                    <div className="card" style={{ background: "var(--onyx)", border: "1.5px solid var(--border-mid)", borderRadius: "16px", padding: "24px" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "20px" }}>
+                            <Key size={14} color="var(--sapphire)" />
+                            <span style={{ fontSize: "11px", fontWeight: "700", letterSpacing: "0.08em", color: "var(--text-secondary)", textTransform: "uppercase" }}>
+                                Model Access Credentials
+                            </span>
+                        </div>
                         <div>
-                            <div style={{ fontWeight: "600", fontSize: "14px", marginBottom: "4px" }}>Deactivate Workspace</div>
-                            <div style={{ fontSize: "13px", color: "#555555" }}>
-                                Temporarily disable your Publixo AI account and freeze all active manuscript tokens.
-                            </div>
+                            <label className="field-label">Custom Gemini API Key</label>
+                            <input type="password" value="••••••••••••••••••••" readOnly className="input-field" style={{ opacity: 0.6 }} />
                         </div>
-                        <button style={{
-                            background: "none", border: "1px solid rgba(255,77,106,0.3)",
-                            borderRadius: "8px", padding: "9px 18px",
-                            color: "#FF4D6A", fontSize: "13px", fontWeight: "600", cursor: "pointer",
-                            whiteSpace: "nowrap", marginLeft: "16px",
-                            transition: "all 0.2s",
-                        }}
-                            onMouseOver={e => { (e.currentTarget as HTMLButtonElement).style.background = "rgba(255,77,106,0.08)"; }}
-                            onMouseOut={e => { (e.currentTarget as HTMLButtonElement).style.background = "none"; }}
-                        >
-                            Deactivate Account
-                        </button>
                     </div>
                 </div>
 
-                {/* Footer */}
-                <div style={{
-                    marginTop: "32px", paddingTop: "24px",
-                    borderTop: "1px solid rgba(0,0,0,0.06)",
-                    display: "flex", alignItems: "center", justifyContent: "space-between",
-                    fontSize: "12px", color: "#737373",
-                }}>
-                    <span>© 2025 Publixo AI Suite · v2.4.0-Stable</span>
-                    <div style={{ display: "flex", gap: "16px" }}>
-                        <span style={{ cursor: "pointer" }}>Privacy Policy</span>
-                        <span style={{ cursor: "pointer" }}>Terms of Excellence</span>
-                        <div style={{ display: "flex", alignItems: "center", gap: "5px", color: "#10D98A" }}>
-                            <div style={{ width: "5px", height: "5px", borderRadius: "50%", background: "#10D98A" }} />
-                            Secure Session Active
-                        </div>
+                {/* Save Feedback */}
+                {saved && (
+                    <div className="fade-in" style={{
+                        display: "flex", alignItems: "center", gap: "8px",
+                        background: "rgba(16,185,129,0.06)", border: "1px solid rgba(16,185,129,0.2)",
+                        borderRadius: "10px", padding: "12px 16px", marginBottom: "20px",
+                        fontSize: "13px", color: "var(--emerald)", fontWeight: "600",
+                    }}>
+                        <CheckCircle size={15} /> Preferences saved successfully.
                     </div>
+                )}
+
+                {/* Action buttons */}
+                <div style={{ display: "flex", gap: "10px" }}>
+                    <button onClick={handleSave} className="btn-dark" style={{ padding: "10px 24px", fontSize: "13px", borderRadius: "10px" }}>
+                        Save Changes
+                    </button>
+                    <button onClick={() => logout().then(() => router.push("/login"))} className="btn-outline" style={{ display: "flex", alignItems: "center", gap: "6px", padding: "9px 24px", fontSize: "13px", borderRadius: "10px", borderColor: "var(--crimson)", color: "var(--crimson)" }}>
+                        <LogOut size={13} /> Sign Out
+                    </button>
                 </div>
             </main>
         </div>
