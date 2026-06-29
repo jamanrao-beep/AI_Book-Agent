@@ -202,7 +202,8 @@ export default function BooksPage() {
       setCustomWritingStyle("");
       setSelectedLanguage("English");
       setCustomLanguage("");
-    } catch {
+    } catch (e: any) {
+      alert(`Debug Info: ${e?.message || JSON.stringify(e)}`);
       setError("Failed to start generation. Make sure the backend is running.");
     } finally {
       setLoading(false);
