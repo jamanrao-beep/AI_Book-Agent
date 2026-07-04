@@ -1,0 +1,200 @@
+        else:
+            progress("designing", 30, "AI is designing your layout concept…")
+
+        # ── 4. Build effective design instructions ────────────────────────────────
+        override_hints: list[str] = []
+        if body_font:            override_hints.append(f"body font MUST be {body_font}")
+        if chapter_font:         override_hints.append(f"chapter heading font MUST be {chapter_font}")
+        if body_font_size:       override_hints.append(f"body font size MUST be {body_font_size}pt")
+        if chapter_font_size:    override_hints.append(f"chapter font size MUST be {chapter_font_size}pt")
+        if line_spacing:         override_hints.append(f"line spacing MUST be {line_spacing}×")
+        if margin_top_mm is not None:    override_hints.append(f"margin top MUST be {margin_top_mm}mm")
+        if margin_bottom_mm is not None: override_hints.append(f"margin bottom MUST be {margin_bottom_mm}mm")
+        if margin_left_mm is not None:   override_hints.append(f"margin left MUST be {margin_left_mm}mm")
+        if margin_right_mm is not None:  override_hints.append(f"margin right MUST be {margin_right_mm}mm")
+        if show_drop_cap is not None:
+            override_hints.append("drop caps: " + ("ENABLED" if show_drop_cap else "DISABLED"))
+        if show_page_numbers is not None:
+            override_hints.append("page numbers: " + ("SHOWN" if show_page_numbers else "HIDDEN"))
+
+        effective_instructions = design_instructions or ""
+
+        _TEMPLATE_HINTS = {
+            "classic_novel":    "Classic cream pages with serif fonts, generous margins, drop caps and ornamental chapter dividers — think vintage Penguin Classics.",
+            "premium_hardcover":"Luxury dark background (#0f0f0f), cream/gold text, gold accent (#c8a200), wide margins — elegant premium edition.",
+            "modern_minimal":   "Pure white page, clean Helvetica, minimal decoration, thin accent rule under chapter titles, airy spacing.",
+            "sanskrit_style":   "Warm ivory page, saffron/gold accent (#c8830a), ornate ornament dividers, classic serif — traditional sacred text aesthetic.",
+            "school_guide":     "White page, structured sans-serif layout, blue accent (#2563eb), numbered chapters, no drop cap — clear academic style.",
+            "thriller_dark":    "Dark page (#111827) with near-white body text (#f3f4f6), red accent (#ef4444), high contrast, sharp Helvetica headings.",
+            "retro_vintage":    "Warm sepia page (#f5ead0), brown text, antique brown accent, italic serif body, diagonal/decorative ornament.",
+            "poetry_bloom":     "Soft blush page (#fff0f5), purple/magenta accent (#d63384), italic serif body, floral ornaments, wide margins.",
+        }
+        if visual_template:
+            hint = _TEMPLATE_HINTS.get(visual_template, "")
+            if hint:
+                effective_instructions = hint + (("\n" + effective_instructions) if effective_instructions else "")
+
+        if override_hints:
+            hint_str = "; ".join(override_hints)
+            effective_instructions = (
+                (effective_instructions + "\n" if effective_instructions else "")
+                + f"[HARD USER OVERRIDES — honour exactly: {hint_str}]"
+            )
+
+        # ── 5. AI concept (seeded with profile defaults) ──────────────────────────
+        progress("designing", 40, "AI is crafting your personalised layout…")
+        concept = generate_layout_concept(
+            book_title=book_title,
+            sample_text=raw_text,
+            design_instructions=effective_instructions,
+            page_width_mm=page_width_mm,
+            page_height_mm=page_height_mm,
+            book_type=book_type,
+            profile_defaults=profile,
+        )
+
+        # ── 6. Apply hard user overrides (user always wins over AI + profile) ─────
+        if body_font:
+            concept["body_font"]          = body_font
+        if chapter_font:
+            concept["chapter_font"]       = chapter_font
+        if body_font_size is not None:
+            concept["body_font_size"]     = float(body_font_size)
+        if chapter_font_size is not None:
+            concept["chapter_font_size"]  = float(chapter_font_size)
+        if line_spacing is not None:
+            concept["line_spacing"]       = float(line_spacing)
+        if margin_top_mm is not None:
+            concept["margin_top_mm"]      = float(margin_top_mm)
+        if margin_bottom_mm is not None:
+            concept["margin_bottom_mm"]   = float(margin_bottom_mm)
+        if margin_left_mm is not None:
+            concept["margin_left_mm"]     = float(margin_left_mm)
+        if margin_right_mm is not None:
+            concept["margin_right_mm"]    = float(margin_right_mm)
+        if show_drop_cap is not None:
+            concept["show_drop_cap"]      = show_drop_cap
+        if show_page_numbers is not None:
+            concept["show_page_numbers"]  = show_page_numbers
+
+        # ── Footer overrides ─────────────────────────────────────────────────────
+        concept["footer_left_text"]     = footer_left_text if footer_left_text is not None else (book_title or "")
+        concept["footer_middle_text"]   = footer_middle_text if footer_middle_text is not None else concept.get("footer_middle_text", "")
+        concept["footer_right_pagenum"] = footer_right_pagenum if footer_right_pagenum is not None else True
+
+        # ── Advanced layout overrides ────────────────────────────────────────────
+        if mirror_margins is not None:
+            concept["mirror_margins"] = mirror_margins
+        if gutter_mm is not None and float(gutter_mm) > 0:
+            concept["gutter_mm"]      = float(gutter_mm)
+            # Gutter adds to the inner (binding) margin.
+            # For single-sided: inner = left.  For mirror_margins: the PDF renderer
+            # already alternates left/right per page; we add to left_mm (recto inner).
+            # Guard: only add gutter once — check if it was already applied.
+            if not concept.get("_gutter_applied"):
+                concept["margin_left_mm"] = float(concept.get("margin_left_mm", 22)) + float(gutter_mm)
+                concept["_gutter_applied"] = True
+        if paragraph_spacing_mm is not None:
+            concept["paragraph_spacing_mm"] = float(paragraph_spacing_mm)
+        if indent_mm is not None:
+            concept["first_para_indent_mm"] = float(indent_mm)
+        if color_mode:
+            concept["color_mode"] = color_mode
+        if bleed_mm is not None:
+            concept["bleed_mm"] = float(bleed_mm)
+        if chapter_start:
+            concept["chapter_start"] = chapter_start
+        if page_number_start is not None:
+            concept["page_number_start"] = int(page_number_start)
+        if page_number_style:
+            concept["page_number_style"] = page_number_style
+        if header_custom_text:
+            concept["header_text"] = header_custom_text
+        if heading_design:
+            concept["heading_design"] = heading_design
+        if section_breaks is not None:
+            concept["section_breaks"] = section_breaks
+        if front_matter:
+            concept["front_matter"] = front_matter
+        if back_matter:
+            concept["back_matter"] = back_matter
+
+        concept["_book_type"]       = book_type or "auto"
+        concept["_book_type_label"] = profile["_label"] if profile else "Auto (AI chosen)"
+
+        # ── APPLY LIBRISCRIBE MATH (Golden Ratio & Gutter Control) ──
+        # This intercepts the concept and applies professional print geometry
+        concept = _apply_libriscribe_typography_math(
+            concept=concept,
+            chapter_count=len(chapters),
+            raw_text_length=len(raw_text)
+        )
+
+        job_id    = uuid.uuid4().hex
+        safe_name = _safe_title(book_title, "book").replace(" ", "_")
+
+        # ── 7. Render PDF ─────────────────────────────────────────────────────────
+        progress("rendering", 58, "Typesetting PDF with your layout…")
+        pdf_path = os.path.join(output_dir, f"layout_{safe_name}_{job_id}.pdf")
+        render_layout_pdf(
+            chapters=chapters, concept=concept, output_path=pdf_path,
+            page_width_mm=page_width_mm, page_height_mm=page_height_mm, book_title=book_title,
+            design_instructions=effective_instructions,
+        )
+
+        # ── 8. Render DOCX ────────────────────────────────────────────────────────
+        progress("rendering_docx", 74, "Generating DOCX version…")
+        docx_path = os.path.join(output_dir, f"layout_{safe_name}_{job_id}.docx")
+        render_layout_docx(
+            chapters=chapters, concept=concept, output_path=docx_path,
+            page_width_mm=page_width_mm, page_height_mm=page_height_mm, book_title=book_title,
+        )
+
+        # ── 9. Render EPUB (Fix #18) ──────────────────────────────────────────────
+        # Produces a valid EPUB 3.0 (+ EPUB 2 NCX fallback) for Amazon KDP,
+        # Smashwords, Apple Books, and Kobo.  Controlled by output_epub flag.
+        epub_path: Optional[str] = None
+        if output_epub:
+            progress("rendering_epub", 84, "Building EPUB for digital publishing…")
+            try:
+                epub_path = os.path.join(output_dir, f"layout_{safe_name}_{job_id}.epub")
+                render_layout_epub(
+                    chapters=chapters,
+                    concept=concept,
+                    output_path=epub_path,
+                    book_title=book_title,
+                    author=author or "",
+                )
+                logger.info(f"EPUB written → {epub_path}")
+            except Exception as _epub_err:
+                logger.warning(f"EPUB render failed (non-fatal): {_epub_err}")
+                epub_path = None
+
+        # ── 10. Export CSS + JSON style tokens (Fix #19) ──────────────────────────
+        # Exports a <name>.css (live paragraph styles) and <name>_styles.json
+        # (machine-readable tokens) so a human editor can continue work in
+        # InDesign, Affinity Publisher, Vellum, Sigil, or any HTML/EPUB tool.
+        stylesheet_paths: dict = {}
+        if output_stylesheet:
+            progress("exporting_stylesheet", 92, "Exporting live CSS stylesheet…")
+            try:
+                stylesheet_paths = export_stylesheet(
+                    concept=concept,
+                    output_dir=output_dir,
+                    safe_name=f"layout_{safe_name}_{job_id}",
+                    page_width_mm=page_width_mm,
+                    page_height_mm=page_height_mm,
+                )
+                logger.info(
+                    f"Stylesheet exported → {stylesheet_paths.get('css_path')}  "
+                    f"+  {stylesheet_paths.get('json_path')}"
+                )
+            except Exception as _ss_err:
+                logger.warning(f"Stylesheet export failed (non-fatal): {_ss_err}")
+                stylesheet_paths = {}
+
+        progress("done", 100, "Layout design complete!")
+
+        # ── FIX #15: Pre-flight / page-count estimation report ───────────────
+        # Estimate page count, flag short chapters, and surface potential issues.
+        # Formula: total characters ÷ chars-per-page (empirically derived).

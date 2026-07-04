@@ -229,211 +229,87 @@ async def websocket_status_endpoint(websocket: WebSocket, job_id: str):
 
 _cover_jobs:      dict[str, dict] = {}
 
-class _LayoutJobProxy:
-    """Disk-backed job store for layout jobs — survives Railway load-balancer routing.
-    Mirrors _ScanJobProxy exactly so all job types are consistent.
-    Previously _layout_jobs was a plain dict[str,dict] which meant any Railway
-    instance re-route on status poll would return 404.
-    """
-    def _path(self, job_id: str) -> str:
-        return os.path.join(_JOBS_DIR, f"layout_{job_id}.json")
+from database import SessionLocal
+from models import Job
 
-    def __getitem__(self, job_id: str) -> dict:
-        try:
-            with open(self._path(job_id), "r", encoding="utf-8") as f:
-                return json.load(f)
-        except FileNotFoundError:
-            raise KeyError(job_id)
-
-    def __setitem__(self, job_id: str, value: dict) -> None:
-        tmp = self._path(job_id) + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(value, f, ensure_ascii=False)
-        os.replace(tmp, self._path(job_id))
-
-    def get(self, job_id: str, default=None):
-        try:
-            with open(self._path(job_id), "r", encoding="utf-8") as f:
-                return json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError):
-            return default
-
-    def __contains__(self, job_id: str) -> bool:
-        return os.path.exists(self._path(job_id))
-
-    def update_job(self, job_id: str, updates: dict) -> None:
-        existing = self.get(job_id) or {}
+class _DBJobProxy:
+    def __init__(self, prefix: str):
+        self.prefix = prefix
+    
+    def get(self, key: str, default=None):
+        with SessionLocal() as db:
+            job = db.query(Job).filter(Job.id == key, Job.job_type == self.prefix).first()
+            if not job: return default
+            
+            # Start with result_json to get all custom keys (like corrected_path, etc)
+            d = dict(job.result_json or {})
+            
+            # Overlay standard columns
+            d["stage"] = job.stage
+            d["pct"] = job.pct
+            d["message"] = job.message
+            d["is_cancelled"] = job.is_cancelled
+            if hasattr(job, "state"): d["state"] = job.stage
+            
+            return d
+            
+    def __getitem__(self, key: str):
+        v = self.get(key)
+        if v is None: raise KeyError(key)
+        return v
+        
+    def __setitem__(self, key: str, value: dict):
+        with SessionLocal() as db:
+            job = db.query(Job).filter(Job.id == key, Job.job_type == self.prefix).first()
+            if not job:
+                job = Job(id=key, job_type=self.prefix)
+                db.add(job)
+                
+            # Extract standard columns
+            if "stage" in value: job.stage = value["stage"]
+            if "state" in value: job.stage = value["state"]
+            if "pct" in value: job.pct = value["pct"]
+            if "message" in value: job.message = value["message"]
+            if "is_cancelled" in value: job.is_cancelled = value["is_cancelled"]
+            
+            # Put EVERYTHING else (including "result" and custom fields) into result_json
+            current_res = dict(job.result_json or {})
+            for k, v in value.items():
+                if k not in ["stage", "state", "pct", "message", "is_cancelled"]:
+                    current_res[k] = v
+            job.result_json = current_res
+            
+            db.commit()
+            
+    def update_job(self, key: str, updates: dict):
+        existing = self.get(key) or {}
         existing.update(updates)
-        self[job_id] = existing
-class _ScanJobProxy:
-    """Disk-backed job store for scan jobs — survives Railway load-balancer routing."""
-    def _path(self, job_id: str) -> str:
-        return os.path.join(_JOBS_DIR, f"scan_{job_id}.json")
+        self[key] = existing
+        
+    def pop(self, key: str, default=None):
+        value = self.get(key, default)
+        with SessionLocal() as db:
+            job = db.query(Job).filter(Job.id == key, Job.job_type == self.prefix).first()
+            if job:
+                db.delete(job)
+                db.commit()
+        return value
 
-    def __getitem__(self, job_id: str) -> dict:
-        try:
-            with open(self._path(job_id), "r", encoding="utf-8") as f:
-                return json.load(f)
-        except FileNotFoundError:
-            raise KeyError(job_id)
-
-    def __setitem__(self, job_id: str, value: dict) -> None:
-        tmp = self._path(job_id) + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(value, f, ensure_ascii=False)
-        os.replace(tmp, self._path(job_id))
-
-    def get(self, job_id: str, default=None):
-        try:
-            with open(self._path(job_id), "r", encoding="utf-8") as f:
-                return json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError):
-            return default
-
-    def __contains__(self, job_id: str) -> bool:
-        return os.path.exists(self._path(job_id))
-
-    def update_job(self, job_id: str, updates: dict) -> None:
-        existing = self.get(job_id) or {}
-        existing.update(updates)
-        self[job_id] = existing
-
-_scan_jobs = _ScanJobProxy()
-_editor_sessions: dict[str, dict] = {}
-_editor_jobs: dict[str, dict] = {}
-# _translate_jobs: disk-backed so Railway load-balancer can route any poll
-# to any instance and still find the job. Uses the same _JOBS_DIR as proofread.
-class _TranslateJobProxy:
-    """Disk-backed job store for translation jobs (mirrors _DiskJobProxy)."""
-    def _path(self, job_id: str) -> str:
-        return os.path.join(_JOBS_DIR, f"trans_{job_id}.json")
-
-    def __getitem__(self, job_id: str) -> dict:
-        try:
-            with open(self._path(job_id), "r", encoding="utf-8") as f:
-                return json.load(f)
-        except FileNotFoundError:
-            raise KeyError(job_id)
-
-    def __setitem__(self, job_id: str, value: dict) -> None:
-        tmp = self._path(job_id) + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(value, f, ensure_ascii=False)
-        os.replace(tmp, self._path(job_id))
-
-    def get(self, job_id: str, default=None):
-        try:
-            with open(self._path(job_id), "r", encoding="utf-8") as f:
-                return json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError):
-            return default
-
-    def __contains__(self, job_id: str) -> bool:
-        return os.path.exists(self._path(job_id))
-
-    def update_job(self, job_id: str, updates: dict) -> None:
-        existing = self.get(job_id) or {}
-        existing.update(updates)
-        self[job_id] = existing
-
-_translate_jobs = _TranslateJobProxy()
-_layout_jobs = _LayoutJobProxy()
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Global job concurrency limiter
-# ─────────────────────────────────────────────────────────────────────────────
-# Without this, each upload spawns an unbounded background thread that runs
-# parallel Gemini calls. Two concurrent users = 16 simultaneous API calls,
-# all hitting rate limits, all backing off, all blocking each other.
-# This semaphore caps the number of *active heavy jobs* (scan/translate/layout)
-# at 2 at once. A 3rd upload queues until a slot opens.
-_HEAVY_JOB_SEMAPHORE = threading.Semaphore(2)
-
-OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "output")
-os.makedirs(OUTPUT_DIR, exist_ok=True)
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Disk-backed proofread job store
-# ─────────────────────────────────────────────────────────────────────────────
-# Railway runs multiple instances behind a load balancer. An in-memory dict
-# is per-process, so a status poll that lands on a different instance than the
-# one running the job gets a 404. Writing job state to a JSON file in the
-# shared OUTPUT_DIR means every instance can read it regardless of which
-# instance handled the upload.
-#
-# Thread safety: writes use an atomic rename (write tmp → rename) so a
-# concurrent reader never sees a half-written file.
-# ─────────────────────────────────────────────────────────────────────────────
-
-_JOBS_DIR = os.path.join(OUTPUT_DIR, "jobs")
-os.makedirs(_JOBS_DIR, exist_ok=True)
-
-_proofread_write_lock = threading.Lock()   # serialise writes from the bg thread
-
-
-def _job_path(job_id: str) -> str:
-    return os.path.join(_JOBS_DIR, f"proof_{job_id}.json")
-
+_layout_jobs = _DBJobProxy("layout")
+_scan_jobs = _DBJobProxy("scan")
+_translate_jobs = _DBJobProxy("translate")
+_cover_jobs = _DBJobProxy("cover")
+_editor_sessions = _DBJobProxy("editor_session")
+_editor_jobs = _DBJobProxy("editor_job")
+_proofread_jobs = _DBJobProxy("proofread")
 
 def _write_job(job_id: str, data: dict) -> None:
-    """Atomically write job state to disk."""
-    path = _job_path(job_id)
-    tmp  = path + ".tmp"
-    with _proofread_write_lock:
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False)
-        os.replace(tmp, path)   # atomic on POSIX
-
-
+    _proofread_jobs[job_id] = data
 def _read_job(job_id: str) -> dict | None:
-    path = _job_path(job_id)
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return None
-
-
+    return _proofread_jobs.get(job_id)
 def _update_job(job_id: str, updates: dict) -> None:
-    """Read-modify-write a job record on disk (thread-safe via the write lock)."""
-    with _proofread_write_lock:
-        path = _job_path(job_id)
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                existing = json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError):
-            existing = {}
-        existing.update(updates)
-        tmp = path + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(existing, f, ensure_ascii=False)
-        os.replace(tmp, path)
+    _proofread_jobs.update_job(job_id, updates)
 
-
-class _DiskJobProxy:
-    """
-    Drop-in replacement for the old _proofread_jobs dict.
-    Proxies __getitem__, __setitem__, and .get() through on-disk JSON files
-    so every Railway instance sees the same job state.
-    """
-    def __getitem__(self, job_id: str) -> dict:
-        job = _read_job(job_id)
-        if job is None:
-            raise KeyError(job_id)
-        return job
-
-    def __setitem__(self, job_id: str, value: dict) -> None:
-        _write_job(job_id, value)
-
-    def get(self, job_id: str, default=None):
-        result = _read_job(job_id)
-        return result if result is not None else default
-
-    def __contains__(self, job_id: str) -> bool:
-        return os.path.exists(_job_path(job_id))
-
-
-_proofread_jobs = _DiskJobProxy()
 
 MAX_FILE_SIZE = 150 * 1024 * 1024  # 150 MB
 STREAM_CHUNK  = 1 * 1024 * 1024    # 1 MB read chunks

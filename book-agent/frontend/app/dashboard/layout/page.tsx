@@ -591,23 +591,30 @@ export default function LayoutDesignerPage() {
     // ── Polling logic ─────────────────────────────────────────────────────────
     const startPolling = (jobId: string) => {
         let errs = 0;
+        if (pollRef.current) clearInterval(pollRef.current);
         pollRef.current = setInterval(async () => {
             try {
-                const r = await fetch(`${API_BASE}/design-layout/${jobId}/status`);
-                if (!r.ok) return;
+                const r = await fetch(`${API_BASE}/layout/${jobId}/status`);
+                if (!r.ok) {
+                    const err = await r.json().catch(() => ({ detail: `HTTP ${r.status}` }));
+                    throw new Error(err.detail || err.message || `HTTP ${r.status}`);
+                }
                 errs = 0;
                 const d = await r.json();
                 setStage(d.stage);
-                setPct(d.pct);
-                setStatusMsg(d.message);
+                setPct(typeof d.pct === "number" ? d.pct : 0);
+                setStatusMsg(d.message || STAGE_LABELS[d.stage] || "Working…");
 
                 if (d.stage === "done" && d.result) {
                     clearInterval(pollRef.current!);
+                    pollRef.current = null;
                     setResult(d.result);
+                    setPct(100);
                     setLoading(false);
                 }
                 if (d.stage === "error") {
                     clearInterval(pollRef.current!);
+                    pollRef.current = null;
                     setError(d.message || "Layout design failed.");
                     setLoading(false);
                 }
@@ -615,8 +622,11 @@ export default function LayoutDesignerPage() {
                 errs++;
                 if (errs >= 6) {
                     clearInterval(pollRef.current!);
+                    pollRef.current = null;
                     setError("Lost connection to layout backend: " + parseFriendlyError(e));
                     setLoading(false);
+                } else {
+                    setStatusMsg(`Still waiting for layout status… retry ${errs}/6`);
                 }
             }
         }, 2500);
@@ -638,6 +648,16 @@ export default function LayoutDesignerPage() {
             // Build custom design description prompt block
             const buildDesignInstructions = () => {
                 let p = designInstructions.trim();
+                const languageObj = LANGUAGES.find((l) => l.value === language);
+                const platformObj = PRINT_PLATFORMS.find((pl) => pl.key === printPlatform);
+                const contextRules = [
+                    languageObj ? `- Manuscript language/script: ${languageObj.label}. Preserve this language and choose compatible typography.` : "",
+                    platformObj ? `- Print destination: ${platformObj.label}. Follow: ${platformObj.hint}.` : "",
+                    paperProfile ? `- Paper/production profile: ${paperProfile}.` : "",
+                ].filter(Boolean).join("\n");
+                if (contextRules) {
+                    p = contextRules + (p ? `\n${p}` : "");
+                }
                 if (aiCommand.trim()) {
                     p = `[AI COMMAND]: ${aiCommand.trim()}\n\n${p}`;
                 }

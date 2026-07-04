@@ -99,6 +99,7 @@ export interface BookProgress {
   book_id: number;
   status: string;
   completed_segments: number;
+  total_segments?: number | null;
 }
 
 // ─────────────────────────────────────────────

@@ -2,6 +2,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { onAuthStateChanged, User } from "firebase/auth";
+import { updateProfile } from "firebase/auth";
 import { auth, logout } from "@/lib/firebase";
 import {
     ArrowLeft,
@@ -21,17 +22,36 @@ export default function SettingsPage() {
     const [twoFactor, setTwoFactor] = useState(true);
     const [defaultFormat, setDefaultFormat] = useState("docx");
     const [wppDefault, setWppDefault] = useState(350);
+    const [displayName, setDisplayName] = useState("");
     const [saved, setSaved] = useState(false);
 
     useEffect(() => {
         const unsub = onAuthStateChanged(auth, (u) => {
             if (!u) router.push("/login");
-            else setUser(u);
+            else {
+                setUser(u);
+                setDisplayName(u.displayName || "");
+                try {
+                    const prefs = JSON.parse(localStorage.getItem("publixo_preferences") || "{}");
+                    if (prefs.defaultFormat) setDefaultFormat(prefs.defaultFormat);
+                    if (prefs.wppDefault) setWppDefault(Number(prefs.wppDefault));
+                    if (typeof prefs.twoFactor === "boolean") setTwoFactor(prefs.twoFactor);
+                } catch { }
+            }
         });
         return () => unsub();
     }, [router]);
 
-    const handleSave = () => {
+    const handleSave = async () => {
+        if (user && displayName.trim() !== (user.displayName || "")) {
+            await updateProfile(user, { displayName: displayName.trim() || null });
+            setUser(auth.currentUser);
+        }
+        localStorage.setItem("publixo_preferences", JSON.stringify({
+            defaultFormat,
+            wppDefault,
+            twoFactor,
+        }));
         setSaved(true);
         setTimeout(() => setSaved(false), 2400);
     };
@@ -117,7 +137,7 @@ export default function SettingsPage() {
                         <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                             <div>
                                 <label className="field-label">Display Name</label>
-                                <input type="text" defaultValue={user?.displayName || ""} placeholder="Your name" className="input-field" />
+                                <input type="text" value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="Your name" className="input-field" />
                             </div>
                             <div>
                                 <label className="field-label">Email Address</label>
@@ -171,7 +191,7 @@ export default function SettingsPage() {
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                             <div>
                                 <p style={{ fontSize: "13px", fontWeight: "700", color: "var(--text-primary)" }}>Two-Factor Auth</p>
-                                <p style={{ fontSize: "11px", color: "var(--text-tertiary)", marginTop: "2px" }}>Require confirmation code on email</p>
+                                <p style={{ fontSize: "11px", color: "var(--text-tertiary)", marginTop: "2px" }}>Saved preference only; configure real 2FA in Firebase Auth.</p>
                             </div>
 
                             {/* Sliding Check Switch */}
@@ -201,8 +221,8 @@ export default function SettingsPage() {
                             </span>
                         </div>
                         <div>
-                            <label className="field-label">Custom Gemini API Key</label>
-                            <input type="password" value="••••••••••••••••••••" readOnly className="input-field" style={{ opacity: 0.6 }} />
+                            <label className="field-label">Model API Key</label>
+                            <input type="text" value="Configured on backend environment" readOnly className="input-field" style={{ opacity: 0.6, cursor: "not-allowed" }} />
                         </div>
                     </div>
                 </div>

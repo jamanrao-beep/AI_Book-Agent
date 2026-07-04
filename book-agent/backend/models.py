@@ -1,40 +1,38 @@
-# pyrefly: ignore [missing-import]
-from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean
-# pyrefly: ignore [missing-import]
-from sqlalchemy.ext.declarative import declarative_base
-from datetime import datetime
+from sqlalchemy import Column, Integer, String, JSON, Boolean, DateTime
+from database import Base
+import datetime
 
-Base = declarative_base()
+class Job(Base):
+    __tablename__ = "jobs"
+
+    id = Column(String, primary_key=True, index=True)
+    job_type = Column(String, index=True) # layout, scan, translate, cover, proofread, editor_session, editor_job
+    stage = Column(String, default="queued")
+    pct = Column(Integer, default=0)
+    message = Column(String, default="")
+    result_json = Column(JSON, default=dict)
+    is_cancelled = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 
 class Book(Base):
     __tablename__ = "books"
-    id             = Column(Integer, primary_key=True, index=True)
-    title          = Column(String(500))
-    num_pages      = Column(Integer)
-    words_per_page = Column(Integer)
-    status         = Column(String(50), default="pending")
-    total_sections = Column(Integer, nullable=True)
-    outline        = Column(Text, nullable=True)
-    pdf_url        = Column(String(1000), nullable=True)
-    docx_url       = Column(String(1000), nullable=True)
-    created_at     = Column(DateTime, default=datetime.utcnow)
-    user_id        = Column(String(200), nullable=True)
-    writing_style  = Column(String(200), nullable=True, default="")
-    language       = Column(String(100), nullable=True, default="English")
-    # Cancel support + heartbeat for long-running jobs
-    is_cancelled   = Column(Boolean, default=False, nullable=False)
-    last_heartbeat = Column(DateTime, nullable=True)
-    # Human-readable error message surfaced to the frontend on failure
-    error_message  = Column(Text, nullable=True)
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String, index=True)
+    topic = Column(String)
+    style = Column(String)
+    language = Column(String)
+    chapter_count = Column(Integer)
+    total_sections = Column(Integer, default=0)
+    pages = Column(Integer)
+    job_id = Column(String)
 
 class BookSegment(Base):
     __tablename__ = "book_segments"
-    id             = Column(Integer, primary_key=True, index=True)
-    book_id        = Column(Integer, index=True)
-    chapter_number = Column(Integer)
-    chapter_title  = Column(String(500))
-    subheading     = Column(String(500))
-    content        = Column(Text)
-    segment_order  = Column(Integer)
-    is_complete    = Column(Boolean, default=False)
-    created_at     = Column(DateTime, default=datetime.utcnow)
+    id = Column(Integer, primary_key=True, index=True)
+    book_id = Column(Integer, index=True)
+    type = Column(String) # 'chapter' or 'section'
+    order_index = Column(Integer)
+    title = Column(String)
+    content = Column(String)
+    parent_id = Column(Integer, nullable=True)

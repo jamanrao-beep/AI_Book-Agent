@@ -61,6 +61,14 @@ interface CoverResult {
     image_generation_warning?: string | null;
 }
 
+interface CoverStatus {
+    job_id: string;
+    stage: string;
+    pct: number;
+    message: string;
+    result?: CoverResult;
+}
+
 async function designCover(
     file: File,
     bookTitle: string,
@@ -88,7 +96,38 @@ async function designCover(
             const err = await res.json().catch(() => ({ detail: "Unknown error" }));
             throw new Error(err.detail || `Server error ${res.status}`);
         }
-        return res.ok ? res.json() : Promise.reject("Server error");
+        const { job_id } = await res.json();
+        return await new Promise<CoverResult>((resolve, reject) => {
+            let consecutiveErrors = 0;
+            const poll = async () => {
+                try {
+                    const statusRes = await fetch(`${API_BASE}/design-cover/${job_id}/status`);
+                    if (!statusRes.ok) {
+                        const err = await statusRes.json().catch(() => ({ detail: `HTTP ${statusRes.status}` }));
+                        throw new Error(err.detail || `HTTP ${statusRes.status}`);
+                    }
+                    consecutiveErrors = 0;
+                    const status: CoverStatus = await statusRes.json();
+                    if (status.stage === "done" && status.result) {
+                        resolve(status.result);
+                        return;
+                    }
+                    if (status.stage === "error") {
+                        reject(new Error(status.message || "Cover design failed."));
+                        return;
+                    }
+                    setTimeout(poll, 3000);
+                } catch (err) {
+                    consecutiveErrors += 1;
+                    if (consecutiveErrors >= 10) {
+                        reject(err instanceof Error ? err : new Error("Lost connection to cover job."));
+                        return;
+                    }
+                    setTimeout(poll, Math.min(3000 * consecutiveErrors, 15000));
+                }
+            };
+            setTimeout(poll, 1500);
+        });
     } finally {
         clearTimeout(timer);
     }

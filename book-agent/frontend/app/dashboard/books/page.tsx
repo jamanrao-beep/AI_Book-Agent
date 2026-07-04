@@ -40,7 +40,10 @@ const STATUS_META: Record<string, { label: string; color: string; bg: string; bo
   assembling: { label: "Assembling Book…", color: "var(--amber)", bg: "rgba(245,158,11,0.06)", border: "rgba(245,158,11,0.18)", glow: "rgba(245,158,11,0.06)" },
   done: { label: "Complete", color: "var(--emerald)", bg: "rgba(16,185,129,0.06)", border: "rgba(16,185,129,0.2)", glow: "rgba(16,185,129,0.06)" },
   failed: { label: "Failed", color: "var(--crimson)", bg: "rgba(239,68,68,0.06)", border: "rgba(239,68,68,0.18)", glow: "transparent" },
+  cancelled: { label: "Cancelled", color: "var(--mist)", bg: "rgba(110,110,110,0.06)", border: "var(--border-mid)", glow: "transparent" },
 };
+
+const TERMINAL_BOOK_STATUSES = new Set(["done", "failed", "cancelled"]);
 
 const STYLE_OPTIONS = [
   { value: "", label: "✦ Default", hint: "Professional & balanced" },
@@ -67,6 +70,7 @@ interface ActiveJob {
   bookId: number;
   title: string;
   segments: number;
+  totalSegments?: number | null;
   status: string;
   errorMessage?: string;
 }
@@ -93,6 +97,18 @@ export default function BooksPage() {
   const [selectedLanguage, setSelectedLanguage] = useState("English");
   const [customLanguage, setCustomLanguage] = useState("");
 
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      if (new URLSearchParams(window.location.search).get("new") === "1") {
+        setShowForm(true);
+      }
+      try {
+        const prefs = JSON.parse(localStorage.getItem("publixo_preferences") || "{}");
+        if (prefs.wppDefault) setWpp(Number(prefs.wppDefault));
+      } catch { }
+    }
+  }, []);
+
   // ── Fetch books ─────────────────────────────────────────────────────────────
   const fetchBooks = useCallback(async (uid?: string) => {
     const targetUid = uid || auth.currentUser?.uid || "anon";
@@ -118,7 +134,7 @@ export default function BooksPage() {
   // ── Poll active job ─────────────────────────────────────────────────────────
   useEffect(() => {
     if (!activeJob) return;
-    if (activeJob.status === "done" || activeJob.status === "failed") return;
+    if (TERMINAL_BOOK_STATUSES.has(activeJob.status)) return;
 
     const interval = setInterval(async () => {
       try {
@@ -131,10 +147,11 @@ export default function BooksPage() {
             ...prev,
             status: statusRes.data.status,
             segments: progressRes.data.completed_segments,
+            totalSegments: progressRes.data.total_segments ?? prev.totalSegments,
             errorMessage: statusRes.data.error_message ?? prev.errorMessage,
           } : null
         );
-        if (statusRes.data.status === "done" || statusRes.data.status === "failed") {
+        if (TERMINAL_BOOK_STATUSES.has(statusRes.data.status)) {
           fetchBooks();
           clearInterval(interval);
         }
@@ -150,27 +167,24 @@ export default function BooksPage() {
     setSuggestingTitles(true);
     setSuggestedTitles([]);
     try {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
+      const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+      const res = await fetch(`${apiBase}/suggest-titles`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 500,
-          messages: [{
-            role: "user",
-            content: `You are a professional book title expert. The user wants to write: "${description.trim()}". Suggest exactly 5 compelling, marketable book titles. Respond ONLY with a valid JSON array of 5 strings, no markdown, no explanation. Example: ["Title One","Title Two","Title Three","Title Four","Title Five"]`,
-          }],
+          description: description.trim(),
         }),
       });
+      if (!res.ok) throw new Error("Title suggestion failed.");
       const data = await res.json();
-      const raw = (data.content as { text?: string }[] || [])
-        .map((b) => b.text || "").join("").trim()
-        .replace(/\`\`\`json|\`\`\`/g, "").trim();
-      setSuggestedTitles(JSON.parse(raw));
+      setSuggestedTitles(Array.isArray(data.titles) ? data.titles.slice(0, 5) : []);
     } catch {
       setSuggestedTitles([
-        "The Path Forward", "Echoes of Tomorrow", "Minds Unbound",
-        "The Hidden Blueprint", "Beyond the Threshold",
+        `The ${title || "New"} Blueprint`,
+        `Beyond ${title || "The First Draft"}`,
+        `${title || "Your Idea"}: A Practical Guide`,
+        `The Hidden Path to ${title || "Change"}`,
+        `Mastering ${title || "The Journey"}`,
       ]);
     } finally {
       setSuggestingTitles(false);
@@ -210,7 +224,8 @@ export default function BooksPage() {
     }
   };
 
-  const totalSegments = Math.ceil((pages * wpp) / 250) * 4;
+  const estimatedSegments = Math.max(1, Math.ceil((pages * wpp) / Math.max(wpp, 1)));
+  const totalSegments = activeJob?.totalSegments || estimatedSegments;
   const progress = activeJob
     ? Math.min(100, Math.round((activeJob.segments / Math.max(totalSegments, 1)) * 100))
     : 0;
@@ -599,11 +614,12 @@ export default function BooksPage() {
         {activeJob && activeJob.status !== "done" && (() => {
 
           // FAILED Status
-          if (activeJob.status === "failed") {
+          if (activeJob.status === "failed" || activeJob.status === "cancelled") {
+            const isCancelled = activeJob.status === "cancelled";
             return (
               <div className="card fade-in" style={{
-                background: "rgba(239,68,68,0.02)",
-                border: "1.5px solid rgba(239,68,68,0.18)",
+                background: isCancelled ? "var(--onyx)" : "rgba(239,68,68,0.02)",
+                border: `1.5px solid ${isCancelled ? "var(--border-mid)" : "rgba(239,68,68,0.18)"}`,
                 borderRadius: "16px",
                 padding: "24px",
                 marginBottom: "32px",
@@ -613,19 +629,19 @@ export default function BooksPage() {
               }}>
                 <div style={{
                   width: "40px", height: "40px", flexShrink: 0,
-                  background: "rgba(239,68,68,0.08)",
-                  border: "1px solid rgba(239,68,68,0.15)",
+                  background: isCancelled ? "var(--void)" : "rgba(239,68,68,0.08)",
+                  border: `1px solid ${isCancelled ? "var(--border-mid)" : "rgba(239,68,68,0.15)"}`,
                   borderRadius: "11px",
                   display: "flex", alignItems: "center", justifyContent: "center",
                 }}>
-                  <AlertTriangle size={18} color="var(--crimson)" />
+                  <AlertTriangle size={18} color={isCancelled ? "var(--mist)" : "var(--crimson)"} />
                 </div>
                 <div style={{ flex: 1 }}>
-                  <h3 className="serif" style={{ fontWeight: "400", fontSize: "18px", color: "var(--crimson)", marginBottom: "6px" }}>
-                    "{activeJob.title}" failed to generate
+                  <h3 className="serif" style={{ fontWeight: "400", fontSize: "18px", color: isCancelled ? "var(--text-primary)" : "var(--crimson)", marginBottom: "6px" }}>
+                    "{activeJob.title}" {isCancelled ? "was cancelled" : "failed to generate"}
                   </h3>
                   <p style={{ fontSize: "13px", color: "var(--text-secondary)", lineHeight: "1.6" }}>
-                    {activeJob.errorMessage ?? "An unexpected model error occurred during the outlining stage. Please retry."}
+                    {isCancelled ? "The generation was stopped before completion." : activeJob.errorMessage ?? "An unexpected model error occurred during the outlining stage. Please retry."}
                   </p>
                   <div style={{ display: "flex", gap: "10px", marginTop: "14px" }}>
                     <button
@@ -707,7 +723,7 @@ export default function BooksPage() {
 
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "12px" }}>
                 <p style={{ fontSize: "11px", color: "var(--text-tertiary)" }}>
-                  {activeJob.segments} sections compiled of ~{totalSegments} total
+                  {activeJob.segments} sections compiled{activeJob.totalSegments ? ` of ${activeJob.totalSegments}` : ""}
                 </p>
                 <button
                   onClick={async () => {
@@ -790,6 +806,7 @@ export default function BooksPage() {
               const meta = STATUS_META[book.status] || STATUS_META.pending;
               const isComplete = book.status === "done";
               const isFailed = book.status === "failed";
+              const isCancelled = book.status === "cancelled";
               const isActive = ["generating", "assembling", "outlining"].includes(book.status);
 
               return (
@@ -837,10 +854,12 @@ export default function BooksPage() {
                       borderRadius: "10px",
                       display: "flex", alignItems: "center", justifyContent: "center",
                     }}>
-                      {isComplete
+                        {isComplete
                         ? <CheckCircle size={18} color="var(--emerald)" />
                         : isFailed
                           ? <XCircle size={18} color="var(--crimson)" />
+                          : isCancelled
+                            ? <XCircle size={18} color="var(--mist)" />
                           : <FileText size={18} color="var(--text-tertiary)" />
                       }
                     </div>
@@ -904,6 +923,7 @@ export default function BooksPage() {
                         }}>
                           {book.status === "done" && <CheckCircle size={11} />}
                           {book.status === "failed" && <XCircle size={11} />}
+                          {book.status === "cancelled" && <XCircle size={11} />}
                           {book.status === "pending" && <Clock size={11} />}
                           {meta.label}
                         </span>

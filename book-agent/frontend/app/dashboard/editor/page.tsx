@@ -241,13 +241,17 @@ export default function BookEditorPage() {
             let polled = false;
             while (!polled) {
                 await new Promise((r) => setTimeout(r, 2500));
-                const sRes = await fetch(`${API_BASE}/editor/${session.session_id}/status/${job_id}`);
+                const sRes = await fetch(`${API_BASE}/editor/${session.session_id}/job/${job_id}/status`);
                 if (!sRes.ok) continue;
                 const statusData = await sRes.json();
 
-                if (statusData.status === "completed" && statusData.result) {
+                if (statusData.state === "done" && statusData.result) {
                     polled = true;
-                    const ver: Version = statusData.result;
+                    const ver: Version = {
+                        ...statusData.result,
+                        pdf_url: `${API_BASE}${statusData.result.pdf_url}`,
+                        docx_url: `${API_BASE}${statusData.result.docx_url}`,
+                    };
                     setVersions((prev) => [...prev, ver]);
                     setCurrentTheme(ver.theme);
                     setThemeOverride(null);
@@ -265,7 +269,7 @@ export default function BookEditorPage() {
                                 },
                             ])
                     );
-                } else if (statusData.status === "failed") {
+                } else if (statusData.state === "error") {
                     polled = true;
                     throw new Error(statusData.error || "The editor agent encountered a model error.");
                 }
