@@ -722,6 +722,7 @@ async def proofread_upload(file: UploadFile = File(...)):
 async def proofread_cancel(job_id: str):
     job = _proofread_jobs.get(job_id)
     if not job:
+        logger.error(f"DEBUG: Proofread job {job_id} not found! Current jobs in DB: {_proofread_jobs._debug_list_all() if hasattr(_proofread_jobs, '_debug_list_all') else 'unknown'}")
         raise HTTPException(404, "Proofread job not found.")
     if job.get("stage") in ("done", "error", "cancelled"):
         raise HTTPException(400, "Job is already complete or cancelled.")

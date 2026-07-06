@@ -256,85 +256,21 @@ export const proofreadDocument = (
   const form = new FormData();
   form.append("file", file);
 
-  // Step 1: upload file, get job_id back immediately
-  const uploadPromise = API.post<{ job_id: string; status: string }>(
-    "/proofread/upload",
+  // We can signal 100% upload so the UI switches to "Analysing…"
+  onUploadProgress?.(100);
+
+  return API.post<ProofreadResult>(
+    "/proofread",
     form,
     {
-      // No Content-Type header — axios sets multipart/form-data + boundary automatically
-      timeout: 10800000,
+      timeout: 300_000, // 5 min timeout
       onUploadProgress: onUploadProgress
         ? (e) => {
           if (e.total) onUploadProgress(Math.round((e.loaded * 100) / e.total));
         }
         : undefined,
-    },
-  );
-
-  // Step 2: poll until done or error
-  return uploadPromise.then(({ data }) => {
-    const jobId = data.job_id;
-    return new Promise<{ data: ProofreadResult }>((resolve, reject) => {
-      // Signal 100% upload so the UI switches to "Analysing…"
-      onUploadProgress?.(100);
-
-      // Short per-poll timeout so a single dropped Railway socket doesn't
-      // stall the whole job. ERR_NETWORK is caught and retried with back-off.
-      const POLL_TIMEOUT_MS = 60_000;
-      const MAX_CONSECUTIVE_ERRORS = 10;
-      let consecutiveErrors = 0;
-
-      const poll = () => {
-        API.get<{
-          job_id: string;
-          stage: string;
-          chunks_done?: number;
-          chunks_total?: number;
-          result?: ProofreadResult;
-          error?: string;
-        }>(`/proofread/${jobId}/status`, { timeout: POLL_TIMEOUT_MS })
-          .then(({ data: status }) => {
-            consecutiveErrors = 0;
-            if (
-              onChunkProgress &&
-              typeof status.chunks_done === "number" &&
-              typeof status.chunks_total === "number" &&
-              status.chunks_total > 0
-            ) {
-              onChunkProgress(status.chunks_done, status.chunks_total);
-            }
-            if (status.stage === "done" && status.result) {
-              resolve({ data: status.result });
-            } else if (status.stage === "error") {
-              reject(new Error(status.error ?? "Proofreading failed on the server."));
-            } else {
-              setTimeout(poll, 3000);
-            }
-          })
-          .catch((err) => {
-            consecutiveErrors += 1;
-            if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
-              reject(
-                new Error(
-                  `Polling failed ${MAX_CONSECUTIVE_ERRORS} times in a row: ${err?.message ?? err}`,
-                ),
-              );
-              return;
-            }
-            const backoff = Math.min(3000 * consecutiveErrors, 15000);
-            console.warn(
-              `[proofread] Poll ${consecutiveErrors}/${MAX_CONSECUTIVE_ERRORS} failed, ` +
-              `retrying in ${backoff}ms:`,
-              err?.message,
-            );
-            setTimeout(poll, backoff);
-          });
-      };
-
-      // First poll after 2 s (small files finish fast)
-      setTimeout(poll, 2000);
-    });
-  });
+    }
+  ).then((res) => ({ data: res.data }));
 };
 
 /** Trigger a browser download of the corrected file. */
