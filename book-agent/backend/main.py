@@ -66,7 +66,7 @@ from cover_designer import design_cover
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "outputs")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-_HEAVY_JOB_SEMAPHORE = asyncio.Semaphore(10)
+_HEAVY_JOB_SEMAPHORE = threading.Semaphore(2)
 
 # pyrefly: ignore [missing-import]
 from sqlalchemy import text
