@@ -220,23 +220,23 @@ def _ensure_unicode_fonts() -> None:
                 try:
                     pdfmetrics.registerFont(TTFont(rl_name, path))
                     _REGISTERED_FONTS.add(rl_name)
-                    print(f"  ✅  Registered: {rl_name} from {path}")
+                    print(f"  [SUCCESS]  Registered: {rl_name} from {path}")
                 except Exception as e:
-                    print(f"  ⚠️   registerFont failed for {rl_name}: {e}")
+                    print(f"  [WARN]   registerFont failed for {rl_name}: {e}")
 
             if _REGISTERED_FONTS:
-                print(f"  ✅  Unicode fonts ready: {sorted(_REGISTERED_FONTS)}")
+                print(f"  [SUCCESS]  Unicode fonts ready: {sorted(_REGISTERED_FONTS)}")
                 # FIX: Set fonts strictly to True here when registration loop finishes safely.
                 _FONTS_REGISTERED = True
             else:
                 print(
-                    "  ⚠️  WARN: No Unicode/Devanagari fonts could be registered. "
+                    "  [WARN]  WARN: No Unicode/Devanagari fonts could be registered. "
                     "Hindi text may render as square boxes. "
                     "Fix: run `apt-get install -y fonts-noto-core` or place "
                     "NotoSansDevanagari-Regular.ttf in a ./fonts/ folder."
                 )
         except Exception as e:
-            print(f"  ⚠️   _ensure_unicode_fonts failed: {e}\n{traceback.format_exc()}")
+            print(f"  [WARN]   _ensure_unicode_fonts failed: {e}\n{traceback.format_exc()}")
 
 # Initialize fonts in the background immediately
 threading.Thread(target=_ensure_unicode_fonts, daemon=True).start()

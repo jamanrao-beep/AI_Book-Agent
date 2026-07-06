@@ -1,3 +1,10 @@
+import sys
+try:
+    sys.stdout.reconfigure(encoding='utf-8')
+    sys.stderr.reconfigure(encoding='utf-8')
+except AttributeError:
+    pass
+
 # pyrefly: ignore [missing-import]
 from fastapi import FastAPI, BackgroundTasks, HTTPException, UploadFile, File, Form
 # pyrefly: ignore [missing-import]
@@ -55,6 +62,11 @@ from proofreader import (
     save_corrected_pdf,
 )
 from cover_designer import design_cover
+
+OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "outputs")
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+_HEAVY_JOB_SEMAPHORE = asyncio.Semaphore(10)
 
 Base.metadata.create_all(bind=engine)
 
