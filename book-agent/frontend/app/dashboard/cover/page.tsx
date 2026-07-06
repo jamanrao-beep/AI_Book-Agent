@@ -96,7 +96,14 @@ async function designCover(
             const err = await res.json().catch(() => ({ detail: "Unknown error" }));
             throw new Error(err.detail || `Server error ${res.status}`);
         }
-        const { job_id } = await res.json();
+        const data = await res.json();
+        
+        // If the backend processed this synchronously, return the result immediately.
+        if (data.concept || data.files !== undefined || data.mode) {
+            return data as CoverResult;
+        }
+        
+        const { job_id } = data;
         return await new Promise<CoverResult>((resolve, reject) => {
             let consecutiveErrors = 0;
             const poll = async () => {

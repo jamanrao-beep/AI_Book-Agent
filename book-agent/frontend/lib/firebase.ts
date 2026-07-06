@@ -2,7 +2,7 @@ import { initializeApp, getApps } from "firebase/app";
 import {
   getAuth,
   GoogleAuthProvider,
-  signInWithRedirect,
+  signInWithPopup,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   signOut,
@@ -20,7 +20,7 @@ const app =
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 
-export const loginWithGoogle = () => signInWithRedirect(auth, googleProvider);
+export const loginWithGoogle = () => signInWithPopup(auth, googleProvider);
 export const loginWithEmail = (email: string, password: string) =>
   signInWithEmailAndPassword(auth, email, password);
 export const signupWithEmail = async (email: string, password: string, displayName?: string) => {

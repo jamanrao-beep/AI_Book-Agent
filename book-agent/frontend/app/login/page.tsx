@@ -3,7 +3,7 @@ import { Suspense, useState, useEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Eye, EyeOff, FileText, ArrowRight } from "lucide-react";
 import { loginWithEmail, signupWithEmail, loginWithGoogle, auth } from "@/lib/firebase";
-import { onAuthStateChanged, getRedirectResult } from "firebase/auth";
+import { onAuthStateChanged } from "firebase/auth";
 
 function LoginContent() {
   const router = useRouter();
@@ -21,9 +21,6 @@ function LoginContent() {
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (user) => { if (user) router.push("/dashboard"); });
-    getRedirectResult(auth).catch(err => {
-      setError(err instanceof Error ? err.message : "Google sign-in failed");
-    });
     return () => unsub();
   }, [router]);
 
