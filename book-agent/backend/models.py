@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, JSON, Boolean, DateTime
+from sqlalchemy import Column, Integer, String, JSON, Boolean, DateTime, Text
 from database import Base
 import datetime
 
@@ -17,22 +17,31 @@ class Job(Base):
 
 class Book(Base):
     __tablename__ = "books"
-    id = Column(Integer, primary_key=True, index=True)
-    title = Column(String, index=True)
-    topic = Column(String)
-    style = Column(String)
-    language = Column(String)
-    chapter_count = Column(Integer)
-    total_sections = Column(Integer, default=0)
-    pages = Column(Integer)
-    job_id = Column(String)
+    id             = Column(Integer, primary_key=True, index=True)
+    title          = Column(String(500))
+    num_pages      = Column(Integer)
+    words_per_page = Column(Integer)
+    status         = Column(String(50), default="pending")
+    total_sections = Column(Integer, nullable=True)
+    outline        = Column(Text, nullable=True)
+    pdf_url        = Column(String(1000), nullable=True)
+    docx_url       = Column(String(1000), nullable=True)
+    created_at     = Column(DateTime, default=datetime.datetime.utcnow)
+    user_id        = Column(String(200), nullable=True)
+    writing_style  = Column(String(200), nullable=True, default="")
+    language       = Column(String(100), nullable=True, default="English")
+    is_cancelled   = Column(Boolean, default=False, nullable=False)
+    last_heartbeat = Column(DateTime, nullable=True)
+    error_message  = Column(Text, nullable=True)
 
 class BookSegment(Base):
     __tablename__ = "book_segments"
-    id = Column(Integer, primary_key=True, index=True)
-    book_id = Column(Integer, index=True)
-    type = Column(String) # 'chapter' or 'section'
-    order_index = Column(Integer)
-    title = Column(String)
-    content = Column(String)
-    parent_id = Column(Integer, nullable=True)
+    id             = Column(Integer, primary_key=True, index=True)
+    book_id        = Column(Integer, index=True)
+    chapter_number = Column(Integer)
+    chapter_title  = Column(String(500))
+    subheading     = Column(String(500))
+    content        = Column(Text)
+    segment_order  = Column(Integer)
+    is_complete    = Column(Boolean, default=False)
+    created_at     = Column(DateTime, default=datetime.datetime.utcnow)

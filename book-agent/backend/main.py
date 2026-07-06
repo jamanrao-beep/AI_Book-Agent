@@ -68,12 +68,24 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 _HEAVY_JOB_SEMAPHORE = asyncio.Semaphore(10)
 
+# pyrefly: ignore [missing-import]
+from sqlalchemy import text
+
+# Auto-fix corrupted schema (from a bad previous deployment)
+try:
+    with engine.begin() as conn:
+        result = conn.execute(text("PRAGMA table_info(books)")).fetchall()
+        columns = [row[1] for row in result]
+        if columns and "user_id" not in columns:
+            conn.execute(text("DROP TABLE books"))
+            conn.execute(text("DROP TABLE book_segments"))
+except Exception:
+    pass
+
 Base.metadata.create_all(bind=engine)
 
 # Auto-migrate missing column for existing SQLite databases
 try:
-    # pyrefly: ignore [missing-import]
-    from sqlalchemy import text
     with engine.begin() as conn:
         conn.execute(text("ALTER TABLE books ADD COLUMN total_sections INTEGER"))
 except Exception:
@@ -367,7 +379,7 @@ class BookRequest(BaseModel):
 
 @app.get("/")
 def root():
-    return {"status": "running", "message": "Publixo AI Backend v4.1 🚀"}
+    return {"status": "running", "message": "Publixo AI Backend v5.0.0 🚀"}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
