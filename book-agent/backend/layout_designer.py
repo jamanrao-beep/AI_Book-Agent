@@ -2597,11 +2597,11 @@ def render_layout_pdf(
             # We work on the *unescaped* text to correctly classify codepoints,
             # then re-escape each segment individually.
             # NOTE: safe_escaped_text may contain <br/> tags — preserve them.
-            fragments = re.split(r"(<br\s*/>)", safe_escaped_text)
+            fragments = re.split(r"(<[^>]+>)", safe_escaped_text)
             result_parts: list[str] = []
 
             for frag in fragments:
-                if re.fullmatch(r"<br\s*/>", frag):
+                if re.fullmatch(r"<[^>]+>", frag):
                     result_parts.append(frag)
                     continue
                 if not frag:
