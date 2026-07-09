@@ -2476,9 +2476,9 @@ def render_layout_pdf(
         # Regex to strip bullet marker text, capturing the content after the marker
         _BULLET_STRIP_RE = re.compile(
             r'^(?:[•\-\*\u2022\u25cf]'
-            r'|(?:\(?\s*\d+\s*[\.\)])'
-            r'|(?:\(?\s*[a-zA-Z\u0900-\u097F]\s*[\.\)])'
-            r'|(?:\(?\s*[ivxlcdmIVXLCDM]+\s*[\.\)])'
+            r'|(?:\(?\s*[\d\u0966-\u096F]+\s*[\.\)\]\u0964])'
+            r'|(?:\(?\s*[a-zA-Z\u0900-\u097F]\s*[\.\)\]\u0964])'
+            r'|(?:\(?\s*[ivxlcdmIVXLCDM]+\s*[\.\)\]\u0964])'
             r')\s*'
         )
 
@@ -3109,12 +3109,12 @@ def render_layout_pdf(
                 )
 
                 # ── Bullet/numbered-list detection ────────────────────────────
-                # Matches: •  -  *  1.  1)  (1)  1 .  i.  ii)  a.  a)
+                # Matches: •  -  *  1.  1)  (1)  1 .  i.  ii)  a.  a) and Hindi १। क।
                 _BULLET_RE = re.compile(
                     r'^(?:[•\-\*\u2022\u25cf]'           # symbol bullets
-                    r'|(?:\(?\s*\d+\s*[\.\)])'           # 1. 1) (1) 1 .
-                    r'|(?:\(?\s*[a-zA-Z\u0900-\u097F]\s*[\.\)])'  # a. a) A. A) and Hindi
-                    r'|(?:\(?\s*[ivxlcdmIVXLCDM]+\s*[\.\)])'  # i. iv) etc.
+                    r'|(?:\(?\s*[\d\u0966-\u096F]+\s*[\.\)\]\u0964])'           # 1. 1) (1) 1 . 1।
+                    r'|(?:\(?\s*[a-zA-Z\u0900-\u097F]\s*[\.\)\]\u0964])'  # a. a) A. A) and Hindi क।
+                    r'|(?:\(?\s*[ivxlcdmIVXLCDM]+\s*[\.\)\]\u0964])'  # i. iv) etc.
                     r')\s+'
                 )
 
@@ -3127,7 +3127,7 @@ def render_layout_pdf(
                     s = line.strip()
                     if not s or len(s) > 80 or not is_only_line:
                         return 0
-                    if s[-1] in '.!?,;:':
+                    if s[-1] in '.!?,;:।॥':
                         return 0
                     # ### prefix → H3
                     if s.startswith('###'):
@@ -3141,6 +3141,9 @@ def render_layout_pdf(
                         return 3
                     # **text** (bold Markdown) or ALL-CAPS or Title-Case → H2
                     if (s.startswith('**') and s.endswith('**')) or s.isupper() or s.istitle():
+                        return 2
+                    # Fallback for Devanagari (Hindi has no Title-Case or ALL-CAPS)
+                    if len(s) <= 60 and re.search(r'[\u0900-\u097F]', s):
                         return 2
                     return 0
 
@@ -3373,7 +3376,7 @@ def render_layout_pdf(
                     # ── Smart Quotes (Fix 3): convert straight quotes to typographic
                     # curly quotes before HTML escaping, so the escaping step below
                     # never sees a raw " or ' and the curly variants pass through cleanly.
-                    if concept.get("smart_quotes") and not has_unicode:
+                    if concept.get("smart_quotes"):
                         joined = _apply_smart_quotes(joined)
                     # ── Pyphen H&J (Upgrade 4): insert soft hyphens to eliminate
                     # "rivers of white space" in justified text.  Only for Latin
@@ -4535,9 +4538,9 @@ def render_layout_docx(
                 # Bullet/numbered-list pattern (mirrors the PDF renderer)
                 _BULLET_RE_D = re.compile(
                     r'^(?:[•\-\*\u2022\u25cf]'
-                    r'|(?:\(?\s*\d+\s*[\.\)])'
-                    r'|(?:\(?\s*[a-zA-Z\u0900-\u097F]\s*[\.\)])'
-                    r'|(?:\(?\s*[ivxlcdmIVXLCDM]+\s*[\.\)])'
+                    r'|(?:\(?\s*[\d\u0966-\u096F]+\s*[\.\)\]\u0964])'
+                    r'|(?:\(?\s*[a-zA-Z\u0900-\u097F]\s*[\.\)\]\u0964])'
+                    r'|(?:\(?\s*[ivxlcdmIVXLCDM]+\s*[\.\)\]\u0964])'
                     r')\s+'
                 )
 
@@ -4545,16 +4548,20 @@ def render_layout_docx(
                     s = line.strip()
                     if not s or len(s) > 80 or not is_only:
                         return False
-                    if s[-1] in '.!?,;:':
+                    if s[-1] in '.!?,;:।॥':
                         return False
-                    return (s.startswith('**') and s.endswith('**')) or s.isupper() or s.istitle()
+                    if (s.startswith('**') and s.endswith('**')) or s.isupper() or s.istitle():
+                        return True
+                    if len(s) <= 60 and re.search(r'[\u0900-\u097F]', s):
+                        return True
+                    return False
 
                 # FIX 8: DOCX bullet strip regex (mirrors PDF _BULLET_STRIP_RE)
                 _BULLET_STRIP_RE_D = re.compile(
                     r'^(?:[•\-\*\u2022\u25cf]'
-                    r'|(?:\(?\s*\d+\s*[\.\\)])' 
-                    r'|(?:\(?\s*[a-zA-Z\u0900-\u097F]\s*[\\.\\)])' 
-                    r'|(?:\(?\s*[ivxlcdmIVXLCDM]+\s*[\\.\\)])' 
+                    r'|(?:\(?\s*[\d\u0966-\u096F]+\s*[\.\)\]\u0964])'
+                    r'|(?:\(?\s*[a-zA-Z\u0900-\u097F]\s*[\.\)\]\u0964])'
+                    r'|(?:\(?\s*[ivxlcdmIVXLCDM]+\s*[\.\)\]\u0964])'
                     r')\s*'
                 )
 
@@ -4682,7 +4689,7 @@ def render_layout_docx(
                     joined = " ".join(physical_lines)
                     # ── Smart Quotes (Fix 5): convert straight quotes to typographic
                     # curly quotes — mirrors the PDF renderer's smart_quotes logic.
-                    if concept.get("smart_quotes") and not has_unicode_docx:
+                    if concept.get("smart_quotes"):
                         joined = _apply_smart_quotes(joined)
                     _ni = _docx_suppress_indent
                     _docx_suppress_indent = False   # reset
