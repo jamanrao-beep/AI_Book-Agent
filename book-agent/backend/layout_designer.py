@@ -2098,20 +2098,34 @@ def render_layout_pdf(
         ch_r,  ch_g,  ch_b  = _hex_to_rgb(concept["chapter_title_color"])
         ac_r,  ac_g,  ac_b  = _hex_to_rgb(concept["accent_color"])
 
-        body_size      = concept["body_font_size"]
+        # ── FIX 7: Sanity-clamp font sizes from AI concept ─────────────────────
+        body_size      = max(9.0, min(13.0, float(concept["body_font_size"])))
+        chapter_size   = max(16.0, min(36.0, float(concept["chapter_font_size"])))
         leading        = body_size * concept["line_spacing"]
+        # Clamp leading to sane range: never less than 1.25× or more than 2× body size
+        leading        = max(body_size * 1.25, min(body_size * 2.0, leading))
         # ── Baseline Grid (Fix 1): snap leading to the grid unit when enabled ──
         if concept.get("baseline_grid"):
             _grid_unit = _compute_baseline_grid(body_size, concept["line_spacing"])
             leading    = _snap_to_baseline_grid(leading, _grid_unit)
         indent_pt      = concept["first_para_indent_mm"] * mm
-        chapter_size   = concept["chapter_font_size"]
-        # paragraph_spacing_mm: if set by user, use it directly; else derive from body font size
-        # Use font-size-based spacing (not leading-based) for tighter, more professional results.
-        # Standard book typography: inter-paragraph gap ≈ 0.5–0.8× body font size.
+        # ── FIX 3: Professional paragraph spacing ─────────────────────────────
+        # Standard book typography:
+        #   - Indented-paragraph style (novels): NO inter-paragraph spacing; indent signals new para.
+        #   - Block-paragraph style (non-fiction): NO indent; spacing signals new para.
+        # If user explicitly set paragraph_spacing_mm, honour it always.
         _para_sp_mm    = concept.get("paragraph_spacing_mm")
-        para_space_after  = float(_para_sp_mm) * mm if _para_sp_mm else body_size * 0.55   # ~half-line gap between paragraphs
-        para_space_before = float(_para_sp_mm) * mm * 0.25 if _para_sp_mm else body_size * 0.10  # minimal before
+        if _para_sp_mm is not None and _para_sp_mm != "" and float(_para_sp_mm) > 0:
+            para_space_after  = float(_para_sp_mm) * mm
+            para_space_before = float(_para_sp_mm) * mm * 0.2
+        elif indent_pt > 0:
+            # Indented style: minimal spacing — the indent itself signals new paragraph
+            para_space_after  = body_size * 0.08  # near-zero gap
+            para_space_before = 0
+        else:
+            # Block style: visible spacing between paragraphs
+            para_space_after  = body_size * 0.65
+            para_space_before = 0
         # color_mode: bw forces monochrome palette
         _color_mode    = concept.get("color_mode", "")
         if _color_mode == "bw":
@@ -2211,10 +2225,13 @@ def render_layout_pdf(
                 canvas.setLineWidth(0.4)
                 canvas.line(_ml, _rule_y, PW - _mr, _rule_y)
 
-            # ── Footer: ALL pages ─────────────────────────────────────────────
+            # ── FIX 6: Footer — proper positioning, proportional sizing ──────────
             if _show_footer:
-                footer_y = mb * 0.45
-                canvas.setFont(body_font, 8)
+                # Position footer at 38% of bottom margin height — well below text frame
+                footer_y = mb * 0.38
+                # Proportional page number font size (never smaller than 8pt)
+                _footer_font_size = max(8, body_size * 0.72)
+                canvas.setFont(body_font, _footer_font_size)
                 canvas.setFillColor(ac_col)
 
                 # Dynamic Mirror Routing
@@ -2227,16 +2244,29 @@ def render_layout_pdf(
                     real_page = doc.page + _pn_start - 1
                     right_text = _roman(real_page) if _pn_roman else str(real_page)
 
-                # Swap left and right text on even pages if mirroring is enabled
-                if _mirror and is_even_page:
-                    left_text, right_text = right_text, left_text
-
-                if left_text:
-                    canvas.drawString(_ml, footer_y, left_text)
-                if footer_middle:
-                    canvas.drawCentredString(PW / 2, footer_y, footer_middle)
-                if right_text:
-                    canvas.drawRightString(PW - _mr, footer_y, right_text)
+                if _mirror:
+                    # Mirror margins: page number on outer edge
+                    # Odd (recto): page number on right
+                    # Even (verso): page number on left
+                    if is_even_page:
+                        left_text, right_text = right_text, left_text
+                    if left_text:
+                        canvas.drawString(_ml, footer_y, left_text)
+                    if footer_middle:
+                        canvas.drawCentredString(PW / 2, footer_y, footer_middle)
+                    if right_text:
+                        canvas.drawRightString(PW - _mr, footer_y, right_text)
+                else:
+                    # Single-sided layout: centre the page number (standard convention)
+                    if footer_left:
+                        canvas.drawString(_ml, footer_y, footer_left)
+                    if footer_middle:
+                        canvas.drawCentredString(PW / 2, footer_y, footer_middle)
+                    if right_text and not footer_left and not footer_middle:
+                        # Page number only — centre it for single-sided
+                        canvas.drawCentredString(PW / 2, footer_y, right_text)
+                    elif right_text:
+                        canvas.drawRightString(PW - _mr, footer_y, right_text)
 
             canvas.restoreState()
 
@@ -2333,19 +2363,43 @@ def render_layout_pdf(
         # Resolve chapter font name, applying italic for italic_elegant
         _ch_font_for_style = chapter_font
         # Always use a bold variant for chapter headings — gives strong visual hierarchy
+        # ── FIX 1: Comprehensive bold/italic font map for ALL registered fonts ──
         _BOLD_MAP = {
-            "Times-Roman":  "Times-Bold",
-            "Helvetica":    "Helvetica-Bold",
-            "Courier":      "Courier-Bold",
+            # Built-in ReportLab fonts
+            "Times-Roman":              "Times-Bold",
+            "Helvetica":                "Helvetica-Bold",
+            "Courier":                  "Courier-Bold",
+            # Premium Latin fonts
+            "Lora":                     "Lora-Bold",
+            "Lora-Italic":              "Lora-BoldItalic",
+            "CrimsonPro":               "CrimsonPro-Bold",
+            "SourceSerif4":             "SourceSerif4-Bold",
+            # Devanagari fonts
+            "NotoSerifDevanagari":      "NotoSerifDevanagari-Bold",
+            "NotoSerifDevanagari-Light": "NotoSerifDevanagari-SemiBold",
+            "NotoSerifDevanagari-Medium": "NotoSerifDevanagari-Bold",
+            "NotoSansDevanagari":       "NotoSansDevanagari-Bold",
+            "NotoSansDevanagari-Light": "NotoSansDevanagari-Medium",
+            "NotoSansDevanagari-Medium": "NotoSansDevanagari-Bold",
+            "Mukta":                    "Mukta-Bold",
+            "Mukta-Light":              "Mukta-SemiBold",
+            "Mukta-Medium":             "Mukta-Bold",
+            "Mukta-SemiBold":           "Mukta-ExtraBold",
         }
         if _hd not in ("italic_elegant",):
             _ch_font_for_style = _BOLD_MAP.get(chapter_font, chapter_font)
-        # _ITALIC_MAP is defined at this scope so it's available throughout
-        # render_layout_pdf (e.g. blockquote_style and epigraph_quote_style below)
-        # regardless of whether _ch_italic is True.
+        # _ITALIC_MAP: available throughout render_layout_pdf for blockquote,
+        # epigraph, H3 subheading, etc.
         _ITALIC_MAP = {
-            "Times-Roman":  "Times-Italic",
-            "Helvetica":    "Helvetica-Oblique",
+            "Times-Roman":              "Times-Italic",
+            "Helvetica":                "Helvetica-Oblique",
+            "Lora":                     "Lora-Italic",
+            "Lora-Bold":                "Lora-BoldItalic",
+            "CrimsonPro":               "CrimsonPro-Italic",
+            "SourceSerif4":             "SourceSerif4-Italic",
+            "EBGaramond":               "EBGaramond-Italic",
+            "NotoSerifDevanagari":      "NotoSerifDevanagari-Italic",
+            "TiroDevanagariHindi":      "TiroDevanagariHindi-Italic",
         }
         if _ch_italic:
             _ch_font_for_style = _ITALIC_MAP.get(chapter_font, chapter_font)
@@ -2357,18 +2411,19 @@ def render_layout_pdf(
         elif _hd == "smallcaps_ornament":
             _ch_size_for_style = chapter_size * 0.80   # smaller size mimics small-caps
 
+        # ── FIX 2: Professional chapter heading style ───────────────────────────
         ch_style = ParagraphStyle(
             "ChapterTitle",
             fontName=_ch_font_for_style, fontSize=_ch_size_for_style,
-            leading=_ch_size_for_style * 1.25,
+            leading=_ch_size_for_style * 1.35,          # generous leading for large headings
             textColor=ch_col,
-            spaceAfter=_ch_size_for_style * 0.55,   # clean gap below heading (~half heading size)
-            spaceBefore=_ch_size_for_style * 0.80,  # gap above heading
+            spaceAfter=_ch_size_for_style * 0.80,       # proper visual gap below heading
+            spaceBefore=_ch_size_for_style * 1.20,      # strong visual break above heading
             alignment=_ch_align,
             letterSpacing=_ch_smallcaps_letter_spacing,
-            allowWidows=0,  # LIBRISCRIBE FEATURE: Prevent single-line stranding
-            allowOrphans=0, # LIBRISCRIBE FEATURE
-            keepWithNext=True, # Ensure headings stick to the first paragraph
+            allowWidows=0,
+            allowOrphans=0,
+            keepWithNext=True,  # heading stays with first paragraph
         )
         prefix_style = ParagraphStyle(
             "ChapterPrefix",
@@ -2403,14 +2458,28 @@ def render_layout_pdf(
             textColor=ac_col,
             alignment=TA_CENTER, spaceBefore=4, spaceAfter=6,
         )
+        # ── FIX 4: Professional bullet/list style ─────────────────────────────
+        # Uses hanging indent: bullet character sits at bulletIndent, text wraps
+        # at leftIndent. firstLineIndent = 0 so the first line aligns with wrap.
+        _bullet_left_indent = indent_pt + body_size * 1.5  # text starts here
+        _bullet_indent      = indent_pt                     # bullet character sits here
         bullet_style = ParagraphStyle(
             "Bullet",
             parent=body_style,
-            firstLineIndent=-body_size * 1.2,
-            leftIndent=body_size * 2.2,
-            spaceBefore=leading * 0.2,
-            spaceAfter=leading * 0.2,
-            bulletIndent=body_size * 1.0,
+            firstLineIndent=0,                              # no extra indent on first line
+            leftIndent=_bullet_left_indent,                 # text block indent
+            bulletIndent=_bullet_indent,                     # bullet glyph indent
+            spaceBefore=body_size * 0.12,                   # tight spacing between items
+            spaceAfter=body_size * 0.12,
+            alignment=TA_LEFT,                              # don't justify list items
+        )
+        # Regex to strip bullet marker text, capturing the content after the marker
+        _BULLET_STRIP_RE = re.compile(
+            r'^(?:[•\-\*\u2022\u25cf]'
+            r'|(?:\(?\s*\d+\s*[\.\)])'
+            r'|(?:\(?\s*[a-zA-Z\u0900-\u097F]\s*[\.\)])'
+            r'|(?:\(?\s*[ivxlcdmIVXLCDM]+\s*[\.\)])'
+            r')\s*'
         )
 
         # ── Dual-font run builder for mixed Devanagari + Latin text ─────────────
@@ -3079,27 +3148,36 @@ def render_layout_pdf(
                 def _is_subheading(line: str, is_only_line: bool) -> bool:
                     return _subheading_level(line, is_only_line) > 0
 
+                # ── FIX 5: Professional sub-heading styles ────────────────────
+                # H3: subtle — slightly larger, italic, moderate spacing
+                _sh3_size = body_size * 1.05
                 subhead3_style = ParagraphStyle(
                     "SubHeading3",
                     parent=body_style,
-                    fontName=body_font,   # body weight, not bold — H3 is subtle
-                    fontSize=body_size,
+                    fontName=_ITALIC_MAP.get(body_font, body_font),
+                    fontSize=_sh3_size,
+                    leading=_sh3_size * 1.35,
                     firstLineIndent=0,
-                    spaceBefore=leading * 0.4,
-                    spaceAfter=leading * 0.1,
+                    spaceBefore=leading * 0.70,
+                    spaceAfter=leading * 0.25,
                     alignment=TA_LEFT,
                     keepWithNext=True,
                 )
 
+                # H2: prominent — bold, larger, accent-coloured, strong spacing
+                _sh2_size = body_size * 1.15
                 subhead_style = ParagraphStyle(
                     "SubHeading",
                     parent=body_style,
                     fontName=_BOLD_MAP.get(body_font, body_font),
+                    fontSize=_sh2_size,
+                    leading=_sh2_size * 1.35,
+                    textColor=ch_col,           # use chapter heading colour for visual hierarchy
                     firstLineIndent=0,
-                    spaceBefore=leading * 0.6,
-                    spaceAfter=leading * 0.2,
+                    spaceBefore=leading * 1.0,  # strong visual break before sub-heading
+                    spaceAfter=leading * 0.40,
                     alignment=TA_LEFT,
-                    keepWithNext=True,  # subheading stays with the paragraph that follows it
+                    keepWithNext=True,           # sub-heading stays with next paragraph
                 )
 
                 # ── FIX #13: Block-quote / pull-quote style ──────────────────
@@ -3245,13 +3323,27 @@ def render_layout_pdf(
                     if all_bullets or any(_BULLET_RE.match(ln) for ln in physical_lines):
                         # Emit each line as its own Paragraph (bullet or body)
                         for ln in physical_lines:
-                            safe_ln = ln.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-                            safe_ln = markdown_to_reportlab(safe_ln)
-                            if has_unicode:
-                                safe_ln = _mixed_font_html(safe_ln, body_font)
                             if _BULLET_RE.match(ln):
-                                all_para_items.append(Paragraph(safe_ln, bullet_style))
+                                # Extract the marker and the content after it
+                                bm = _BULLET_RE.match(ln)
+                                marker_text = bm.group(0).strip() if bm else "•"
+                                content_text = _BULLET_STRIP_RE.sub("", ln, count=1).strip()
+                                # Determine bullet character: use original marker for numbered,
+                                # normalise symbol bullets to a proper bullet glyph
+                                if marker_text in ("-", "*"):
+                                    bullet_char = "\u2022"  # •
+                                else:
+                                    bullet_char = marker_text
+                                safe_ln = content_text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                                safe_ln = markdown_to_reportlab(safe_ln)
+                                if has_unicode:
+                                    safe_ln = _mixed_font_html(safe_ln, body_font)
+                                all_para_items.append(Paragraph(safe_ln, bullet_style, bulletText=bullet_char))
                             else:
+                                safe_ln = ln.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                                safe_ln = markdown_to_reportlab(safe_ln)
+                                if has_unicode:
+                                    safe_ln = _mixed_font_html(safe_ln, body_font)
                                 all_para_items.append(Paragraph(safe_ln, body_style))
                         # ── Fix #9: next paragraph after a list block has no indent ──
                         _suppress_next_indent = True
@@ -4377,8 +4469,8 @@ def render_layout_docx(
             add_para(_ch_title_text, ch_fn, _ch_size_d, bold=True,
                      italic=ch_italic or _ch_italic_d,
                      color=concept["chapter_title_color"],
-                     space_before=_ch_size_d * 0.80 if not prefix else 0,
-                     space_after=_ch_size_d * 0.55,
+                     space_before=_ch_size_d * 1.20 if not prefix else 0,
+                     space_after=_ch_size_d * 0.80,
                      align=_ch_align_d)
 
             # Post-heading decoration per design
@@ -4401,10 +4493,19 @@ def render_layout_docx(
                 # Extra ornament pass already handled above via general ornament block
                 pass
 
-            # Paragraph spacing: use explicit mm if set, else derive from body font size (not leading)
-            # Standard book typography: inter-paragraph gap ≈ 0.5–0.6× body font size
-            _para_sp_after  = round(float(_para_sp_mm_d) * 2.835, 1) if _para_sp_mm_d else round(body_size * 0.55, 1)
-            _para_sp_before = round(float(_para_sp_mm_d) * 2.835 * 0.25, 1) if _para_sp_mm_d else round(body_size * 0.10, 1)
+            # Paragraph spacing: mirrors FIX 3 logic from the PDF renderer
+            # Indented-paragraph style: near-zero spacing (indent signals new paragraph)
+            # Block-paragraph style: visible spacing between paragraphs
+            _docx_indent_mm = float(concept.get("first_para_indent_mm", 0) or 0)
+            if _para_sp_mm_d is not None and _para_sp_mm_d != "" and float(_para_sp_mm_d) > 0:
+                _para_sp_after  = round(float(_para_sp_mm_d) * 2.835, 1)
+                _para_sp_before = round(float(_para_sp_mm_d) * 2.835 * 0.2, 1)
+            elif _docx_indent_mm > 0:
+                _para_sp_after  = round(body_size * 0.08, 1)
+                _para_sp_before = 0
+            else:
+                _para_sp_after  = round(body_size * 0.65, 1)
+                _para_sp_before = 0
 
             raw_body = chapter.get("body", "").strip()
             # Split on explicit section dividers when section_breaks enabled
@@ -4448,18 +4549,38 @@ def render_layout_docx(
                         return False
                     return (s.startswith('**') and s.endswith('**')) or s.isupper() or s.istitle()
 
+                # FIX 8: DOCX bullet strip regex (mirrors PDF _BULLET_STRIP_RE)
+                _BULLET_STRIP_RE_D = re.compile(
+                    r'^(?:[•\-\*\u2022\u25cf]'
+                    r'|(?:\(?\s*\d+\s*[\.\\)])' 
+                    r'|(?:\(?\s*[a-zA-Z\u0900-\u097F]\s*[\\.\\)])' 
+                    r'|(?:\(?\s*[ivxlcdmIVXLCDM]+\s*[\\.\\)])' 
+                    r')\s*'
+                )
+
                 def _add_bullet_para(text: str) -> None:
-                    """Add a bullet/numbered line with hanging indent."""
-                    add_para(text, body_fn, body_size, italic=body_italic,
+                    """Add a bullet/numbered line with hanging indent and stripped marker."""
+                    # Strip the marker from the text
+                    bm_d = _BULLET_RE_D.match(text)
+                    marker_raw = bm_d.group(0).strip() if bm_d else "•"
+                    content = _BULLET_STRIP_RE_D.sub("", text, count=1).strip()
+                    # Normalise symbol bullets to proper bullet glyph
+                    if marker_raw in ("-", "*"):
+                        bullet_char = "\u2022"  # •
+                    else:
+                        bullet_char = marker_raw
+                    # Prepend bullet character with thin space
+                    display_text = f"{bullet_char}\u2009{content}"
+                    add_para(display_text, body_fn, body_size, italic=body_italic,
                              color=concept["text_color"],
                              align=WD_ALIGN_PARAGRAPH.LEFT,
-                             space_before=_para_sp_before * 0.5,
-                             space_after=_para_sp_after * 0.5,
+                             space_before=round(body_size * 0.12, 1),
+                             space_after=round(body_size * 0.12, 1),
                              line_space=_docx_ls,
                              no_first_indent=True)
                     p_b = doc.paragraphs[-1]
-                    p_b.paragraph_format.left_indent = Pt(body_size * 2.5)
-                    p_b.paragraph_format.first_line_indent = Pt(-body_size * 1.0)
+                    p_b.paragraph_format.left_indent = Pt(concept["first_para_indent_mm"] * 2.835 + body_size * 1.5)
+                    p_b.paragraph_format.first_line_indent = Pt(-body_size * 1.5)
 
                 # Epigraph regex (mirrors PDF renderer)
                 _EPIGRAPH_RE_D = re.compile(r"^[_*](.*?)[_*]\s*[—–-]\s*(.+)$", re.DOTALL)
