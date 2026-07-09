@@ -1027,11 +1027,26 @@ def _render_fixed_front_pages(
             mid = len(words) // 2
             title_lines = [" ".join(words[:mid]), " ".join(words[mid:])]
 
+    from reportlab.platypus import Paragraph
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.enums import TA_CENTER
+    
     # Draw title starting from ~top 25% of page
     title_y = H - (H * 0.18) - TITLE_FONT_SIZE
-    c.setFont(devanagari_font, TITLE_FONT_SIZE)
-    for i, line in enumerate(title_lines[:3]):  # max 3 lines
-        c.drawCentredString(W / 2, title_y - i * (TITLE_FONT_SIZE * 1.25), line)
+    
+    title_style = ParagraphStyle(
+        "TitlePageTitle",
+        fontName=devanagari_font,
+        fontSize=TITLE_FONT_SIZE,
+        leading=TITLE_FONT_SIZE * 1.15,
+        alignment=TA_CENTER,
+        textColor=black
+    )
+    title_para = Paragraph(book_title.replace('\n', '<br/>'), title_style)
+    # Give it the full width of the text area to wrap
+    title_w, title_h = title_para.wrap(TEXT_W, H)
+    # Draw from bottom up since reportlab draws from y-coordinate upwards
+    title_para.drawOn(c, LEFT_M, title_y - title_h + TITLE_FONT_SIZE)
 
     # ── Author name ─────────────────────────────────────────────────────────
     AUTHOR_FONT_SIZE = 20
@@ -2218,6 +2233,40 @@ def render_layout_pdf(
         # _gutter_pt is computed for completeness but gutter is already folded into ml.
         _gutter_pt = float(concept.get("gutter_mm", 0) or 0) * mm  # already folded into ml by design_layout()
 
+        def markdown_to_reportlab(text: str) -> str:
+            import re
+            tokens = re.split(r'(\*\*\*|\*\*|\*)', text)
+            result = ""
+            b_open = False
+            i_open = False
+            for token in tokens:
+                if token == '***':
+                    if b_open and i_open:
+                        result += "</i></b>"
+                        b_open, i_open = False, False
+                    else:
+                        result += "<b><i>"
+                        b_open, i_open = True, True
+                elif token == '**':
+                    if b_open:
+                        result += "</b>"
+                        b_open = False
+                    else:
+                        result += "<b>"
+                        b_open = True
+                elif token == '*':
+                    if i_open:
+                        result += "</i>"
+                        i_open = False
+                    else:
+                        result += "<i>"
+                        i_open = True
+                else:
+                    result += token
+            if i_open: result += "</i>"
+            if b_open: result += "</b>"
+            return result
+
         if _mirror:
             from reportlab.platypus import BaseDocTemplate, PageTemplate, Frame  # pyrefly: ignore [missing-import]
             # odd (recto): binding on left → left margin is the INNER (larger) one
@@ -2335,6 +2384,15 @@ def render_layout_pdf(
             leading=(body_size + 1) * 1.4,
             textColor=ac_col,
             alignment=TA_CENTER, spaceBefore=4, spaceAfter=6,
+        )
+        bullet_style = ParagraphStyle(
+            "Bullet",
+            parent=body_style,
+            firstLineIndent=-body_size * 1.2,
+            leftIndent=body_size * 2.2,
+            spaceBefore=leading * 0.2,
+            spaceAfter=leading * 0.2,
+            bulletIndent=body_size * 1.0,
         )
 
         # ── Dual-font run builder for mixed Devanagari + Latin text ─────────────
@@ -2859,7 +2917,8 @@ def render_layout_pdf(
                 else:
                     _suppress_next_indent = False
 
-                paragraphs = [p.strip() for p in re.split(r"\n{2,}", section_text) if p.strip()]
+                # Split on any newline to prevent single-newline lists from turning into giant blobs
+                paragraphs = [p.strip() for p in re.split(r"\n+", section_text) if p.strip()]
                 if not paragraphs and sec_idx == 0:
                     paragraphs = ["[No content]"]
 
@@ -2965,9 +3024,9 @@ def render_layout_pdf(
                 # ── Bullet/numbered-list detection ────────────────────────────
                 # Matches: •  -  *  1.  1)  (1)  1 .  i.  ii)  a.  a)
                 _BULLET_RE = re.compile(
-                    r'^(?:[•\-\*]'                        # symbol bullets
+                    r'^(?:[•\-\*\u2022\u25cf]'           # symbol bullets
                     r'|(?:\(?\s*\d+\s*[\.\)])'           # 1. 1) (1) 1 .
-                    r'|(?:\(?\s*[a-zA-Z]\s*[\.\)])'      # a. a) A. A)
+                    r'|(?:\(?\s*[a-zA-Z\u0900-\u097F]\s*[\.\)])'  # a. a) A. A) and Hindi
                     r'|(?:\(?\s*[ivxlcdmIVXLCDM]+\s*[\.\)])'  # i. iv) etc.
                     r')\s+'
                 )
@@ -3014,15 +3073,6 @@ def render_layout_pdf(
                     keepWithNext=True,
                 )
 
-                bullet_style = ParagraphStyle(
-                    "Bullet",
-                    parent=body_style,
-                    firstLineIndent=0,
-                    leftIndent=body_size * 1.5,
-                    spaceBefore=para_space_before * 0.5,
-                    spaceAfter=para_space_after * 0.5,
-                    alignment=TA_LEFT if True else TA_JUSTIFY,  # bullets always left-aligned
-                )
                 subhead_style = ParagraphStyle(
                     "SubHeading",
                     parent=body_style,
@@ -3178,6 +3228,7 @@ def render_layout_pdf(
                         # Emit each line as its own Paragraph (bullet or body)
                         for ln in physical_lines:
                             safe_ln = ln.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                            safe_ln = markdown_to_reportlab(safe_ln)
                             if has_unicode:
                                 safe_ln = _mixed_font_html(safe_ln, body_font)
                             if _BULLET_RE.match(ln):
@@ -3901,16 +3952,25 @@ def render_layout_docx(
             footer.is_linked_to_previous = False
             fp = footer.paragraphs[0]
 
-            # Tab stops: centre at page midpoint (~4500 twips) + right-align (~9000 twips)
+            # Calculate printable width in twips (1 cm = ~567 twips)
+            page_w_twips = ((page_width_mm + _bleed_mm_d * 2) / 10) * 567
+            margin_l_twips = ((concept["margin_left_mm"] + _bleed_mm_d) / 10) * 567
+            margin_r_twips = ((concept["margin_right_mm"] + _bleed_mm_d) / 10) * 567
+            printable_w_twips = int(page_w_twips - margin_l_twips - margin_r_twips)
+
+            tab_ctr_pos = str(printable_w_twips // 2)
+            tab_rt_pos = str(printable_w_twips)
+
+            # Tab stops: centre at page midpoint + right-align
             pPr = fp._p.get_or_add_pPr()
             tabs_el = _OxmlEl("w:tabs")
             tab_ctr = _OxmlEl("w:tab")
             tab_ctr.set(_qn_footer("w:val"), "center")
-            tab_ctr.set(_qn_footer("w:pos"), "4500")
+            tab_ctr.set(_qn_footer("w:pos"), tab_ctr_pos)
             tabs_el.append(tab_ctr)
             tab_rt = _OxmlEl("w:tab")
             tab_rt.set(_qn_footer("w:val"),  "right")
-            tab_rt.set(_qn_footer("w:pos"),  "9000")
+            tab_rt.set(_qn_footer("w:pos"),  tab_rt_pos)
             tabs_el.append(tab_rt)
             pPr.append(tabs_el)
 
@@ -3923,14 +3983,13 @@ def render_layout_docx(
                 except Exception:
                     pass
 
-            # Left slot
-            _footer_run(footer_left_text_d)
-            # Centre slot
-            fp.add_run("\t")
-            if footer_middle_text_d:
+            if not footer_left_text_d and not footer_middle_text_d:
+                fp.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+            else:
+                _footer_run(footer_left_text_d)
+                fp.add_run("\t")
                 _footer_run(footer_middle_text_d)
-            # Right slot: page number field
-            fp.add_run("\t")
+                fp.add_run("\t")
             if footer_right_pn_d and show_pn_docx:
                 run_pg = fp.add_run()
                 run_pg.font.name = "Times New Roman"
@@ -4023,7 +4082,7 @@ def render_layout_docx(
                 body_font_name=_FONT_MAP.get(concept["body_font"], ("Times New Roman", False))[0],
                 chapter_font_name=ch_fn_h1,
                 chapter_size_pt=float(concept.get("chapter_font_size", 22)),
-                body_size_pt=float(concept.get("body_font_size", 11)),
+                body_size_pt=float(concept.get("body_size", 11)),
                 accent_hex=concept.get("accent_color", "#555555"),
                 chapter_hex=concept.get("chapter_title_color", "#111111"),
             )
@@ -4086,47 +4145,60 @@ def render_layout_docx(
             if no_first_indent:
                 pf.first_line_indent = Pt(0)
 
-            if not has_unicode_docx or not text.strip():
-                # Simple single-run path (no Devanagari in this document)
-                run = p.add_run(text)
-                _set_run_font(run, font_name, size, bold, italic, color)
-                return
-
-            # Dual-run path: split text into Devanagari and Latin segments
-            latin_fallback = _DOCX_LATIN_FALLBACK.get(font_name, font_name)
+            import re
+            tokens = re.split(r'(\*\*\*|\*\*|\*)', text)
+            cur_bold = bold
+            cur_italic = italic
+            parsed_runs = []
+            for token in tokens:
+                if token == '***':
+                    cur_bold = not cur_bold
+                    cur_italic = not cur_italic
+                elif token == '**':
+                    cur_bold = not cur_bold
+                elif token == '*':
+                    cur_italic = not cur_italic
+                elif token:
+                    parsed_runs.append((token, cur_bold, cur_italic))
 
             def _is_latin_char_docx(ch: str) -> bool:
                 cp = ord(ch)
                 if ch.isspace():
                     return False
                 if 0x0900 <= cp <= 0x097F:
-                    return False   # Devanagari → Devanagari font
+                    return False   # Devanagari
                 if 0x0020 <= cp <= 0x024F:
-                    return True    # Basic Latin + Latin Extended A/B
+                    return True    # Latin
                 if 0x2000 <= cp <= 0x206F:
-                    return True    # General Punctuation
+                    return True    # Punctuation
                 return False
 
-            # Build character-level runs: (is_latin, chunk)
-            runs_list: list[tuple[bool, str]] = []
-            if text:
-                cur_latin = _is_latin_char_docx(text[0])
-                cur_buf   = text[0]
-                for ch in text[1:]:
-                    ch_lat = _is_latin_char_docx(ch)
-                    if ch.isspace() or ch_lat == cur_latin:
-                        cur_buf += ch
-                    else:
-                        runs_list.append((cur_latin, cur_buf))
-                        cur_latin = ch_lat
-                        cur_buf   = ch
-                if cur_buf:
-                    runs_list.append((cur_latin, cur_buf))
+            latin_fallback = _DOCX_LATIN_FALLBACK.get(font_name, font_name)
 
-            for is_latin, chunk in runs_list:
-                chosen_font = latin_fallback if (is_latin and chunk.strip()) else font_name
-                run = p.add_run(chunk)
-                _set_run_font(run, chosen_font, size, bold, italic, color)
+            for chunk_text, chunk_bold, chunk_italic in parsed_runs:
+                if not has_unicode_docx or not chunk_text.strip():
+                    run = p.add_run(chunk_text)
+                    _set_run_font(run, font_name, size, chunk_bold, chunk_italic, color)
+                else:
+                    runs_list: list[tuple[bool, str]] = []
+                    if chunk_text:
+                        cur_latin = _is_latin_char_docx(chunk_text[0])
+                        cur_buf   = chunk_text[0]
+                        for ch in chunk_text[1:]:
+                            ch_lat = _is_latin_char_docx(ch)
+                            if ch.isspace() or ch_lat == cur_latin:
+                                cur_buf += ch
+                            else:
+                                runs_list.append((cur_latin, cur_buf))
+                                cur_latin = ch_lat
+                                cur_buf   = ch
+                        if cur_buf:
+                            runs_list.append((cur_latin, cur_buf))
+
+                    for is_latin, subchunk in runs_list:
+                        chosen_font = latin_fallback if (is_latin and subchunk.strip()) else font_name
+                        run = p.add_run(subchunk)
+                        _set_run_font(run, chosen_font, size, chunk_bold, chunk_italic, color)
 
         def add_rule(color_hex: str, width_pct: int = 100, thickness: float = 1.0) -> None:
             """Add a paragraph with a bottom border that acts as a horizontal rule.
@@ -4164,6 +4236,20 @@ def render_layout_docx(
             if ornament:
                 add_para(ornament, body_fn, body_size + 2, color=concept["accent_color"],
                          align=WD_ALIGN_PARAGRAPH.CENTER, space_before=6, space_after=6)
+            
+            # Add Kavya Logo
+            try:
+                import io
+                import base64
+                logo_para = doc.add_paragraph()
+                logo_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                logo_para.paragraph_format.space_before = Pt(100)
+                _kbw_bytes = base64.b64decode(_KAVYA_BW_PNG_B64)
+                logo_run = logo_para.add_run()
+                logo_run.add_picture(io.BytesIO(_kbw_bytes), width=Cm(4.8))
+            except Exception as e:
+                pass
+
             doc.add_page_break()
 
         # Copyright page
@@ -4322,15 +4408,16 @@ def render_layout_docx(
                     # First paragraph of each chapter also gets no indent
                     _docx_suppress_indent = (sec_idx_d == 0)
 
-                paragraphs = [p.strip() for p in re.split(r"\n{2,}", section_text_d) if p.strip()]
+                # Split on any newline to prevent single-newline lists from turning into giant blobs
+                paragraphs = [p.strip() for p in re.split(r"\n+", section_text_d) if p.strip()]
                 if not paragraphs and sec_idx_d == 0:
                     paragraphs = ["[No content]"]
 
                 # Bullet/numbered-list pattern (mirrors the PDF renderer)
                 _BULLET_RE_D = re.compile(
-                    r'^(?:[•\-\*]'
+                    r'^(?:[•\-\*\u2022\u25cf]'
                     r'|(?:\(?\s*\d+\s*[\.\)])'
-                    r'|(?:\(?\s*[a-zA-Z]\s*[\.\)])'
+                    r'|(?:\(?\s*[a-zA-Z\u0900-\u097F]\s*[\.\)])'
                     r'|(?:\(?\s*[ivxlcdmIVXLCDM]+\s*[\.\)])'
                     r')\s+'
                 )
@@ -4344,17 +4431,17 @@ def render_layout_docx(
                     return (s.startswith('**') and s.endswith('**')) or s.isupper() or s.istitle()
 
                 def _add_bullet_para(text: str) -> None:
-                    """Add a bullet/numbered line with left indent."""
-                    p_b = doc.add_paragraph()
-                    p_b.alignment = WD_ALIGN_PARAGRAPH.LEFT
-                    pf_b = p_b.paragraph_format
-                    pf_b.left_indent   = Pt(body_size * 1.5)
-                    pf_b.first_line_indent = Pt(0)
-                    pf_b.space_before  = Pt(_para_sp_before * 0.5)
-                    pf_b.space_after   = Pt(_para_sp_after  * 0.5)
-                    pf_b.line_spacing  = Pt(body_size * _docx_ls)
-                    run_b = p_b.add_run(text)
-                    _set_run_font(run_b, body_fn, body_size, False, body_italic, concept["text_color"])
+                    """Add a bullet/numbered line with hanging indent."""
+                    add_para(text, body_fn, body_size, italic=body_italic,
+                             color=concept["text_color"],
+                             align=WD_ALIGN_PARAGRAPH.LEFT,
+                             space_before=_para_sp_before * 0.5,
+                             space_after=_para_sp_after * 0.5,
+                             line_space=_docx_ls,
+                             no_first_indent=True)
+                    p_b = doc.paragraphs[-1]
+                    p_b.paragraph_format.left_indent = Pt(body_size * 2.5)
+                    p_b.paragraph_format.first_line_indent = Pt(-body_size * 1.0)
 
                 # Epigraph regex (mirrors PDF renderer)
                 _EPIGRAPH_RE_D = re.compile(r"^[_*](.*?)[_*]\s*[—–-]\s*(.+)$", re.DOTALL)
