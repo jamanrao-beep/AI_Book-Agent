@@ -3127,7 +3127,7 @@ def render_layout_pdf(
                     s = line.strip()
                     if not s or len(s) > 80 or not is_only_line:
                         return 0
-                    if s[-1] in '.!?,;:।॥':
+                    if s[-1] in '.!?,;:”’\u0964\u0965':
                         return 0
                     # ### prefix → H3
                     if s.startswith('###'):
@@ -4548,7 +4548,7 @@ def render_layout_docx(
                     s = line.strip()
                     if not s or len(s) > 80 or not is_only:
                         return False
-                    if s[-1] in '.!?,;:।॥':
+                    if s[-1] in '.!?,;:”’\u0964\u0965':
                         return False
                     if (s.startswith('**') and s.endswith('**')) or s.isupper() or s.istitle():
                         return True
