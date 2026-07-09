@@ -1744,15 +1744,33 @@ def parse_chapters(raw_text: str) -> list[dict]:
         # --------------------------------------------------
 
         if len(splits) < 2:
-            # No chapter headings detected — split by word count.
-            words = raw_text.split()
-            total_words = len(words)
-            target_sections = min(60, max(1, total_words // 500))
-            chunk_size = max(500, math.ceil(total_words / target_sections))
+            # No chapter headings detected — try to find Markdown headings (##)
+            md_splits = []
+            for i, line in enumerate(lines):
+                if line.strip().startswith("## ") or line.strip().startswith("# "):
+                    md_splits.append(i)
+            
+            if len(md_splits) >= 2:
+                # Use markdown headings
+                chapters = []
+                for k, start_line in enumerate(md_splits[:MAX_CHAPTERS]):
+                    end_line = md_splits[k + 1] if k + 1 < len(md_splits) else len(lines)
+                    heading = lines[start_line].strip().lstrip('#').strip()
+                    body = "\n".join(lines[start_line + 1: end_line]).strip()
+                    chapters.append({"title": heading, "body": body})
+                return chapters
+
+            # If still no headings, split by paragraphs to preserve formatting (not by word split which destroys \n)
+            import re
+            paragraphs = re.split(r'\n\n+', raw_text)
+            total_paras = len(paragraphs)
+            target_sections = min(60, max(1, len(raw_text.split()) // 500))
+            chunk_size = max(1, math.ceil(total_paras / target_sections))
+            
             chapters = []
-            for idx in range(0, total_words, chunk_size):
-                chunk = " ".join(words[idx: idx + chunk_size])
-                if len(chunk) >= MIN_CHAPTER_CHARS:
+            for idx in range(0, total_paras, chunk_size):
+                chunk = "\n\n".join(paragraphs[idx: idx + chunk_size]).strip()
+                if len(chunk) >= MIN_CHAPTER_CHARS or idx == 0:
                     chapters.append({"title": f"Section {len(chapters) + 1}", "body": chunk})
             return chapters
 
