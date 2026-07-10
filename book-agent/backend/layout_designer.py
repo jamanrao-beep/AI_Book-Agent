@@ -608,6 +608,30 @@ def _ensure_unicode_fonts() -> None:
         except Exception as e:
             print(f"  ⚠️   _ensure_unicode_fonts failed: {e}\n{traceback.format_exc()}")
         finally:
+            # Register families so <b> and <i> tags work in Paragraphs!
+            try:
+                from reportlab.lib.fonts import addMapping
+                def _safe_map(family, normal, bold, italic, bold_italic):
+                    if normal in _REGISTERED_FONTS:
+                        addMapping(family, 0, 0, normal)
+                        if bold in _REGISTERED_FONTS:
+                            addMapping(family, 1, 0, bold)
+                        if italic in _REGISTERED_FONTS:
+                            addMapping(family, 0, 1, italic)
+                        if bold_italic in _REGISTERED_FONTS:
+                            addMapping(family, 1, 1, bold_italic)
+
+                _safe_map("NotoSansDevanagari", "NotoSansDevanagari", "NotoSansDevanagari-Bold", "NotoSansDevanagari", "NotoSansDevanagari-Bold")
+                _safe_map("NotoSerifDevanagari", "NotoSerifDevanagari", "NotoSerifDevanagari-Bold", "NotoSerifDevanagari-Italic", "NotoSerifDevanagari-Bold")
+                _safe_map("Mukta", "Mukta", "Mukta-Bold", "Mukta", "Mukta-Bold")
+                _safe_map("TiroDevanagariHindi", "TiroDevanagariHindi", "TiroDevanagariHindi", "TiroDevanagariHindi-Italic", "TiroDevanagariHindi-Italic")
+                _safe_map("Lora", "Lora", "Lora-Bold", "Lora-Italic", "Lora-BoldItalic")
+                _safe_map("CrimsonPro", "CrimsonPro", "CrimsonPro-Bold", "CrimsonPro-Italic", "CrimsonPro-Bold")
+                _safe_map("SourceSerif4", "SourceSerif4", "SourceSerif4-Bold", "SourceSerif4", "SourceSerif4-Bold")
+                _safe_map("EBGaramond", "EBGaramond", "EBGaramond-Bold", "EBGaramond-Italic", "EBGaramond-BoldItalic")
+            except Exception as e:
+                print(f"  ⚠️   Failed to register font families: {e}")
+            
             _FONTS_REGISTERED = True
 
 
@@ -1852,8 +1876,9 @@ Typography rules you must follow:
 - NEVER choose a chapter_font_size below 20 or above 36. Prefer 24–30 for strong visual hierarchy.
 - NEVER choose line_spacing below 1.4 or above 2.0. Prefer 1.5–1.7 for generous, readable leading.
 - All colour pairs must have sufficient contrast for print (WCAG AA on paper).
-- For cream/ivory backgrounds, always use dark brown or near-black text, never grey.
-- For dark backgrounds, always use near-white or light text.
+- NEVER use generic, dull, or purely plain colors unless specifically requested. Ensure `page_bg`, `text_color`, and especially `accent_color` and `chapter_title_color` form a vibrant, modern, aesthetically pleasing and visually appealing palette.
+- For cream/ivory backgrounds, always use deep rich brown or warm near-black text, never plain grey.
+- For dark backgrounds, always use near-white or soft pastel text, with a highly vibrant contrasting accent color (like bright gold, cyan, or coral).
 - font choices must be from the allowed values only. Available fonts:
   Latin serif (premium): Lora, Lora-Bold, Lora-Italic, EBGaramond, EBGaramond-Italic, SourceSerif4, SourceSerif4-Bold, CrimsonPro, CrimsonPro-Bold, CrimsonPro-Italic
   Latin serif (built-in): Times-Roman, Times-Italic, Times-Bold
@@ -3108,14 +3133,13 @@ def render_layout_pdf(
                     alignment=TA_LEFT,
                 )
 
-                # ── Bullet/numbered-list detection ────────────────────────────
                 # Matches: •  -  *  1.  1)  (1)  1 .  i.  ii)  a.  a) and Hindi १। क।
                 _BULLET_RE = re.compile(
-                    r'^(?:[•\-\*\u2022\u25cf]'           # symbol bullets
+                    r'^(?:[•\-\*\u2022\u25cf\u25A0\u25B8]'           # symbol bullets
                     r'|(?:\(?\s*[\d\u0966-\u096F]+\s*[\.\)\]\u0964])'           # 1. 1) (1) 1 . 1।
                     r'|(?:\(?\s*[a-zA-Z\u0900-\u097F]\s*[\.\)\]\u0964])'  # a. a) A. A) and Hindi क।
                     r'|(?:\(?\s*[ivxlcdmIVXLCDM]+\s*[\.\)\]\u0964])'  # i. iv) etc.
-                    r')\s+'
+                    r')(?:\s+|(?=[\u0900-\u097F]))' # Requires space or immediately followed by Devanagari
                 )
 
                 # ── Inline sub-heading detection ──────────────────────────────
@@ -3167,15 +3191,17 @@ def render_layout_pdf(
                     keepWithNext=True,
                 )
 
+                from reportlab.lib.colors import HexColor  # pyrefly: ignore [missing-import]
+
                 # H2: prominent — bold, larger, accent-coloured, strong spacing
-                _sh2_size = body_size * 1.15
+                _sh2_size = body_size * 1.35
                 subhead_style = ParagraphStyle(
                     "SubHeading",
                     parent=body_style,
                     fontName=_BOLD_MAP.get(body_font, body_font),
                     fontSize=_sh2_size,
                     leading=_sh2_size * 1.35,
-                    textColor=ch_col,           # use chapter heading colour for visual hierarchy
+                    textColor=HexColor(concept.get('accent_color', '#000000')),
                     firstLineIndent=0,
                     spaceBefore=leading * 1.0,  # strong visual break before sub-heading
                     spaceAfter=leading * 0.40,
@@ -4674,13 +4700,15 @@ def render_layout_docx(
 
                     # Sub-heading
                     if _is_subheading_d(para_text.strip(), is_only):
-                        clean_sh = para_text.strip().strip('*')
-                        add_para(clean_sh, body_fn, body_size, bold=True,
-                                 color=concept["text_color"],
+                        clean_sh = para_text.strip().lstrip('#').strip('* ')
+                        _docx_sh2_size = body_size * 1.35
+                        add_para(clean_sh, body_fn, _docx_sh2_size, bold=True,
+                                 color=concept.get("accent_color", "#555555"),
                                  align=WD_ALIGN_PARAGRAPH.LEFT,
-                                 space_before=round(body_size * 0.6, 1),
-                                 space_after=round(body_size * 0.2, 1),
-                                 line_space=_docx_ls)
+                                 space_before=round(_docx_sh2_size * 1.2, 1),
+                                 space_after=round(_docx_sh2_size * 0.4, 1),
+                                 line_space=_docx_ls,
+                                 no_first_indent=True)
                         # ── Fix #12: suppress indent on next para after subheading ──
                         _docx_suppress_indent = True
                         continue
