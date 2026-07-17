@@ -1443,11 +1443,11 @@ def _apply_smart_quotes(text: str) -> str:
         return text
 
     # Double quotes: opening after space/start, closing elsewhere
-    result = re.sub(r'(^|[\s\(\[\{—–])\"', r'\1\u201c', text)
+    result = re.sub(r'(^|[\s\(\[\{—–])\"', r'\1' + '\u201c', text)
     result = result.replace('"', '\u201d')
 
     # Single quotes: opening after space/start, closing/contraction elsewhere
-    result = re.sub(r"(^|[\s\(\[\{—–])\'", r'\1\u2018', result)
+    result = re.sub(r"(^|[\s\(\[\{—–])\'", r'\1' + '\u2018', result)
     result = result.replace("'", '\u2019')
 
     # Em-dash: replace double hyphen with proper em-dash
@@ -2486,21 +2486,21 @@ def render_layout_pdf(
         # ── FIX 4: Professional bullet/list style ─────────────────────────────
         # Uses hanging indent: bullet character sits at bulletIndent, text wraps
         # at leftIndent. firstLineIndent = 0 so the first line aligns with wrap.
-        _bullet_left_indent = indent_pt + body_size * 1.5  # text starts here
-        _bullet_indent      = indent_pt                     # bullet character sits here
+        _bullet_indent      = max(body_size * 1.5, indent_pt + body_size * 0.5)
+        _bullet_left_indent = _bullet_indent + body_size * 1.2
         bullet_style = ParagraphStyle(
             "Bullet",
             parent=body_style,
             firstLineIndent=0,                              # no extra indent on first line
             leftIndent=_bullet_left_indent,                 # text block indent
             bulletIndent=_bullet_indent,                     # bullet glyph indent
-            spaceBefore=body_size * 0.12,                   # tight spacing between items
-            spaceAfter=body_size * 0.12,
+            spaceBefore=body_size * 0.3,                   # tighter spacing
+            spaceAfter=body_size * 0.3,
             alignment=TA_LEFT,                              # don't justify list items
         )
         # Regex to strip bullet marker text, capturing the content after the marker
         _BULLET_STRIP_RE = re.compile(
-            r'^(?:[•\-\*\u2022\u25cf]'
+            r'^(?:[•\-\*\u2022\u25cf\u25A0\u25B8\u2013\u2014]'
             r'|(?:\(?\s*[\d\u0966-\u096F]+\s*[\.\)\]\u0964])'
             r'|(?:\(?\s*[a-zA-Z\u0900-\u097F]\s*[\.\)\]\u0964])'
             r'|(?:\(?\s*[ivxlcdmIVXLCDM]+\s*[\.\)\]\u0964])'
@@ -3135,7 +3135,7 @@ def render_layout_pdf(
 
                 # Matches: •  -  *  1.  1)  (1)  1 .  i.  ii)  a.  a) and Hindi १। क।
                 _BULLET_RE = re.compile(
-                    r'^(?:[•\-\*\u2022\u25cf\u25A0\u25B8]'           # symbol bullets
+                    r'^(?:[•\-\*\u2022\u25cf\u25A0\u25B8\u2013\u2014]'           # symbol bullets
                     r'|(?:\(?\s*[\d\u0966-\u096F]+\s*[\.\)\]\u0964])'           # 1. 1) (1) 1 . 1।
                     r'|(?:\(?\s*[a-zA-Z\u0900-\u097F]\s*[\.\)\]\u0964])'  # a. a) A. A) and Hindi क।
                     r'|(?:\(?\s*[ivxlcdmIVXLCDM]+\s*[\.\)\]\u0964])'  # i. iv) etc.
@@ -3151,7 +3151,8 @@ def render_layout_pdf(
                     s = line.strip()
                     if not s or len(s) > 80 or not is_only_line:
                         return 0
-                    if s[-1] in '.!?,;:”’\u0964\u0965':
+                    # Allow colons at the end of subheadings so user's like 'शारीरिक फायदे:' work.
+                    if s[-1] in '.!?,;”’\u0964\u0965':
                         return 0
                     # ### prefix → H3
                     if s.startswith('###'):
@@ -4563,7 +4564,7 @@ def render_layout_docx(
 
                 # Bullet/numbered-list pattern (mirrors the PDF renderer)
                 _BULLET_RE_D = re.compile(
-                    r'^(?:[•\-\*\u2022\u25cf]'
+                    r'^(?:[•\-\*\u2022\u25cf\u25A0\u25B8\u2013\u2014]'
                     r'|(?:\(?\s*[\d\u0966-\u096F]+\s*[\.\)\]\u0964])'
                     r'|(?:\(?\s*[a-zA-Z\u0900-\u097F]\s*[\.\)\]\u0964])'
                     r'|(?:\(?\s*[ivxlcdmIVXLCDM]+\s*[\.\)\]\u0964])'
@@ -4574,7 +4575,8 @@ def render_layout_docx(
                     s = line.strip()
                     if not s or len(s) > 80 or not is_only:
                         return False
-                    if s[-1] in '.!?,;:”’\u0964\u0965':
+                    # Allow colons at the end of subheadings so user's like 'शारीरिक फायदे:' work.
+                    if s[-1] in '.!?,;”’\u0964\u0965':
                         return False
                     if (s.startswith('**') and s.endswith('**')) or s.isupper() or s.istitle():
                         return True
@@ -4584,7 +4586,7 @@ def render_layout_docx(
 
                 # FIX 8: DOCX bullet strip regex (mirrors PDF _BULLET_STRIP_RE)
                 _BULLET_STRIP_RE_D = re.compile(
-                    r'^(?:[•\-\*\u2022\u25cf]'
+                    r'^(?:[•\-\*\u2022\u25cf\u25A0\u25B8\u2013\u2014]'
                     r'|(?:\(?\s*[\d\u0966-\u096F]+\s*[\.\)\]\u0964])'
                     r'|(?:\(?\s*[a-zA-Z\u0900-\u097F]\s*[\.\)\]\u0964])'
                     r'|(?:\(?\s*[ivxlcdmIVXLCDM]+\s*[\.\)\]\u0964])'
