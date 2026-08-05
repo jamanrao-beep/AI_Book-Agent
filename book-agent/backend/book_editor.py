@@ -2059,47 +2059,6 @@ def _apply_edit_chunked(
 
     log.info("Chunked edit: %d chapters, book='%s'", n, book_title[:60])
 
-    # Detect if this is a layout-only instruction (no prose changes needed).
-    # Only skip the expensive prose-edit API calls if the instruction is
-    # exclusively about layout (blank pages, recto, margins, drop caps, etc.)
-    # and contains zero prose/style editing intent.
-    _PURE_LAYOUT_PHRASES = re.compile(
-        r"^\s*(?:add|insert|make|set|enable|disable|use|put|apply|force|give"
-        r"|place|start|begin)\b[^.!?]{0,120}"
-        r"(?:blank page|recto|right.hand|right side|drop cap|ornament|"
-        r"section label|mirror margin|page break|odd.page|line spacing|"
-        r"column|header|footer|running head)\b",
-        re.IGNORECASE,
-    )
-    has_layout   = bool(_LAYOUT_KEYWORDS.search(user_instruction))
-    has_prose    = bool(_PROSE_KEYWORDS.search(user_instruction))
-    has_style    = bool(_STYLE_KEYWORDS.search(user_instruction))
-    is_layout_only = (
-        has_layout
-        and not has_prose
-        and not has_style
-        and _PURE_LAYOUT_PHRASES.search(user_instruction)
-    )
-
-    if is_layout_only:
-        log.info("Layout-only instruction — skipping prose edit API calls")
-        final_chapters = []
-        for ch in chapters:
-            ch_copy = copy.deepcopy(ch)
-            ch_copy.pop("_changed", None)
-            final_chapters.append(ch_copy)
-        summary = _generate_edit_summary(user_instruction, [], book_title)
-        return {
-            "title":            book_title,
-            "author":           author,
-            "description":      book_structure.get("description", ""),
-            "isbn":             book_structure.get("isbn", ""),
-            "year":             book_structure.get("year", ""),
-            "chapters":         final_chapters,
-            "edit_summary":     summary,
-            "chapters_changed": [],
-        }
-
     updated_chapters: List[Optional[dict]] = [None] * n
     changed_numbers:  List[int]            = []
     target_numbers = set(_extract_chapter_targets(user_instruction, book_structure))
@@ -2405,6 +2364,44 @@ def apply_edit(
         "apply_edit: %d chapters, ~%d tokens, instruction='%s'",
         len(chapters), estimated_tokens, user_instruction[:80],
     )
+
+    _PURE_LAYOUT_PHRASES = re.compile(
+        r"^\s*(?:add|insert|make|set|enable|disable|use|put|apply|force|give"
+        r"|place|start|begin)\b[^.!?]{0,120}"
+        r"(?:blank page|recto|right.hand|right side|drop cap|ornament|"
+        r"section label|mirror margin|page break|odd.page|line spacing|"
+        r"column|header|footer|running head)\b",
+        re.IGNORECASE,
+    )
+    has_layout   = bool(_LAYOUT_KEYWORDS.search(user_instruction))
+    has_prose    = bool(_PROSE_KEYWORDS.search(user_instruction))
+    has_style    = bool(_STYLE_KEYWORDS.search(user_instruction))
+    is_layout_only = (
+        has_layout
+        and not has_prose
+        and not has_style
+        and _PURE_LAYOUT_PHRASES.search(user_instruction)
+    )
+
+    if is_layout_only:
+        log.info("Layout-only instruction — skipping prose edit API calls")
+        final_chapters = []
+        for ch in chapters:
+            ch_copy = copy.deepcopy(ch)
+            ch_copy.pop("_changed", None)
+            final_chapters.append(ch_copy)
+        book_title = book_structure.get("title", "Untitled")
+        summary = _generate_edit_summary(user_instruction, [], book_title)
+        return {
+            "title":            book_title,
+            "author":           book_structure.get("author", ""),
+            "description":      book_structure.get("description", ""),
+            "isbn":             book_structure.get("isbn", ""),
+            "year":             book_structure.get("year", ""),
+            "chapters":         final_chapters,
+            "edit_summary":     summary,
+            "chapters_changed": [],
+        }
 
     if estimated_tokens > 2000 or len(chapters) > 1:
         return _apply_edit_chunked(book_structure, user_instruction, conversation_history)

@@ -259,7 +259,9 @@ def _api_call_with_retry(fn, *args, **kwargs):
                     time.sleep(wait)
                     continue
             raise
-    raise last_exc
+    if last_exc is not None:
+        raise last_exc
+    raise RuntimeError("MAX_RETRIES must be at least 1")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
